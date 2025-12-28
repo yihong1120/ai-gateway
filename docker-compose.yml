@@ -1,0 +1,12 @@
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: ai-gateway
+    restart: unless-stopped
+    # Linux-only: lets the container reach host services at 127.0.0.1 (e.g., Ollama on :11434)
+    network_mode: host
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    env_file:
+      - .env
+    command: ["--config", "/app/config.yaml", "--host", "127.0.0.1", "--port", "4000"]

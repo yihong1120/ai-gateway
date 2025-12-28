@@ -1,0 +1,53 @@
+model_list:
+  # Google AI Studio - Gemini (via the LiteLLM provider using the official endpoint; no need to set base_url yourself)
+  # Use model=gemini-2.5-pro on the client side
+  - model_name: gemini-2.5-pro
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GOOGLE_API_KEY
+
+  # Google Gemini Flash (cheaper/faster)
+  - model_name: gemini-2.5-flash-lite
+    litellm_params:
+      model: gemini/gemini-2.5-flash-lite
+      api_key: os.environ/GOOGLE_API_KEY
+
+  # Google Gemini Flash
+  - model_name: gemini-2.5-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GOOGLE_API_KEY
+
+  # Gemini 3 (preview)
+  - model_name: gemini-3-pro-preview
+    litellm_params:
+      model: gemini/gemini-3-pro-preview
+      api_key: os.environ/GOOGLE_API_KEY
+
+  - model_name: gemini-3-flash-preview
+    litellm_params:
+      model: gemini/gemini-3-flash-preview
+      api_key: os.environ/GOOGLE_API_KEY
+
+  # Local Ollama (local models; URL differs from Google, so api_base is required)
+  # Use model=gpt-oss-20b on the client side
+  - model_name: gpt-oss-20b
+    litellm_params:
+      model: ollama/gpt-oss:20b
+      api_base: http://127.0.0.1:11434
+
+  # Local Ollama Embeddings (bge-m3)
+  # Use model=bge-m3 on the client side and call POST /v1/embeddings
+  - model_name: bge-m3
+    litellm_params:
+      model: ollama/bge-m3
+      api_base: http://127.0.0.1:11434
+
+  # OpenAI (optional)
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+general_settings:
+  master_key: null
