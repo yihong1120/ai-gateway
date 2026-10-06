@@ -26,6 +26,7 @@ import httpx
 from . import calendar_attachments
 from . import calendar_read
 from . import calendar_verification
+from official_document_workflow.domain.calendar.csv_schema import protect_eip_csv
 from official_document_workflow.infrastructure.office import office_input
 
 ORIGIN = 'http://eip.jiedar.com.tw'
@@ -609,7 +610,7 @@ class Netask:
         # the deployed parser). Protect literal percent/plus once at this
         # boundary: chainage 0K+100 must not become 0K 100, nor %2B become +.
         # Original downloads and expected rows remain byte/text unchanged.
-        transport = csv_bytes.replace(b'%', b'%25').replace(b'+', b'%2B')
+        transport = protect_eip_csv(csv_bytes)
         rows = (
             await self.rpc(
                 'Common',

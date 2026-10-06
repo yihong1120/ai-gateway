@@ -499,7 +499,10 @@ class BatchWorkflow:
                     content_type='text/csv; charset=utf-8',
                     source_file_id=self.ids[0],
                     kind='calendar_csv',
-                    extra_metadata={'eip_group_source_ids': self.ids},
+                    extra_metadata={
+                        'eip_group_source_ids': self.ids,
+                        self.module.CALENDAR_CSV_FORMAT_KEY: self.module.CALENDAR_CSV_FORMAT,
+                    },
                 )
                 state['files'].append({'id': f.id, 'name': f.filename, 'kind': 'calendar_csv'})
                 state['csv_ids'].append(f.id)

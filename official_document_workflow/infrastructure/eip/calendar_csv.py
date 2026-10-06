@@ -7,10 +7,13 @@ import os
 import sys
 from datetime import datetime
 from datetime import timedelta
+from urllib.parse import unquote_plus
 
 from .netask import csv_minutes
+from official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT
 from official_document_workflow.domain.calendar.csv_schema import CALENDAR_HEADERS
 from official_document_workflow.domain.calendar.csv_schema import CALENDAR_TRANSLATION_ROW
+from official_document_workflow.domain.calendar.csv_schema import protect_eip_csv
 from official_document_workflow.domain.calendar.presentation import format_ai_title
 from official_document_workflow.domain.calendar.presentation import split_ai_title
 
@@ -141,13 +144,47 @@ def import_segments(rows):
     return result
 
 
-def parse_csv(payload: bytes, *, default_duration_minutes=None):
+def decode_csv(payload: bytes, csv_format='plain') -> bytes:
+    """Decode only a server-recorded format; legacy literal %2B stays literal."""
+    if csv_format == 'plain':
+        return payload
+    if csv_format != CALENDAR_CSV_FORMAT:
+        raise ValueError('行事曆 CSV 格式版本不支援，請重新產生。')
+    return unquote_plus(payload.decode('utf-8-sig'), errors='strict').encode('utf-8-sig')
+
+
+def export_eip_csv(rows):
+    """Produce the one download that Netask can import directly, without labels."""
+    normalized = []
+    for source in rows:
+        row = {key: str(source.get(key, '')) for key in CALENDAR_HEADERS}
+        for prefix in ('Start', 'End'):
+            if row[f'{prefix} Date']:
+                row[f'{prefix} Date'] = datetime.strptime(
+                    row[f'{prefix} Date'], '%Y/%m/%d',
+                ).strftime('%Y/%m/%d')
+        row = fit_calendar_subject(row)
+        # Retain the source interval and missing endpoints. The AI importer
+        # still owns overnight segmentation, reservation and historical aliases.
+        normalized.append(row)
+    output = io.StringIO(newline='')
+    writer = csv.DictWriter(output, fieldnames=CALENDAR_HEADERS, quoting=csv.QUOTE_ALL)
+    writer.writeheader()
+    for row in normalized:
+        converted = {key: row[key] for key in CALENDAR_HEADERS}
+        for prefix in ('Start', 'End'):
+            converted[f'{prefix} Time'] = canonical_time(row, prefix)
+        writer.writerow(converted)
+    return protect_eip_csv(output.getvalue().encode('utf-8-sig'))
+
+
+def parse_csv(payload: bytes, *, default_duration_minutes=None, csv_format='plain'):
     if default_duration_minutes is not None and default_duration_minutes not in (
         60,
         120,
     ):
         raise ValueError('預留時間僅允許 60 或 120 分鐘。')
-    reader = csv.DictReader(io.StringIO(payload.decode('utf-8-sig')))
+    reader = csv.DictReader(io.StringIO(decode_csv(payload, csv_format).decode('utf-8-sig')))
     if reader.fieldnames != CALENDAR_HEADERS:
         raise ValueError()
     rows = list(reader)
@@ -190,6 +227,10 @@ def parse_csv(payload: bytes, *, default_duration_minutes=None):
             raise ValueError()
         if any('\x00' in v for v in row.values()):
             raise ValueError()
+        # Netask pads month/day in CM_Import. Compare and journal the same
+        # canonical dates even when a downloaded CSV used 2026/10/7.
+        row['Start Date'] = start.strftime('%Y/%m/%d')
+        row['End Date'] = end.strftime('%Y/%m/%d')
         converted = fit_calendar_subject(row)
         rows[index] = converted
     rows = import_segments(rows)

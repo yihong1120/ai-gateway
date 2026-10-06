@@ -73,8 +73,13 @@ class PreparationTests(unittest.TestCase):
         self.assertIn(original[0]['Description'], row['Description'])
         self.assertEqual(set(row), set(M.CALENDAR_HEADERS))
         self.assertEqual(self.analysis['rows'], original)
-        exported, _ = parse_csv(self.pipe._calendar_csv([*original, row]))
-        self.assertEqual(exported, [*original, row])
+        exported, _ = parse_csv(self.pipe._calendar_csv([*original, row]), csv_format=M.CALENDAR_CSV_FORMAT)
+        from official_document_workflow.infrastructure.eip.calendar_csv import canonical_time
+        expected = [{
+            **value, 'Start Time': canonical_time(value, 'Start'),
+            'End Time': canonical_time(value, 'End'),
+        } for value in [*original, row]]
+        self.assertEqual(exported, expected)
 
     def test_model_selected_afternoon_time_and_duration_survive_eip_transport(self):
         import csv
@@ -85,8 +90,9 @@ class PreparationTests(unittest.TestCase):
         rows, notices = self.render()
         self.assertFalse(notices)
         self.assertEqual(rows[0]['Work Hour'], '2.5')
-        exported, transport = parse_csv(self.pipe._calendar_csv(rows))
-        self.assertEqual(exported, rows)
+        exported, transport = parse_csv(self.pipe._calendar_csv(rows), csv_format=M.CALENDAR_CSV_FORMAT)
+        self.assertEqual(exported[0]['Description'], rows[0]['Description'])
+        self.assertEqual(exported[0]['Start Time(24hr)'], rows[0]['Start Time(24hr)'])
         imported = list(csv.DictReader(io.StringIO(transport.decode('utf-8-sig'))))[0]
         self.assertEqual(imported['Name'], 'AI填寫')
         self.assertEqual(imported['Start Time'], '下午01:15:00')

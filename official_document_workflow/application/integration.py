@@ -15,6 +15,7 @@ from open_webui.models.functions import Functions
 from open_webui.storage.provider import Storage
 
 from .multi_agent import process_with_team
+from official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT_KEY
 from official_document_workflow.infrastructure.eip import calendar_csv
 from official_document_workflow.infrastructure.eip.calendar_attachments import (
     validate_upload,
@@ -94,7 +95,10 @@ async def read_csv(owner: str, file_id: str, *, default_duration_minutes=None, i
         raise ValueError('請選擇自己擁有的行事曆 CSV。')
     path = await asyncio.to_thread(Storage.get_file, item.path)
     payload = await asyncio.to_thread(Path(path).read_bytes)
-    rows, transport = calendar_csv.parse_csv(payload, default_duration_minutes=default_duration_minutes)
+    rows, transport = calendar_csv.parse_csv(
+        payload, default_duration_minutes=default_duration_minutes,
+        csv_format=(item.meta or {}).get(CALENDAR_CSV_FORMAT_KEY, 'plain'),
+    )
     if include_history:
         await annotate_csv_sources(owner, item, rows, default_duration_minutes)
     return rows, transport

@@ -1,7 +1,7 @@
 """
 title: 公文 PDF／Word／ODT／圖片批次：附件拆分、可編輯 DOCX 與行事曆 CSV（雲端 LLM）
 author: Visionnaire
-version: 3.13.0
+version: 3.13.1
 required_open_webui_version: 0.11.1
 description: Processes up to 10 mixed PDF, ODT, DOC and DOCX files, or naturally sorted photos of one document. Office uploads use the existing isolated PDF converter before the shared document workflow. Original uploads are preserved. Main letters and attachments have separate PDF and Word downloads named for each parent letter; identical pages reuse PDF splitting and Word rendering within the batch. Internal OCR supports source-validated cloud analysis and editable layout DOCX. Calendar CSV contains verified events and suggested preparation reminders. Background tasks never process uploads.
 """
@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import csv
 import hashlib
 import io
 import json
@@ -50,8 +49,10 @@ from official_document_workflow.application.pending import PendingClarificationS
 from official_document_workflow.application.pending import PendingClarificationStore
 from official_document_workflow.application.prompts import INSTRUCTION_PLANNER_PROMPT
 from official_document_workflow.application.prompts import PENDING_REMINDER_RESOLUTION_PROMPT
+from official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT
+from official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT_KEY
 from official_document_workflow.domain.calendar.csv_schema import CALENDAR_HEADERS
-from official_document_workflow.domain.calendar.csv_schema import CALENDAR_TRANSLATION_ROW
+from official_document_workflow.domain.calendar.csv_schema import CALENDAR_TRANSLATION_ROW  # noqa: F401 - legacy schema export
 from official_document_workflow.domain.calendar.operations import apply_calendar_operations
 from official_document_workflow.domain.calendar.operations import CalendarTransformResult
 from official_document_workflow.domain.workflow import JobPlan
@@ -60,6 +61,7 @@ from official_document_workflow.domain.workflow import PendingReminderResolution
 from official_document_workflow.infrastructure.concurrency import document_request
 from official_document_workflow.infrastructure.concurrency import model_request
 from official_document_workflow.infrastructure.concurrency import run_ocr
+from official_document_workflow.infrastructure.eip.calendar_csv import export_eip_csv
 from official_document_workflow.infrastructure.office import office_input
 from official_document_workflow.infrastructure.storage.processing_cache import active_requests
 from official_document_workflow.infrastructure.storage.processing_cache import upload_outcome
@@ -345,10 +347,6 @@ class Pipe:
         )
         eip_source_window_characters: int = Field(
             default=12000, ge=2000, le=80000, description='Transport size of one EIP evidence-index request, not a total source-text limit.',
-        )
-        include_template_translation_row: bool = Field(
-            default=True,
-            description='Write the Chinese example-label row immediately after the English header, matching the supplied calendar template.',
         )
         rename_original_attachment: bool = Field(
             default=False,
@@ -990,7 +988,7 @@ class Pipe:
             content_type='text/csv; charset=utf-8',
             source_file_id=first_result.prepared_source.source_file.id,
             kind='calendar_csv',
-            extra_metadata=metadata,
+            extra_metadata={**metadata, CALENDAR_CSV_FORMAT_KEY: CALENDAR_CSV_FORMAT},
         )
         return csv_name, csv_file
 
@@ -4168,19 +4166,13 @@ class Pipe:
         return rows
 
     def _calendar_csv(self, rows: list[dict[str, str]]) -> bytes:
-        output = io.StringIO(newline='')
-        writer = csv.DictWriter(output, fieldnames=CALENDAR_HEADERS, extrasaction='ignore', quoting=csv.QUOTE_ALL)
-        writer.writeheader()
-        if self.valves.include_template_translation_row:
-            writer.writerow(CALENDAR_TRANSLATION_ROW)
-        for row in rows:
-            writer.writerow(
-                {
-                    header: self._csv_safe_cell(str(row.get(header, '')))
-                    for header in CALENDAR_HEADERS
-                },
-            )
-        return output.getvalue().encode('utf-8-sig')
+        return export_eip_csv([
+            {
+                header: self._csv_safe_cell(str(row.get(header, '')))
+                for header in CALENDAR_HEADERS
+            }
+            for row in rows
+        ])
 
     @staticmethod
     def _csv_safe_cell(value: str) -> str:

@@ -258,7 +258,7 @@ class GroupTests(unittest.IsolatedAsyncioTestCase):
             c.kwargs for c in self.pipe._store_derived_bytes.await_args_list if c.kwargs['kind'] == 'calendar_csv'
         )
         rows = list(csv.DictReader(io.StringIO(saved['payload'].decode('utf-8-sig'))))
-        self.assertEqual([r['Start Date'] for r in rows[1:]], ['2026/09/10', '2026/09/17'])
+        self.assertEqual([r['Start Date'] for r in rows], ['2026/09/10', '2026/09/17'])
 
     async def test_reminder_without_deadline_is_attention_not_conversion_failure(self):
         self.pipe._plan_current_user_request.return_value = JobPlan(

@@ -15,6 +15,7 @@ from company_agent.runtime.models import select_profile
 from company_agent.services.eip.client import attachment_list
 from company_agent.services.eip.client import binding
 from company_agent.services.eip.client import source
+from official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT_KEY
 from official_document_workflow.infrastructure.eip import calendar_csv
 
 
@@ -102,7 +103,7 @@ async def owned_bytes(owner, file_id):
     data = await asyncio.to_thread(read_output, path)
     if not data or len(data) > 20_000_000:
         raise ValueError('產出超過單檔限制。')
-    return name, data
+    return name, data, (item.meta or {}).get(CALENDAR_CSV_FORMAT_KEY, 'plain')
 
 
 async def process(ctx, args, emitter=None):
@@ -188,20 +189,21 @@ async def process(ctx, args, emitter=None):
         )
         await binding(ctx)
         for item in result.get('files', []):
-            name, payload = await owned_bytes(ctx.owner, item['id'])
+            name, payload, csv_format = await owned_bytes(ctx.owner, item['id'])
             f = ctx.store.artifact(ctx.owner, ctx.job, name, payload)
             files.append(f)
             if item['id'] in result.get('csv_ids', []):
                 # Only a validated pipeline CSV gets a calendar button.
-                calendar_csv.parse_csv(payload)
+                calendar_csv.parse_csv(payload, csv_format=csv_format)
                 with ctx.store.db() as conn:
                     conn.execute(
-                        'INSERT INTO eip_calendar_sources VALUES(%s,%s,%s,%s)',
+                        'INSERT INTO eip_calendar_sources(owner,job,artifact,revision,csv_format) VALUES(%s,%s,%s,%s,%s)',
                         (
                             ctx.owner,
                             ctx.job,
                             f['id'],
                             ctx.settings.eip_binding_revision,
+                            csv_format,
                         ),
                     )
         output = {

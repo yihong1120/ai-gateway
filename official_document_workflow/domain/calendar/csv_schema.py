@@ -1,6 +1,15 @@
 """Shared calendar CSV export and import contract."""
 from __future__ import annotations
 
+CALENDAR_CSV_FORMAT = 'netask-urlencoded-v1'
+CALENDAR_CSV_FORMAT_KEY = 'calendar_csv_format'
+
+
+def protect_eip_csv(payload: bytes) -> bytes:
+    """Protect literal percent and plus once against Netask's urldecode."""
+    return payload.replace(b'%', b'%25').replace(b'+', b'%2B')
+
+
 CALENDAR_HEADERS = [
     'Name',
     'Subject',

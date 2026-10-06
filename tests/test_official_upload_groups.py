@@ -570,9 +570,13 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
         return answer
 
     def rows(self):
+        from official_document_workflow.infrastructure.eip.calendar_csv import decode_csv
+
         files = [x for x in self.saved if x['kind'] == 'calendar_csv']
         self.assertEqual(len(files), 1)
-        return list(csv.DictReader(io.StringIO(files[0]['payload'].decode('utf-8-sig'))))[1:]
+        self.assertEqual(files[0]['extra_metadata'][M.CALENDAR_CSV_FORMAT_KEY], M.CALENDAR_CSV_FORMAT)
+        payload = decode_csv(files[0]['payload'], M.CALENDAR_CSV_FORMAT)
+        return list(csv.DictReader(io.StringIO(payload.decode('utf-8-sig'))))
 
     async def test_main_and_image_attachment_complement_each_other_through_chat_entry(self):
         main = SOURCE.replace(DEADLINE_EVIDENCE, '依附件所列日期提送評估報告予本段續辦。')

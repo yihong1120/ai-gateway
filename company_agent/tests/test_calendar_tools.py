@@ -143,6 +143,47 @@ class CalendarAdapterTests(unittest.IsolatedAsyncioTestCase):
 
 
 class CalendarToolTests(unittest.IsolatedAsyncioTestCase, Fixture):
+    async def test_pipeline_download_format_survives_artifact_copy_and_preview(self):
+        from tests.test_eip_calendar_csv import fixture
+        from official_document_workflow.infrastructure.eip.calendar_csv import export_eip_csv
+        from official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT
+        import hashlib
+
+        rows, _ = parse_csv(fixture())
+        payload = export_eip_csv(rows)
+        artifact = self.store.artifact('alice', self.job, '公文批次_3組_行事曆.csv', payload)
+        with self.store.db() as db:
+            db.execute(
+                'INSERT INTO eip_calendar_sources(owner,job,artifact,revision,csv_format) VALUES(%s,%s,%s,%s,%s)',
+                ('alice', self.job, artifact['id'], 'rev', CALENDAR_CSV_FORMAT),
+            )
+        revision, sha, decoded = calendar_source(self.store, 'alice', artifact['id'])
+        self.assertEqual(revision, 'rev')
+        self.assertEqual(sha, hashlib.sha256(payload).hexdigest())
+        imported, _ = parse_csv(decoded)
+        self.assertEqual(imported[0]['Description'], rows[0]['Description'])
+        self.assertIn('2K+500', imported[0]['Subject'])
+        self.assertIn('%2B', imported[0]['Subject'])
+
+    async def test_upgrade_preserves_legacy_calendar_sources_as_plain(self):
+        from company_agent.runtime.storage import Store
+        from tests.test_eip_calendar_csv import fixture
+
+        artifact = self.store.artifact('alice', self.job, 'legacy.csv', fixture())
+        with self.store.db() as db:
+            db.execute('DROP TABLE eip_calendar_sources')
+            db.execute(
+                'CREATE TABLE eip_calendar_sources(owner TEXT,job TEXT,artifact TEXT,revision TEXT, PRIMARY KEY(owner,job,artifact))',
+            )
+            db.execute(
+                'INSERT INTO eip_calendar_sources VALUES(%s,%s,%s,%s)',
+                ('alice', self.job, artifact['id'], 'rev'),
+            )
+        upgraded = Store(self.private)
+        with upgraded.db() as db:
+            self.assertEqual(db.execute('SELECT csv_format FROM eip_calendar_sources').fetchone()[0], 'plain')
+        self.assertEqual(calendar_source(upgraded, 'alice', artifact['id'])[2], fixture())
+
     def setUp(self):
         super().setUp()
         from tests.test_eip_connector import SCHEMA

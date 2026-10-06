@@ -511,7 +511,7 @@ class EIPProcessingTests(
             ) as team,
             patch(
                 'company_agent.services.eip.processing.owned_bytes',
-                new=AsyncMock(return_value=('test.pdf', b'%PDF-export')),
+                new=AsyncMock(return_value=('test.pdf', b'%PDF-export', 'plain')),
             ),
         ):
             result = await process(ctx, EIPProcess(handles=handles))

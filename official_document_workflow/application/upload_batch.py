@@ -701,6 +701,7 @@ async def process_unique_uploads(pipe, module, owner, prepared, origins, directo
                 content_type='text/csv; charset=utf-8', source_file_id=prepared[0].source_file.id,
                 kind='calendar_csv',
                 extra_metadata={
+                    module.CALENDAR_CSV_FORMAT_KEY: module.CALENDAR_CSV_FORMAT,
                     'official_document_batch': {
                         'groups': [g.model_dump() for g in groups], 'pending_groups': pending_groups,
                     },

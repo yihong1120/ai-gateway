@@ -50,7 +50,9 @@ class Store:
             CREATE TABLE IF NOT EXISTS model_attempts(job TEXT PRIMARY KEY,attempts INTEGER);
             CREATE TABLE IF NOT EXISTS job_budgets(job TEXT PRIMARY KEY,owner TEXT NOT NULL,step_limit INTEGER NOT NULL CHECK(step_limit BETWEEN 1 AND 80));
             CREATE TABLE IF NOT EXISTS eip_calendar_sources(owner TEXT,job TEXT,artifact TEXT,revision TEXT,
+                csv_format TEXT NOT NULL DEFAULT 'plain',
                 PRIMARY KEY(owner,job,artifact));
+            ALTER TABLE eip_calendar_sources ADD COLUMN IF NOT EXISTS csv_format TEXT NOT NULL DEFAULT 'plain';
             CREATE TABLE IF NOT EXISTS tool_receipts(owner TEXT,job TEXT,call_id TEXT,name TEXT,args_hash TEXT,result TEXT,
               PRIMARY KEY(owner,job,call_id));
             CREATE TABLE IF NOT EXISTS eip_sources(owner TEXT NOT NULL,job TEXT NOT NULL,handle TEXT NOT NULL,

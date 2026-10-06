@@ -6,15 +6,17 @@ import time
 
 
 def calendar_source(store, owner, artifact):
+    from official_document_workflow.infrastructure.eip.calendar_csv import decode_csv
+
     with store.db() as db:
         row = db.execute(
-            'SELECT job,revision FROM eip_calendar_sources WHERE owner=%s AND artifact=%s',
+            'SELECT job,revision,csv_format FROM eip_calendar_sources WHERE owner=%s AND artifact=%s',
             (owner, artifact),
         ).fetchone()
     if not row:
         raise ValueError('只能預覽本人經公文流程或行程工具驗證的行事曆 CSV。')
     _name, sha, payload = store.read_artifact(owner, artifact, row[0])
-    return row[1], sha, payload
+    return row[1], sha, decode_csv(payload, row[2])
 
 
 async def current_binding(owner, revision):

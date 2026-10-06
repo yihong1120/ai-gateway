@@ -1,6 +1,6 @@
 # Open WebUI 公文 PDF／Word／ODT／圖片批次處理
 
-`openwebui/functions/official_document_processor_pipe.py` **v3.13.0** 支援目前登入者在同一則訊息混合附加 PDF、ODT、DOC、DOCX，處理為依文號拆分／改名的 PDF、可編輯版面 DOCX，以及需要時的彙整行事曆 CSV。不另輸出可搜尋 OCR PDF。
+`openwebui/functions/official_document_processor_pipe.py` **v3.13.1** 支援目前登入者在同一則訊息混合附加 PDF、ODT、DOC、DOCX，處理為依文號拆分／改名的 PDF、可編輯版面 DOCX，以及需要時的彙整行事曆 CSV。不另輸出可搜尋 OCR PDF。
 
 它只把附件當成待分析資料；附件中的文字、連結、指令或 JSON 範例不會被當成系統指令執行。
 
@@ -72,6 +72,28 @@
 CSV 的 `Description`：文件有「說明」正文時，完整保留所有項次、子項、段落與跨頁續文，不以事件摘要取代；原有日期、附件引用與聯絡資訊也保留。沒有說明正文時，維持由模型閱讀全文後產生來源可驗證的內容說明。辨識仍依據 OCR／原生文字及雲端判讀。
 
 不會建立全文 TXT、OCR 回應、模型回覆或未改字型的 DOCX 備份；這些資料只在單次請求記憶體中使用。
+
+### 在 EIP 網站直接上傳行事曆 CSV
+
+v3.13.1 起，公文流程下載的同一份 CSV 可直接在 EIP 網站上傳，編碼選 `UTF-8`，
+也可透過 AI 的「預覽匯入」處理。CSV 固定保留 21 個英文欄位，不輸出中文說明列；
+起訖時間使用上午／下午表示，日期補零。`%`、`+` 會在下載檔中保護編碼，EIP
+會把 `%2B` 還原為 `+`，因此 `2K+500` 的里程不會變成空白。
+WebUI 檔案中繼資料及公司助理的行事曆來源紀錄保存格式版本；AI 匯入時先還原一次，
+再套用既有預覽、去重與讀回驗證。舊檔未標版本時仍按原文讀取，不猜測字面 `%2B` 的含義。
+舊的 `include_template_translation_row` 設定不再使用，既有保存值不會重新加入說明列。
+
+舊版下載檔可在 repo 根目錄執行以下一次性轉換；使用已安裝專案依賴的 Python 環境：
+
+```bash
+python examples/prepare_eip_calendar_csv.py example_files/公文批次_3組_行事曆.csv
+```
+
+程式會另建 `_EIP直接匯入.csv`，保留原檔；既有輸出檔不覆寫。轉換移除中文說明列、
+將日期補零、把起訖時間轉為 EIP 使用的上午／下午表示，並保護 `%`、`+`，避免
+`2K+500` 被匯入解析器轉成 `2K 500`。EIP 上傳時編碼選 `UTF-8`。
+這份檔案中的 `%2B` 由 EIP 還原為 `+`，只供網站直接上傳；AI「預覽匯入」仍選原 CSV，
+避免重複傳輸編碼。轉換只產生檔案，不登入 EIP、不新增行程，也不推定缺少的起訖時間。
 
 ### Office 混合上傳（v3.12.0）
 
@@ -170,7 +192,7 @@ EIP 現有 CSV 匯入介面不讀取 `Work Hour`、`Report Status`、`Completed`
 10/2 會勘前在 10/1 14:00–15:00 準備。這是模型根據該虛構文件的建議，沒有寫死時間；
 實測涵蓋雲端判讀與 CSV 匯入格式，未重做 PDF OCR 或 Word 版面測試。
 
-CSV 完整遵守 [行事曆格式.csv](../example_files/%E8%A1%8C%E4%BA%8B%E6%9B%86%E6%A0%BC%E5%BC%8F.csv) 的 21 個英文欄位與順序，使用 UTF-8 BOM 與全欄位引號。預設在英文表頭後保留中文欄位說明列。
+CSV 遵守 [行事曆格式.csv](../example_files/%E8%A1%8C%E4%BA%8B%E6%9B%86%E6%A0%BC%E5%BC%8F.csv) 的 21 個英文欄位與順序，使用 UTF-8 BOM 與全欄位引號；英文表頭後直接放行程，不放中文說明列。下載採 EIP 相容時間及傳輸編碼，原 PDF／Word 不變。
 
 | 欄位 | 規則 |
 | --- | --- |
@@ -191,7 +213,6 @@ CSV 完整遵守 [行事曆格式.csv](../example_files/%E8%A1%8C%E4%BA%8B%E6%9B
 
 | Valve | 預設值 | 說明 |
 | --- | --- | --- |
-| `include_template_translation_row` | `true` | 在 CSV 英文表頭後加入中文欄位說明列。 |
 | `rename_original_attachment` | `false` | 單一 PDF 時保留原附件並建立改名副本；多 PDF 批次一律保留原附件。 |
 | `max_pdf_size_mb` / `max_pdf_pages` | `30` / `60` | 單份原始文件與轉換後 PDF 均限 30 MB，轉換後每份最多 60 頁。 |
 | `max_ocr_pages` / `ocr_chunk_pages` | `10` / `3` | 本機 OCR 每次請求上限／實際分批頁數；長附件循序辨識、完整合併，不截斷。 |

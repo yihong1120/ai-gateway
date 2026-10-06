@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
+from urllib.parse import unquote_plus
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -210,8 +211,8 @@ class CalendarCsvTests(unittest.TestCase):
             deadlines=[_deadline()],
         )
         parsed = list(csv.DictReader(io.StringIO(self.pipe._calendar_csv(rows).decode('utf-8-sig'))))
-        self.assertEqual(parsed[0], PIPE_MODULE.CALENDAR_TRANSLATION_ROW)
-        row = parsed[1]
+        self.assertEqual(len(parsed), 1)
+        row = parsed[0]
         self.assertEqual(row['Name'], '鍾羽雯')
         self.assertEqual(row['Start Date'], '2026/09/10')
         self.assertEqual(row['End Date'], '2026/09/10')
@@ -273,9 +274,34 @@ class CalendarCsvTests(unittest.TestCase):
 
     def test_formula_cells_are_escaped(self) -> None:
         encoded = self.pipe._calendar_csv([{'Name': '=unsafe', 'Subject': '+unsafe'}]).decode('utf-8-sig')
-        row = list(csv.DictReader(io.StringIO(encoded)))[1]
+        row = list(csv.DictReader(io.StringIO(unquote_plus(encoded))))[0]
         self.assertEqual(row['Name'], "'=unsafe")
         self.assertEqual(row['Subject'], "'+unsafe")
+
+    def test_generated_download_is_direct_eip_format_even_with_legacy_valves(self):
+        from official_document_workflow.infrastructure.eip.calendar_csv import parse_csv
+        from official_document_workflow.infrastructure.eip.netask import csv_minutes
+
+        self.pipe.valves = Pipe.Valves(include_template_translation_row=True)
+        payload = self.pipe._calendar_csv([{
+            'Subject': '現勘 2K+500，50%，字面 %2B[AI產生]',
+            'Start Date': '2026/10/7', 'End Date': '2026/10/7',
+            'Start Time': '14:00:00', 'Start Time(24hr)': '14:00',
+            'End Time': '15:00:00', 'End Time(24hr)': '15:00',
+            'All day event': '假', 'Private': '真', 'Priority': '普通',
+            'Description': '工程里程 2K+500\n字面 %2B，進度 50%',
+        }])
+        self.assertTrue(payload.startswith(b'\xef\xbb\xbf'))
+        direct = list(csv.DictReader(io.StringIO(unquote_plus(payload.decode('utf-8-sig')))))
+        self.assertEqual(len(direct), 1)
+        self.assertEqual(set(direct[0]), set(PIPE_MODULE.CALENDAR_HEADERS))
+        self.assertEqual(direct[0]['Start Date'], '2026/10/07')
+        self.assertEqual(direct[0]['Start Time'], '下午02:00:00')
+        self.assertEqual(csv_minutes(direct[0]['End Time']), '900')
+        self.assertIn('2K+500', direct[0]['Subject'])
+        rows, _ = parse_csv(payload, csv_format=PIPE_MODULE.CALENDAR_CSV_FORMAT)
+        self.assertEqual(rows[0]['Subject'], direct[0]['Subject'])
+        self.assertEqual(rows[0]['Description'], direct[0]['Description'])
 
 
 class CloudValidationTests(unittest.TestCase):
