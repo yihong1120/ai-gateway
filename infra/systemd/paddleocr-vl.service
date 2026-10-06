@@ -1,0 +1,25 @@
+[Unit]
+Description=Fallback GPU PP-OCR document OCR service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/changdar/Documents/ai-gateway
+Environment=PADDLE_PDX_CACHE_HOME=/home/changdar/.cache/paddleocr-vl
+Environment=PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
+Environment=PADDLEOCR_DEVICE=gpu:0
+Environment=PADDLEOCR_VL_HOST=127.0.0.1
+Environment=PADDLEOCR_VL_PORT=8113
+Environment=PYTHONUNBUFFERED=1
+# Fallback only: the official PaddleOCR-VL + vLLM Compose stack now owns
+# 127.0.0.1:8113 in production. Exactly one worker avoids duplicate GPU model
+# copies when this PP-OCR fallback is deliberately re-enabled.
+ExecStart=/home/changdar/.conda/envs/paddleocr_vl_env/bin/python -m uvicorn infra.paddleocr.paddleocr_vl_server:app --host 127.0.0.1 --port 8113 --workers 1
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

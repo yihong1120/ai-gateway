@@ -1,0 +1,8 @@
+**
+!company_agent/
+!company_agent/services/
+!company_agent/services/cad/
+!company_agent/services/cad/worker/
+!company_agent/services/cad/worker/CadReader.csproj
+!company_agent/services/cad/worker/Program.cs
+!company_agent/services/cad/worker/dxf_worker.py

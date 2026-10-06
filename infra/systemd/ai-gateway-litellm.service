@@ -1,0 +1,17 @@
+[Unit]
+Description=LiteLLM AI gateway for Open WebUI
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/changdar/Documents/ai-gateway
+# Avoid an unrelated shell DEBUG=release value being parsed as LiteLLM's
+# boolean --debug option.
+Environment=DEBUG=false
+EnvironmentFile=/home/changdar/Documents/ai-gateway/.env.litellm
+ExecStart=/home/changdar/.conda/envs/llm_env/bin/litellm --config /home/changdar/Documents/ai-gateway/config.yaml --host 127.0.0.1 --port 4000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

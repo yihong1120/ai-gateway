@@ -1,0 +1,5 @@
+**
+!company_agent/
+!company_agent/services/
+!company_agent/services/office/
+!company_agent/services/office/worker.py
