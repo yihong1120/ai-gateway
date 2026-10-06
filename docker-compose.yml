@@ -5,8 +5,20 @@ services:
     restart: unless-stopped
     # Linux-only: lets the container reach host services at 127.0.0.1 (e.g., Ollama on :11434)
     network_mode: host
+    working_dir: /app
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+      - ./secrets/changdar-ai-llm-server.json:/app/secrets/changdar-ai-llm-server.json:ro
     env_file:
-      - .env
+      # LiteLLM must not receive the Open WebUI / Keycloak secrets.
+      - .env.litellm
     command: ["--config", "/app/config.yaml", "--host", "127.0.0.1", "--port", "4000"]
+
+  fileserver:
+    image: nginx:alpine
+    container_name: ai-fileserver
+    restart: unless-stopped
+    ports:
+      - "18080:80"
+    volumes:
+      - /mnt/data:/usr/share/nginx/html:ro
