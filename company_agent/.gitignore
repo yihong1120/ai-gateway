@@ -1,0 +1,6 @@
+config.local.json
+test_outputs/
+__pycache__/
+*.sqlite3*
+checkpoint.key
+run-*.lock

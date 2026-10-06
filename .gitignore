@@ -1,0 +1,38 @@
+# Local environment files; keep distributable templates.
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Local credentials, overrides, and runtime state.
+/secrets/
+.webui_secret_key
+config.local.json
+checkpoint.key
+nas.key
+eip-automation.key
+run-*.lock
+*.sqlite3
+*.sqlite3-*
+/.history
+
+# Python environments, bytecode, and build outputs.
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+/build/
+/dist/
+
+# Development tool caches.
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Local test inputs and generated evaluation outputs.
+/example_files/
+/test_outputs/
+
+# .NET CAD worker build outputs.
+/company_agent/services/cad/worker/bin/
+/company_agent/services/cad/worker/obj/
