@@ -8,6 +8,8 @@ repos:
     -   id: debug-statements
     -   id: double-quote-string-fixer
     -   id: name-tests-test
+        args: [--pytest-test-first]
+        files: (^|/)test_[^/]+\.py$
     -   id: requirements-txt-fixer
 -   repo: https://github.com/asottile/setup-cfg-fmt
     rev: v3.2.0
@@ -32,10 +34,13 @@ repos:
     rev: v2.3.2
     hooks:
     -   id: autopep8
+        args: [--in-place, --exit-code, --max-line-length=120]
 -   repo: https://github.com/PyCQA/flake8
     rev: 7.4.1
     hooks:
     -   id: flake8
+        # Prompts and external contracts contain long strings that must stay intact.
+        args: [--max-line-length=120, --extend-ignore=E501]
 -   repo: https://github.com/pre-commit/mirrors-mypy
     rev: v2.3.1
     hooks:
