@@ -1,0 +1,19 @@
+[Unit]
+Description=Visionnaire private LiteLLM usage API
+After=network-online.target ai-gateway-litellm.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/changdar/Documents/ai-gateway
+EnvironmentFile=/home/changdar/Documents/ai-gateway/.env.ai_usage
+ExecStart=/home/changdar/.conda/envs/llm_env/bin/python -m uvicorn examples.ai_usage.app:app --host 127.0.0.1 --port 8012
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ReadWritePaths=/home/changdar/Documents/ai-gateway
+
+[Install]
+WantedBy=default.target
