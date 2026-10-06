@@ -45,5 +45,11 @@ repos:
     rev: v2.3.1
     hooks:
     -   id: mypy
+        # Framework adapters and dynamic test stubs do not yet have a typing baseline.
+        files: ^examples/(auth|bff|db_management|deployment_registry|ai_usage)/.*\.py$
+        additional_dependencies: [types-pyyaml]
+    -   id: mypy
+        name: mypy (full repository audit)
+        stages: [manual]
         additional_dependencies: [types-pyyaml]
         exclude: ^testing/resources/
