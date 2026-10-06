@@ -1,0 +1,353 @@
+{
+  "date": "2026-10-04",
+  "target_peak_users": 50,
+  "hardware": {
+    "cpu": "Intel Core i7-14700, 28 threads",
+    "ram_total_gib": 62,
+    "ram_available_gib_at_start": 30,
+    "gpu": "RTX 4090 24 GiB",
+    "gpu_memory_used_mib_at_start": 15588
+  },
+  "scope": {
+    "scheduler": "Real isolated PostgreSQL queues and EIP account scheduler; real local synthetic 10-page PDF/Word rendering; simulated 150ms model/OCR latency and 800ms work hold.",
+    "ocr": "Live loopback PaddleOCR-VL with one synthetic rasterized A4 page containing 12 Chinese records; eight requests at each 2/3/4 limit; validation requires recognized 2026 and 測試.",
+    "not_measured": [
+      "Cloud model provider rate/token quotas",
+      "Live authenticated EIP or NAS traffic",
+      "Complete production business document latency",
+      "Long or complex scanned PDFs"
+    ]
+  },
+  "users_50": {
+    "warning": "Not a live cloud-model or live EIP throughput measurement.",
+    "profiles": [
+      {
+        "scope": "real PostgreSQL dispatcher + EIP scheduler + local 10-page PDF/Word rendering; simulated provider/OCR latency",
+        "limits": {
+          "company": 4,
+          "documents": 4,
+          "eip": 4,
+          "models": 8,
+          "ocr": 2
+        },
+        "users": 50,
+        "jobs": 150,
+        "errors": 0,
+        "elapsed_seconds": 17.416,
+        "jobs_per_minute": 516.77,
+        "submit_p95_ms": 19.073,
+        "wait_p95_seconds": 14.506,
+        "execution_p95_seconds": 1.511,
+        "event_loop_lag_p95_ms": 6.147,
+        "event_loop_lag_max_ms": 124.397,
+        "peaks": {
+          "eip": 4,
+          "model": 8,
+          "ocr": 2,
+          "company": 4,
+          "document": 4
+        },
+        "max_rss_mib": 908.6
+      },
+      {
+        "scope": "real PostgreSQL dispatcher + EIP scheduler + local 10-page PDF/Word rendering; simulated provider/OCR latency",
+        "limits": {
+          "company": 8,
+          "documents": 8,
+          "eip": 8,
+          "models": 16,
+          "ocr": 2
+        },
+        "users": 50,
+        "jobs": 150,
+        "errors": 0,
+        "elapsed_seconds": 11.215,
+        "jobs_per_minute": 802.47,
+        "submit_p95_ms": 19.15,
+        "wait_p95_seconds": 8.601,
+        "execution_p95_seconds": 1.705,
+        "event_loop_lag_p95_ms": 7.105,
+        "event_loop_lag_max_ms": 32.741,
+        "peaks": {
+          "eip": 8,
+          "model": 16,
+          "ocr": 2,
+          "company": 8,
+          "document": 8
+        },
+        "max_rss_mib": 950.4
+      },
+      {
+        "scope": "real PostgreSQL dispatcher + EIP scheduler + local 10-page PDF/Word rendering; simulated provider/OCR latency",
+        "limits": {
+          "company": 12,
+          "documents": 12,
+          "eip": 12,
+          "models": 24,
+          "ocr": 3
+        },
+        "users": 50,
+        "jobs": 150,
+        "errors": 0,
+        "elapsed_seconds": 9.676,
+        "jobs_per_minute": 930.1,
+        "submit_p95_ms": 19.054,
+        "wait_p95_seconds": 6.941,
+        "execution_p95_seconds": 2.246,
+        "event_loop_lag_p95_ms": 16.513,
+        "event_loop_lag_max_ms": 123.307,
+        "peaks": {
+          "eip": 12,
+          "model": 24,
+          "ocr": 3,
+          "company": 12,
+          "document": 12
+        },
+        "max_rss_mib": 1051.7
+      },
+      {
+        "scope": "real PostgreSQL dispatcher + EIP scheduler + local 10-page PDF/Word rendering; simulated provider/OCR latency",
+        "limits": {
+          "company": 16,
+          "documents": 16,
+          "eip": 16,
+          "models": 32,
+          "ocr": 4
+        },
+        "users": 50,
+        "jobs": 150,
+        "errors": 0,
+        "elapsed_seconds": 9.355,
+        "jobs_per_minute": 962.08,
+        "submit_p95_ms": 19.324,
+        "wait_p95_seconds": 7.013,
+        "execution_p95_seconds": 2.793,
+        "event_loop_lag_p95_ms": 25.633,
+        "event_loop_lag_max_ms": 155.994,
+        "peaks": {
+          "eip": 16,
+          "model": 32,
+          "ocr": 4,
+          "company": 14,
+          "document": 16
+        },
+        "max_rss_mib": 1224.3
+      }
+    ],
+    "backlogs": [
+      {
+        "max_pending": 500,
+        "max_pending_per_user": 20,
+        "accepted": 500,
+        "submit_p95_ms": 19.615,
+        "submit_max_ms": 22.645,
+        "seconds": 8.38,
+        "overflow_idempotency_cancellation": "passed"
+      },
+      {
+        "max_pending": 1000,
+        "max_pending_per_user": 40,
+        "accepted": 1000,
+        "submit_p95_ms": 19.455,
+        "submit_max_ms": 21.603,
+        "seconds": 16.795,
+        "overflow_idempotency_cancellation": "passed"
+      },
+      {
+        "max_pending": 2000,
+        "max_pending_per_user": 50,
+        "accepted": 2000,
+        "submit_p95_ms": 21.4,
+        "submit_max_ms": 35.563,
+        "seconds": 35.861,
+        "overflow_idempotency_cancellation": "passed"
+      }
+    ]
+  },
+  "users_100_surge": {
+    "profiles": [
+      {
+        "scope": "real PostgreSQL dispatcher + EIP scheduler + local 10-page PDF/Word rendering; simulated provider/OCR latency",
+        "limits": {
+          "company": 8,
+          "documents": 8,
+          "eip": 8,
+          "models": 16,
+          "ocr": 2
+        },
+        "users": 100,
+        "jobs": 264,
+        "errors": 0,
+        "elapsed_seconds": 21.279,
+        "jobs_per_minute": 744.39,
+        "submit_p95_ms": 20.247,
+        "wait_p95_seconds": 17.62,
+        "execution_p95_seconds": 1.838,
+        "event_loop_lag_p95_ms": 7.771,
+        "event_loop_lag_max_ms": 112.588,
+        "peaks": {
+          "eip": 8,
+          "model": 16,
+          "ocr": 2,
+          "company": 8,
+          "document": 8
+        },
+        "max_rss_mib": 960.3
+      },
+      {
+        "scope": "real PostgreSQL dispatcher + EIP scheduler + local 10-page PDF/Word rendering; simulated provider/OCR latency",
+        "limits": {
+          "company": 12,
+          "documents": 12,
+          "eip": 12,
+          "models": 24,
+          "ocr": 3
+        },
+        "users": 100,
+        "jobs": 264,
+        "errors": 0,
+        "elapsed_seconds": 17.703,
+        "jobs_per_minute": 894.76,
+        "submit_p95_ms": 21.389,
+        "wait_p95_seconds": 14.841,
+        "execution_p95_seconds": 2.376,
+        "event_loop_lag_p95_ms": 18.266,
+        "event_loop_lag_max_ms": 130.133,
+        "peaks": {
+          "eip": 12,
+          "model": 24,
+          "ocr": 3,
+          "company": 12,
+          "document": 12
+        },
+        "max_rss_mib": 1176.2
+      }
+    ]
+  },
+  "live_ocr": {
+    "baseline": {
+      "gpu_used_mib": 15588,
+      "gpu_free_mib": 8491,
+      "gpu_util_percent": 63
+    },
+    "profiles": [
+      {
+        "scope": "live local OCR; same synthetic scanned A4 page, no cloud calls",
+        "limit": 2,
+        "pages": 8,
+        "errors": 0,
+        "error_types": [],
+        "elapsed_seconds": 24.148,
+        "pages_per_minute": 19.88,
+        "service_p50_seconds": 5.811,
+        "service_p95_seconds": 6.403,
+        "queue_wait_p95_seconds": 15.285,
+        "health_p95_ms": 2.467,
+        "peak_inflight": 2,
+        "gpu_peak_used_mib": 15588,
+        "gpu_peak_util_percent": 100
+      },
+      {
+        "scope": "live local OCR; same synthetic scanned A4 page, no cloud calls",
+        "limit": 3,
+        "pages": 8,
+        "errors": 0,
+        "error_types": [],
+        "elapsed_seconds": 25.67,
+        "pages_per_minute": 18.7,
+        "service_p50_seconds": 9.564,
+        "service_p95_seconds": 9.862,
+        "queue_wait_p95_seconds": 12.655,
+        "health_p95_ms": 2.799,
+        "peak_inflight": 3,
+        "gpu_peak_used_mib": 15605,
+        "gpu_peak_util_percent": 100
+      },
+      {
+        "scope": "live local OCR; same synthetic scanned A4 page, no cloud calls",
+        "limit": 4,
+        "pages": 8,
+        "errors": 0,
+        "error_types": [],
+        "elapsed_seconds": 27.134,
+        "pages_per_minute": 17.69,
+        "service_p50_seconds": 13.129,
+        "service_p95_seconds": 13.992,
+        "queue_wait_p95_seconds": 10.681,
+        "health_p95_ms": 2.548,
+        "peak_inflight": 4,
+        "gpu_peak_used_mib": 15605,
+        "gpu_peak_util_percent": 100
+      }
+    ],
+    "warmup": {
+      "scope": "live local OCR; same synthetic scanned A4 page, no cloud calls",
+      "limit": 1,
+      "pages": 1,
+      "errors": 0,
+      "error_types": [],
+      "elapsed_seconds": 3.296,
+      "pages_per_minute": 18.2,
+      "service_p50_seconds": 3.284,
+      "service_p95_seconds": 3.284,
+      "queue_wait_p95_seconds": 0.0,
+      "health_p95_ms": 2.644,
+      "peak_inflight": 1,
+      "gpu_peak_used_mib": 15588,
+      "gpu_peak_util_percent": 98
+    }
+  },
+  "suggested_pilot": {
+    "company": 8,
+    "documents": 8,
+    "eip": 8,
+    "models": 16,
+    "ocr": 2,
+    "max_pending": 1000,
+    "max_pending_per_user": 20
+  },
+  "production_limits_changed": false,
+  "pilot_repeat": {
+    "scope": "real PostgreSQL dispatcher + EIP scheduler + local 10-page PDF/Word rendering; simulated provider/OCR latency",
+    "limits": {
+      "company": 8,
+      "documents": 8,
+      "eip": 8,
+      "models": 16,
+      "ocr": 2
+    },
+    "users": 50,
+    "jobs": 150,
+    "errors": 0,
+    "elapsed_seconds": 11.442,
+    "jobs_per_minute": 786.6,
+    "submit_p95_ms": 18.919,
+    "wait_p95_seconds": 8.951,
+    "execution_p95_seconds": 1.975,
+    "event_loop_lag_p95_ms": 8.764,
+    "event_loop_lag_max_ms": 107.703,
+    "peaks": {
+      "eip": 8,
+      "model": 16,
+      "ocr": 2,
+      "company": 8,
+      "document": 8
+    },
+    "max_rss_mib": 1002.9
+  },
+  "post_test_database": {
+    "max_connections": 100,
+    "current_connections": 48,
+    "test_schemas_remaining": 13,
+    "webui_database_pool": {
+      "DATABASE_POOL_SIZE": "default",
+      "DATABASE_POOL_MAX_OVERFLOW": "default"
+    },
+    "benchmark_schemas_with_fixture_rows_remaining": 0
+  },
+  "regression_tests": {
+    "count": 31,
+    "errors": 0
+  },
+  "production_health_http": 200
+}

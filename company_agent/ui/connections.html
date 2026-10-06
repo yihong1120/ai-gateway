@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>帳號與連線</title><link rel="stylesheet" href="/connections/app.css"><script defer src="/connections/app.js"></script></head>
+<body><main><nav aria-label="工作入口"><a href="/">Open WebUI</a> · <a href="/eip">EIP 公文工作台</a> · <a href="/agents">公司助理工作台</a></nav>
+<h1>帳號與連線</h1><p>集中管理本人 EIP 與 NAS 連線。兩者的憑證、權限、登入狀態及設定各自獨立；更新或解除其中一個，不影響另一個。既有綁定不需重新輸入。</p>
+<section id="identity"><h2>登入帳號與使用者管理</h2>
+<p>Open WebUI 也提供使用者管理入口；新增、停用、刪除及公司權限變更均交由 Visionnaire 的管理服務執行。Keycloak 管理登入，Open WebUI 保存聊天、檔案與個人設定，三者以不可變的 OIDC 使用者識別碼連結。</p>
+<p><a id="identity-account" href="#">修改我的登入密碼與安全設定</a></p>
+<div id="identity-admin" hidden><p><a id="identity-openwebui-users" href="/admin/users">Open WebUI 使用者管理</a> · <a id="identity-visionnaire-users" href="/connections/users">完整公司、群組與工地權限管理</a></p>
+<p>Open WebUI 原生頁面的新增、停用、角色、密碼與刪除操作會同步 Visionnaire 及 Keycloak；新增帳號預設繼承管理員的公司與群組，並取得該群組的工地權限。跨群組配置請使用完整權限管理入口。</p></div>
+<p id="identity-status" role="status">讀取管理權限中…</p></section>
+<section id="eip"><h2>EIP 帳號</h2><p id="eip-status" role="status">讀取連線狀態中…</p><p id="eip-session"></p><p id="eip-schedule"></p>
+<button type="button" id="eip-refresh">重新整理狀態</button><button type="button" id="eip-test" disabled>測試／重新建立 EIP 連線</button><button type="button" id="eip-pause" disabled>暫停自動處理</button><button type="button" id="eip-unlink" disabled>解除 EIP 綁定並移除憑證</button>
+<details><summary>首次綁定／更換 EIP 帳號或密碼</summary>
+<p>已保存帳密時，查詢可自動恢復連線。不需要定期重填密碼。只想停止排程請按「暫停自動處理」，憑證仍保留；再次啟用請在下方重新綁定並明確勾選自動處理同意。</p>
+<form id="eip-form"><label for="eip-account">本人 EIP 帳號</label><input id="eip-account" name="eip-account" autocomplete="username" maxlength="100" required>
+<label for="eip-password">EIP 密碼</label><input id="eip-password" name="eip-password" type="password" autocomplete="current-password" maxlength="256" required>
+<label class="check"><input id="eip-http" type="checkbox" required>我了解 EIP 目前使用未加密 HTTP，僅在可信任網路使用；建議由管理員啟用 HTTPS／VPN。</label>
+<label class="check"><input id="eip-auto" type="checkbox">同意保存加密 EIP 密碼，啟用每小時公文下載、雲端分析及自動匯入我的私人行事曆。</label>
+<p>自動處理不預先勾選。未勾選而儲存時，僅建立短期 Session，且會停止既有排程並移除已保存密碼；不是單純暫停。</p>
+<p>啟用後，通過驗證的 CSV 直接匯入私人行事曆。只有開始日期／時間、沒有結束資料時，預設預留 1 小時（管理員可設定為 2 小時），明確標註為系統預留，不當成公文事實；原始檔案不變。匯入後核對詳細資料，結果不明不自動重送。</p>
+<p>待處理文件匣（待簽核／待經辦）不限日期、不分已讀／未讀，已完成的不重做。簽核紀錄、通知紀錄與我送出的簽核仍以首次啟用前 24 小時為固定抓取起點；同帳號重新綁定保留起點與處理紀錄。每輪最多處理 10 份，其餘留至後續排程。不會替你簽核或送出公文。查看附件可能更新閱讀紀錄。沒有明確期限不新增行程；匯入結果不明不自動重送。關閉網頁不影響排程。</p>
+<button type="submit" id="eip-save">儲存 EIP 綁定</button></form></details>
+<p id="eip-notice" role="status" aria-live="polite"></p><a href="/eip">查看公文處理狀態、成果下載與行事曆</a></section>
+<section id="nas"><h2>公司助理 NAS 帳號</h2><p id="nas-status" role="status">讀取連線狀態中…</p>
+<p>可綁定 NAS 一般或管理員帳號。可讀目錄依該帳號的 NAS 權限決定，包含 NAS 授權的 homes。若使用管理員帳號，Agent 可能讀到其他使用者家目錄。仍為唯讀，不提供寫入、刪除或覆寫；修改文件另產生私人下載檔。</p>
+<button type="button" id="nas-refresh">重新整理狀態</button><button type="button" id="nas-test" disabled>測試 NAS 連線與可用資料夾</button><button type="button" id="nas-unlink" disabled>解除 NAS 綁定並移除憑證</button>
+<details><summary>首次綁定／更換 NAS 帳號或密碼</summary>
+<form id="nas-form"><label for="nas-account">本人 NAS 帳號</label><input id="nas-account" name="nas-account" autocomplete="username" maxlength="256" required>
+<label for="nas-password">NAS 密碼</label><input id="nas-password" name="nas-password" type="password" autocomplete="current-password" maxlength="256" required>
+<label class="check"><input id="nas-consent" type="checkbox" required>我使用本人 NAS 帳號，同意加密保存憑證；依我的指令，必要的檔名與文件內容可交由已設定雲端模型分析。</label>
+<button type="submit" id="nas-save">驗證並綁定 NAS</button></form></details>
+<p>每次操作以本人帳號重新登入、用後登出。密碼不交給模型。目前不支援每次需驗證碼的登入，請勿為此關閉雙因素驗證。解除或更換帳號後，舊 NAS 工作不能沿用新帳號；請另開工作。既有私人成果不會自動刪除。</p>
+<p id="nas-notice" role="status" aria-live="polite"></p><div id="nas-shares"></div><a href="/agents">查看公司助理任務與下載成果</a></section>
+</main></body></html>

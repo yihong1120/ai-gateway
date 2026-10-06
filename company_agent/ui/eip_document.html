@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>EIP 公文內容</title>
+  <link rel="stylesheet" href="/agents/eip-document.css">
+</head>
+<body>
+  <main>
+    <nav><a href="/">返回 Open WebUI</a><a href="/eip">EIP 公文工作台</a></nav>
+    <article aria-live="polite">
+      <p id="status">正在讀取 EIP 公文…</p>
+      <section id="document" hidden>
+        <p class="folder" id="folder"></p>
+        <h1 id="subject"></h1>
+        <dl>
+          <div><dt>文件匣時間</dt><dd id="date"></dd></div>
+          <div id="due-row"><dt>預定完成日</dt><dd id="due"></dd></div>
+          <div id="flow-row"><dt>簽核編號</dt><dd id="flow"></dd></div>
+          <div id="state-row"><dt>進度／狀態</dt><dd id="state"></dd></div>
+        </dl>
+        <h2>公文內文</h2>
+        <dl id="fields" class="contents"></dl>
+        <h2>表單與附件</h2>
+        <p class="hint">PDF 可直接在瀏覽器開啟；Word 檔會下載供檢視。開啟此頁可能更新 EIP 已讀狀態。</p>
+        <ul id="attachments"></ul>
+      </section>
+    </article>
+  </main>
+  <script src="/agents/eip-document.js" defer></script>
+</body>
+</html>

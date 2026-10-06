@@ -1,0 +1,88 @@
+{
+  "state_dir": "/srv/company-agent-private",
+  "model_name": "Kimi-K2.5",
+  "require_user_billing": true,
+  "structured_completion": true,
+  "require_artifact_review": true,
+  "compact_prompts": true,
+  "role_models": {
+    "coordinator": {
+      "model": "Kimi-K2.5",
+      "max_tokens": 4096
+    },
+    "knowledge": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096
+    },
+    "document": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096
+    },
+    "data": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096
+    },
+    "reviewer": {
+      "model": "Kimi-K2.5",
+      "max_tokens": 4096
+    },
+    "research": {
+      "model": "Kimi-K2.5",
+      "max_tokens": 4096
+    },
+    "engineering": {
+      "model": "Kimi-K2.5",
+      "max_tokens": 4096
+    },
+    "eip": {
+      "model": "Kimi-K2.5",
+      "max_tokens": 4096
+    }
+  },
+  "purpose_models": {
+    "summary": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "minimal",
+      "max_tokens": 2048
+    }
+  },
+  "roots": [],
+  "model_profiles": {
+    "lite": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096,
+      "supports_images": true,
+      "description": "低成本通用模型，適合明確任務、文件整理、工具操作及簡單圖像。每百萬 tokens 基本輸入 $0.30、輸出 $2.50。能力足夠時優先考慮。"
+    },
+    "text_economy": {
+      "model": "DeepSeek-V4-Flash",
+      "max_tokens": 4096,
+      "supports_images": false,
+      "description": "低成本文字模型，適合文字擷取、摘要、結構化整理；不接圖片。每百萬 tokens 基本輸入 $0.19、輸出 $0.51。"
+    },
+    "balanced": {
+      "model": "Kimi-K2.5",
+      "max_tokens": 4096,
+      "supports_images": true,
+      "description": "已驗證的文字與視覺模型，適合跨來源整合及較複雜校核。每百萬 tokens 基本輸入 $0.60、輸出 $3.00。"
+    },
+    "flash": {
+      "model": "gemini-3.8-flash",
+      "reasoning_effort": "low",
+      "max_tokens": 4096,
+      "supports_images": true,
+      "description": "較強的 Gemini 文字與視覺模型，適合複雜判讀。每百萬 tokens 基本輸入 $0.75、輸出 $3.75。近期測試曾遇到 429，非必要不作常規首選，失敗不自動重試。"
+    },
+    "pro": {
+      "model": "gemini-3.1-pro-preview",
+      "reasoning_effort": "high",
+      "max_tokens": 8192,
+      "supports_images": true,
+      "description": "昂貴的深度推理模型，只在必要的困難推理、來源矛盾或複雜圖文交叉判讀考慮。200K 以內輸入每百萬 tokens 基本 $2、輸出 $12。簡單任務避免使用。"
+    }
+  }
+}

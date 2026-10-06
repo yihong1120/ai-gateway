@@ -1,0 +1,20 @@
+{
+  "state_dir": "/srv/company-agent-economy-trial-private",
+  "model_name": "Kimi-K2.5",
+  "compact_prompts": true,
+  "require_artifact_review": true,
+  "require_user_billing": true,
+  "structured_completion": true,
+  "max_steps": 16,
+  "execution_timeout_seconds": 1200,
+  "max_file_bytes": 20000000,
+  "roots": [
+    {
+      "name": "project_docs",
+      "path": "/mnt/company-nas/approved-project",
+      "readers": ["REPLACE_WITH_VERIFIED_USER_ID"],
+      "writers": [],
+      "model_access": false
+    }
+  ]
+}

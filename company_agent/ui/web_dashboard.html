@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>公司工作助理</title><link rel="stylesheet" href="/agents/app.css"><script defer src="/agents/app.js"></script></head>
+<body><main><a href="/">← Open WebUI</a><h1>公司工作助理</h1>
+<p>在 Open WebUI 的模型選單選擇「公司工作助理」，輸入需求並附上文件即可。所有已啟用帳號均可使用，模型費用合併扣本人既有每日 US$4 額度。</p>
+<p>支援文件、Excel、圖片、本地 OCR、Tavily 公開研究、EIP 附件及 DWG／DXF 結構分析。CAD 不重存 DWG、不覆寫 NAS 原圖；未知圖元、外參與字型可能不完整，不代表整張施工圖已驗證。所需文件內容與選取圖片會送至已設定雲端模型；公開搜尋詞與網頁網址交給 Tavily，請勿提供不允許外送的資料。Tavily 使用管理員設定的 API 額度，與個人模型額度分開。</p>
+<p id="notice" role="status"></p>
+<p>PNG／JPEG 與 PDF 支援本地 OCR 或指定單頁的雲端圖片語意分析（消耗本人模型額度，不是工程安全認證）。Excel 支援新建計算報表，或核對原值後跨表修改儲存格、受限同表公式及既有樣式，另存不覆寫；原簿修改版需要用 Excel 開啟重算。EIP 可查詢並處理 PDF／DOCX／DOC 附件，同簽核附件共同分析，提供私人 PDF／可編輯 Word／期限 CSV 下載。CSV 旁可預覽，再由本人確認匯入私人行事曆；沒有期限不建立行程。不簽核、不寄信、不刪除，查詢與下載可能更新已讀。</p>
+<section><h2>帳號與連線</h2><p>EIP 與 NAS 綁定已集中到 <a href="/connections">帳號與連線</a>。既有綁定保持不變；此工作台專注任務進度與成果下載。</p><a href="/connections#nas">管理我的 NAS</a> · <a href="/eip">EIP 公文工作台</a></section>
+<section><h2>我的工作</h2><button id="refresh">重新整理</button><div id="jobs"></div></section>
+<section id="detail" hidden><h2 id="status"></h2><p id="progress"></p><pre id="answer"></pre><div id="notices"></div><h3>網路來源</h3><div id="web-sources"></div><h3>下載成果</h3><div id="files"></div><h3>子任務</h3><div id="delegations"></div><div id="proposals"></div>
+<p id="budget"></p>
+<button id="cancel" type="button" hidden>取消背景工作</button>
+<button id="resume" type="button" hidden>恢復未完成工作</button>
+<p>公司助理與公文 PDF 送出後會立即返回工作連結；可關閉頁面，並在此查詢、下載或取消背景工作。公司助理預設 40 次模型呼叫，包含摘要與附件分析。已計費請求不因後續工作失敗而退費。</p>
+<form id="followup"><h3>接續修改</h3><label for="instruction">新工作將引用這份工作的来源與產出，原檔不覆寫。</label><textarea id="instruction" maxlength="6000" required placeholder="例如：將這份簡報改成五頁，保留原有重點。"></textarea><button id="submit" type="submit">建立接續工作</button></form>
+</section></main></body></html>
