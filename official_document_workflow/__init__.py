@@ -1,0 +1,2 @@
+"""Official-document workflow package."""
+from __future__ import annotations

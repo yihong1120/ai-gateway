@@ -1,0 +1,18 @@
+:root{font-family:system-ui,sans-serif;color-scheme:light dark}body{margin:0;background:light-dark(#f5f6f8,#15171a);color:light-dark(#20242a,#eee)}main{max-width:1080px;margin:auto;padding:24px}header{margin-bottom:24px}section{border:1px solid #8885;border-radius:12px;padding:24px;margin:20px 0;background:light-dark(white,#22252b)}h1{font-size:28px}h2{font-size:21px}a{color:light-dark(#1258ac,#8dbbff)}label{display:block;margin:12px 0}input:not([type=checkbox]),select,textarea{display:block;box-sizing:border-box;padding:10px;border:1px solid #8888;border-radius:6px;width:100%;max-width:600px;font:inherit}textarea{min-height:90px}button{padding:10px 16px;margin:6px 6px 6px 0;border:1px solid #8888;border-radius:6px;cursor:pointer;font:inherit}button:disabled{opacity:.5;cursor:default}.fields{display:flex;gap:12px;flex-wrap:wrap;align-items:end}.muted{opacity:.75;font-size:14px;line-height:1.6}.check{line-height:1.6}#notice{position:sticky;top:8px;background:light-dark(#fff0ca,#433a1e);padding:12px;border-radius:6px;z-index:1}#notice:empty{display:none}.document{border-top:1px solid #8885;padding:12px 0}.attachment{margin-left:20px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.6}.event{padding:12px;border-bottom:1px solid #8885;white-space:pre-wrap;overflow-wrap:anywhere}.download{display:flex;gap:12px;align-items:center;overflow-wrap:anywhere;margin:12px 0}details{margin-top:10px}
+:root #job-result{margin-top:20px;border-top:1px solid #8885;padding-top:8px;overflow-wrap:anywhere}
+#job-result p,#job-result li{white-space:pre-wrap;line-height:1.6}
+#job-result li+li{margin-top:6px}
+.result-warning:not(:empty),.result-error:not(:empty){padding:12px 16px;border-radius:8px;margin:12px 0}
+.result-warning:not(:empty){background:light-dark(#fff4d6,#433a22);border-left:4px solid #c89626}
+.result-error:not(:empty){background:light-dark(#fff0ee,#422b2b);border-left:4px solid #cf6565}
+#job-result h4{margin:0 0 8px}
+#downloads .download{flex-wrap:wrap;padding:12px 0;border-bottom:1px solid #8884}
+#downloads .download strong{font-size:14px;min-width:100px}
+#downloads .download a{flex:1 1 260px;min-width:0}
+.automatic-pager{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:12px 0}
+.automatic-pager label{display:flex;align-items:center;gap:8px;margin:0}
+.automatic-pager select{width:auto;margin:0}
+.automatic-pager span{font-size:14px}
+#automatic-results{overflow-wrap:anywhere}
+.task-times{margin:10px 0}
+.task-time-summary{display:grid;gap:2px;overflow-wrap:anywhere}
