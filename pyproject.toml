@@ -6,7 +6,56 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "litellm[proxy]",
+  "openai",
+  "requests",
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.30,<1",
+  "httpx>=0.27,<1",
+  "PyJWT[crypto]>=2.8,<3",
+  "python-dotenv>=1.0,<2",
+  "python-docx>=1.1,<2",
+  "pdf2docx>=0.5.13,<0.6",
+  "PyMuPDF>=1.28,<1.29",
+  "Pillow>=11.1,<13",
+  "pillow-heif>=1,<2",
+  "langgraph==1.0.10",
+  "langgraph-prebuilt==1.0.8",
+  "cryptography>=43,<49",
 ]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project.optional-dependencies]
+company-agent = [
+  "openpyxl>=3.1.5,<4",
+  "python-pptx>=1.0,<2", "defusedxml>=0.7,<1",
+  "langchain-core>=1.2.13,<2",
+  "langchain==1.2.10",
+  "langgraph==1.0.10",
+  "langgraph-prebuilt==1.0.8",
+  "langchain-openai==1.1.10",
+  "langgraph-checkpoint-postgres==3.0.5",
+  "psycopg[binary]>=3.2,<4",
+  "pycryptodome>=3.23,<4",
+]
+
+[tool.setuptools.packages.find]
+include = ["official_document_workflow*", "company_agent*"]
+
+[tool.setuptools.package-data]
+"official_document_workflow" = ["frontend/*.html", "frontend/assets/*.js", "frontend/assets/*.css"]
+"company_agent" = ["README.md"]
+"company_agent.configs" = ["*.json"]
+"company_agent.evals" = ["README.md"]
+"company_agent.agents" = ["common.md"]
+"company_agent.ui" = ["*.html", "*.js", "*.css"]
+"company_agent.services.cad.worker" = ["*.cs", "*.csproj"]
+"company_agent.tests" = ["fixtures/*.json"]
+"*" = ["prompt.md"]
 
 [tool.uv]
 # Use a local virtualenv in the repo (default behavior when running `uv sync`).
+[tool.black]
+line-length = 120
