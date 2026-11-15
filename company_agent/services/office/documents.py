@@ -17,8 +17,9 @@ from xml.etree.ElementTree import SubElement
 from xml.etree.ElementTree import tostring
 
 from defusedxml import ElementTree as SafeXML
-from langchain_core.tools import ToolException
 from lxml import etree
+
+from company_agent.services.files.errors import RecoverableToolError
 
 
 TEXT_TYPES = {'.txt', '.md', '.csv'}
@@ -233,9 +234,11 @@ def spreadsheet_package(data):
             if re.fullmatch(r'xl/worksheets/[^/]+\.xml', name):
                 sheets += 1
                 root = SafeXML.fromstring(z.read(name), forbid_dtd=True)
-                for row in root.iter('{' + X + '}row'):
-                    if int(row.attrib.get('r', '0')) > 10_000:
-                        raise ValueError('XLSX 超過 10000 列上限。')
+                actual_rows = max((int(row.attrib.get('r', '0')) for row in root.iter('{' + X + '}row')), default=0)
+                if actual_rows > 10_000:
+                    raise RecoverableToolError('spreadsheet_resource_limit', 'XLSX 超過 10000 列上限，未讀取或截斷資料。',
+                                               resource='worksheet_rows', actual=actual_rows, maximum=10000,
+                                               next_action='停止統計與產檔，請使用者分割來源後另開工作；不可改小讀取範圍冒充完整結果。')
                 for cell in root.iter('{' + X + '}c'):
                     cells += 1
                     match = re.fullmatch(r'([A-Z]{1,3})([1-9][0-9]{0,6})', cell.attrib.get('r', ''))
@@ -299,7 +302,7 @@ def read_spreadsheet(data, sheet=None, start_row=1, row_limit=20, column_limit=2
     with spreadsheet_books(data) as (book, cached):
         selected = sheet if sheet is not None else book.sheetnames[0]
         if selected not in book.sheetnames:
-            raise ToolException('找不到指定工作表。')
+            raise RecoverableToolError('sheet_not_found', '找不到指定工作表，請使用精確名稱。', requested_sheet=selected, available_sheets=book.sheetnames)
         ws, cache = book[selected], cached[selected]
         rows = []
         bounds = {
@@ -368,7 +371,7 @@ def analyze_spreadsheet(data, sheet, column, start_row, end_row):
         raise ValueError('XLSX 分析範圍超過上限。')
     with spreadsheet_books(data) as (book, _cached):
         if sheet not in book.sheetnames:
-            raise ToolException('找不到指定工作表。')
+            raise RecoverableToolError('sheet_not_found', '找不到指定工作表，請使用精確名稱。', requested_sheet=sheet, available_sheets=book.sheetnames)
         ws = book[sheet]
         values = []
         excluded = {'formula': 0, 'blank': 0, 'other': 0}

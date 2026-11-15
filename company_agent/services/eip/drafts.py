@@ -7,8 +7,8 @@ import io
 import json
 from datetime import date
 
-from official_document_workflow.domain.calendar.csv_schema import CALENDAR_HEADERS
-from official_document_workflow.infrastructure.eip.calendar_csv import parse_csv
+from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_HEADERS
+from examples.official_document_workflow.infrastructure.eip.calendar_csv import parse_csv
 
 
 async def prepare(ctx, args):
@@ -61,7 +61,7 @@ async def prepare(ctx, args):
     )
     with ctx.store.db() as db:
         db.execute(
-            'INSERT INTO eip_calendar_sources VALUES(%s,%s,%s,%s)',
+            'INSERT INTO eip_calendar_sources(owner,job,artifact,revision) VALUES(%s,%s,%s,%s)',
             (ctx.owner, ctx.job, artifact['id'], ctx.settings.eip_binding_revision),
         )
     result = {

@@ -158,6 +158,7 @@ class AdapterReuseTests(unittest.IsolatedAsyncioTestCase):
         alice, bob = self.runtime('alice'), self.runtime('bob')
         for runtime in (alice, bob):
             owner = runtime.context.owner
+            runtime.context.settings.office_execution_mode = 'flexible'
             runtime.state['messages'] = [
                 AIMessage(
                     content='', tool_calls=[

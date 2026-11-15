@@ -14,6 +14,9 @@ SPEC = AgentSpec(
             'delegate_knowledge',
             'delegate_research',
             'delegate_reviewer',
+            'plan_delivery',
+            'supersede_artifact',
+            'validate_delivery',
         ),
     ),
 )

@@ -17,6 +17,7 @@ from company_agent.runtime.completion import review_evidence
 from company_agent.services.cad.sandbox import NOTICE as CAD_NOTICE
 from company_agent.services.cad.sandbox import read_results as cad_read_results
 from company_agent.services.eip.reading import read_results as eip_read_results
+from company_agent.services.external_tools.evidence import read_results as external_read_results
 from company_agent.services.research.web import merge_web_sources
 from company_agent.state import GRAPH_VERSION
 from company_agent.state import merge_sources
@@ -37,6 +38,10 @@ def execution_summary(state):
         receipt['notice'] for receipt in receipts['propose_publish']
         if receipt['status'] == 'rejected' and 'notice' in receipt
     )
+    external_reads = external_read_results(
+        json.loads(message.content) for message in tools
+        if message.status == 'success' and (message.name or '').startswith('external_')
+    )
     names = {message.name for message in tools}
     if names & {'read_cad', 'create_cad', 'edit_cad_text'}:
         notices.append(CAD_NOTICE)
@@ -52,18 +57,22 @@ def execution_summary(state):
         'sources': state.get('sources', []),
         'web_sources': state.get('web_sources', []),
         'notices': notices,
-        'read_results': [*cad_read_results(receipts['read_cad']), *eip_read_results(receipts['eip_read_attachment'])],
+        'read_results': [*cad_read_results(receipts['read_cad']), *eip_read_results(receipts['eip_read_attachment']), *external_reads],
         'tool_feedback': [{'tool': m.name, 'message': m.content} for m in tools if m.status == 'error'],
         'model_calls': [
-            {'step': m.response_metadata['model_step'], 'agent': m.name, 'usage': m.usage_metadata or {}}
+            {
+                'step': m.response_metadata['model_step'], 'agent': m.name, 'usage': m.usage_metadata or {},
+                'latency_seconds': m.response_metadata.get('latency_seconds'),
+                'model': m.response_metadata.get('model_name'),
+            }
             for m in model_messages if 'model_step' in m.response_metadata
         ],
     }
     for report in reports:
         for key in ('notices', 'read_results', 'tool_feedback', 'model_calls'):
-            result[key].extend(report[key])
-        result['sources'] = merge_sources(result['sources'], report['sources'])
-        result['web_sources'] = merge_web_sources(result['web_sources'], report['web_sources'])
+            result[key].extend(report.get(key, []))
+        result['sources'] = merge_sources(result['sources'], report.get('sources', []))
+        result['web_sources'] = merge_web_sources(result['web_sources'], report.get('web_sources', []))
     return result
 
 
@@ -75,11 +84,12 @@ def finish_run(settings, store, owner, job, snapshot, limit, *, failure=None):
     # carries the public evidence projection, persisted by native interrupt.
     reports = {**state.get('reports', {}), **{i['delegation_id']: i['report'] for i in interrupts}}
     summary = execution_summary({**state, 'reports': reports})
-    files = store.files(owner, job)
+    files = store.deliverable_files(owner, job)
     reviews = review_evidence(state)
     reviewed = {(item['id'], item['sha256']) for item in reviews}
     unreviewed = [f['id'] for f in files if (f['id'], f['sha256']) not in reviewed]
-    if settings.require_artifact_review and unreviewed and not interrupts and failure is None:
+    incomplete = completion and completion['outcome'] != 'completed'
+    if settings.require_artifact_review and unreviewed and not interrupts and failure is None and not incomplete:
         raise ValueError('產出尚未取得獨立審核的實際讀取回條。')
     answer = state['messages'][-1].text
     if completion:
@@ -109,7 +119,11 @@ def finish_run(settings, store, owner, job, snapshot, limit, *, failure=None):
         'usage': {key: usage[key] for key in ('input_tokens', 'output_tokens')},
         'model_steps': used,
         'resumable': bool(snapshot.next),
-        'framework': 'langgraph', 'architecture': 'multi_agent', 'graph_version': GRAPH_VERSION,
+        'framework': 'langgraph', 'architecture': 'single_agent' if settings.orchestration_mode == 'chat' else 'multi_agent', 'graph_version': GRAPH_VERSION,
+        'orchestration_mode': settings.orchestration_mode,
+        'office_execution_mode': settings.office_execution_mode,
+        'model_calls': calls,
+        'delivery_validation': store.validations(owner, job),
         'context_mode': 'per_delegation',
         'completion_protocol': 'typed_tool' if settings.structured_completion else 'text',
         'capabilities': capability_catalog(),
@@ -121,7 +135,12 @@ def finish_run(settings, store, owner, job, snapshot, limit, *, failure=None):
         },
         'agent_visits': [call['agent'] for call in calls],
         'delegations': [
-            {'id': call['id'], 'agent': reports[call['id']]['agent'], 'status': reports[call['id']]['status']}
+            {
+                'id': call['id'], 'agent': reports[call['id']]['agent'], 'status': reports[call['id']]['status'],
+                'resolves_assignments': reports[call['id']].get('resolves_assignments', []),
+                'revises_assignments': reports[call['id']].get('revises_assignments', []),
+                'work_key': reports[call['id']].get('work_key'), 'outputs': reports[call['id']].get('outputs', []),
+            }
             for message in state['messages'] if isinstance(message, AIMessage)
             for call in message.tool_calls if call['id'] in reports
         ],

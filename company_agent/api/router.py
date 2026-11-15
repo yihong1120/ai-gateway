@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import mimetypes
 import os
 import uuid
-from contextlib import asynccontextmanager
 from importlib.resources import files
 from urllib.parse import quote
 
@@ -18,31 +16,19 @@ from fastapi.responses import Response
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
+from examples.shared.runtime.browser import data
 from company_agent.api.http import active
 from company_agent.api.http import PrivateRoute
 from company_agent.api.identity import router as identity_router
 from company_agent.api.service import configured_service
 from company_agent.api.service import service
-from company_agent.runtime.context import verified_user
+from company_agent.api.lifespan import ServiceLifespan
+from examples.shared.runtime.jobs import JobServiceMiddleware
+from examples.identity.adapters.webui import verified_user
 from company_agent.runtime.models import close_model
 
 router = APIRouter(route_class=PrivateRoute)
 router.include_router(identity_router)
-
-
-async def data(request):
-    expected = os.getenv('EIP_WEBUI_ORIGIN', str(request.base_url).rstrip('/'))
-    if request.headers.get('origin') != expected or request.headers.get('x-company-action') != '1':
-        raise HTTPException(403, '請從本站工作頁操作。')
-    payload = bytearray()
-    async for chunk in request.stream():
-        payload.extend(chunk)
-        if len(payload) > 16000:
-            raise HTTPException(413, '請求過大。')
-    value = json.loads(payload)
-    if not isinstance(value, dict):
-        raise ValueError()
-    return value
 
 
 @router.get('/agents')
@@ -113,7 +99,7 @@ async def eip_document_attachment(job: str, handle: str, index: int, user=Depend
 
 @router.get('/agents/jobs')
 async def jobs(user=Depends(active)):
-    return {'jobs': await asyncio.to_thread(service().queue.list, user.id)}
+    return {'jobs': await service()._io(service().list, user.id)}
 
 
 @router.post('/agents/calendar/preview')
@@ -147,42 +133,48 @@ async def nas_status(user=Depends(active)):
     configured = bool(os.getenv('COMPANY_AGENT_NAS_URL'))
     if configured:
         endpoint()
-    return {**NASVault(configured_service().queue.store).status(user.id), 'configured': configured}
+    vault = NASVault(configured_service().queue.store)
+    return {**vault.status(user.id), 'bindings': await asyncio.to_thread(vault.bindings, user.id), 'configured': configured}
 
 
 @router.post('/agents/nas/bind')
 async def nas_bind(request: Request, user=Depends(active)):
     value = await data(request)
-    if set(value) != {'account', 'password', 'consent'} or value['consent'] is not True:
+    if not {'account', 'password', 'consent'} <= set(value) or set(value) - {'account', 'password', 'consent', 'binding_id', 'label'} or value['consent'] is not True:
         raise ValueError('請確認個人帳號、加密保存及所需文件雲端分析的同意事項。')
     from company_agent.services.files.nas import NASVault
 
     vault = NASVault(configured_service().queue.store)
-    result = await asyncio.to_thread(vault.bind, user.id, value['account'], value['password'])
+    result = await asyncio.to_thread(vault.bind, user.id, value['account'], value['password'],
+                                     binding_id=value.get('binding_id'), label=value.get('label'))
     vault.store.audit(user.id, None, 'nas_bind', 'done')
     return result
 
 
 @router.post('/agents/nas/unlink')
 async def nas_unlink(request: Request, user=Depends(active)):
-    if await data(request) != {}:
-        raise ValueError('解除綁定不接受其他身分或參數。')
+    value = await data(request)
+    if set(value) - {'binding_id'}:
+        raise ValueError('解除綁定僅接受本人連線識別碼。')
     from company_agent.services.files.nas import NASVault
 
     vault = NASVault(configured_service().queue.store)
-    await asyncio.to_thread(vault.unlink, user.id)
+    await asyncio.to_thread(vault.unlink, user.id, value.get('binding_id'))
     vault.store.audit(user.id, None, 'nas_unlink', 'done')
-    return vault.status(user.id)
+    return {**vault.status(user.id), 'bindings': await asyncio.to_thread(vault.bindings, user.id)}
 
 
 @router.post('/agents/nas/test')
 async def nas_test(request: Request, user=Depends(active)):
-    if await data(request) != {}:
-        raise ValueError('測試連線不接受身分或連線參數。')
+    value = await data(request)
+    if set(value) - {'binding_id'}:
+        raise ValueError('測試連線僅接受本人連線識別碼。')
     from company_agent.services.files.nas import NASVault
 
     vault = NASVault(configured_service().queue.store)
-    status = vault.status(user.id)
+    if not value.get('binding_id') and len(vault.bindings(user.id)) > 1:
+        raise ValueError('請選擇要測試的 NAS 連線。')
+    status = vault.status(user.id, value.get('binding_id'))
 
     return {
         **status,
@@ -197,7 +189,8 @@ async def job(key: str, user=Depends(active)):
 
 @router.get('/agents/artifacts/{key}')
 async def artifact(key: str, user=Depends(active)):
-    name, sha, payload = service().queue.store.read_artifact(user.id, key)
+    svc = service()
+    name, sha, payload = await svc._io(svc.queue.store.read_artifact, user.id, key)
     return Response(
         payload,
         media_type='application/octet-stream',
@@ -224,8 +217,8 @@ async def resume(key: str, request: Request, user=Depends(active)):
         raise ValueError('不接受额外身分或執行參數。')
     svc = service()
     subject = await billed_subject(user)
-    svc.queue.resume(user.id, subject, key, value.get('decision'))
-    return svc.queue.public(user.id, key)
+    await svc._io(svc.queue.resume, user.id, subject, key, value.get('decision'))
+    return await svc._io(svc.result, user.id, key)
 
 
 @router.post('/agents/jobs/{key}/followup')
@@ -235,14 +228,14 @@ async def followup(key: str, request: Request, user=Depends(active)):
         raise ValueError('接續修改欄位不符。')
     request_id = str(uuid.UUID(str(value['request_id'])))
     svc = service()
-    old = svc.queue.get(user.id, key)
+    old = await svc._io(svc.queue.get, user.id, key)
     if old['kind'] != 'company':
         raise ValueError('請回公文聊天另送新訊息；未重播既有公文工作。')
     subject = await billed_subject(user)
-    new = svc.queue.submit(
+    new = await svc._io(svc.queue.submit,
         user.id, subject, old['chat'], request_id, value['instruction'], [], [key],
     )
-    return svc.queue.public(user.id, new)
+    return await svc._io(svc.result, user.id, new)
 
 
 async def billed_subject(user):
@@ -253,27 +246,14 @@ async def billed_subject(user):
         await close_model(model)
 
 
-class ServiceLifespan:
-    def __init__(self, original):
-        self.original = original
-
-    @asynccontextmanager
-    async def run(self, app):
-        async with self.original(app):
-            svc = service()
-            svc.task = asyncio.create_task(svc.loop())
-            try:
-                yield
-            finally:
-                svc.task.cancel()
-                await asyncio.wait({svc.task})
-                if not svc.task.cancelled():
-                    svc.task.result()
-
 
 def install(app):
-    app.router.lifespan_context = ServiceLifespan(app.router.lifespan_context).run
-    app.router.routes[0:0] = router.routes
+    from examples.shared.runtime.installation import install_once
+    with install_once(app, 'company_agent_installed') as installing:
+        if installing:
+            app.add_middleware(JobServiceMiddleware, owner=app)
+            app.router.lifespan_context = ServiceLifespan(app.router.lifespan_context).run
+            app.router.routes[0:0] = router.routes
 
 
 def read_nas_shares(vault, owner, revision):
@@ -286,8 +266,9 @@ async def capacity(user=Depends(active)):
     """Content-free operational counters; administrators only."""
     if user.role != 'admin':
         raise HTTPException(403, '需要管理員權限。')
-    from official_document_workflow.infrastructure import concurrency as limits
-    from official_document_workflow.infrastructure.storage.state import STATE
+    from examples.shared.runtime import concurrency as limits
+    from examples.official_document_workflow.runtime import current_resources
+    state = current_resources().state
     current = configured_service()
 
     def queued():
@@ -300,6 +281,7 @@ async def capacity(user=Depends(active)):
             'waiting': waiting.get('company', 0),
             'max_pending': current.queue.max_pending,
             'max_pending_per_user': current.queue.max_per_user,
+            'mutation_locks': current.queue.store.lock_metrics(),
         },
         'documents': {
             'limit': limits.DOCUMENTS.limit, 'active': len(limits.DOCUMENTS.active),
@@ -308,10 +290,10 @@ async def capacity(user=Depends(active)):
             'resource_waiting': len(limits.DOCUMENTS.waiting),
         },
         'eip': {
-            'limit': STATE.processing.limit, 'active': len(STATE.processing.active),
-            'waiting': len(STATE.processing.waiting),
-            'manual_tasks': sum(not task.done() for task in STATE.tasks),
-            'automatic_accounts': len(STATE.automatic_tasks),
+            'limit': state.processing.limit, 'active': len(state.processing.active),
+            'waiting': len(state.processing.waiting),
+            'manual_tasks': sum(not task.done() for task in state.tasks),
+            'automatic_accounts': len(state.automatic_tasks),
         },
         'models': {'limit': limits.MODEL_LIMIT, 'active': limits.MODEL_LIMIT - limits.MODELS._value},
         'ocr': {'limit': limits.OCR_LIMIT, 'active': limits.OCR_LIMIT - limits.OCR._value},

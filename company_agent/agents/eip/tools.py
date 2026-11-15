@@ -30,33 +30,21 @@ async def emit_progress(event, *, runtime, name):
 async def eip_tool(runtime: ToolRuntime, *, tool_name, input_schema, **kwargs):
     name, schema = tool_name, input_schema
     runtime.stream_writer({'stage': 'tool', 'tool': name})
+    args = schema.model_validate(kwargs)
     if name == 'eip_read_attachment':
         from company_agent.services.eip.reading import read_attachment
 
-        result = await read_attachment(
-            runtime.context, schema.model_validate(kwargs),
-        )
+        result = await read_attachment(runtime.context, args)
     elif name == 'eip_process_attachments':
         from company_agent.services.eip.processing import process
 
-        result = await process(
-            runtime.context,
-            schema.model_validate(kwargs),
-            emitter=partial(emit_progress, runtime=runtime, name=name),
-        )
+        result = await process(runtime.context, args, emitter=partial(emit_progress, runtime=runtime, name=name))
     elif name == 'eip_calendar_prepare':
         from company_agent.services.eip.drafts import prepare
 
-        result = await prepare(
-            runtime.context, schema.model_validate(kwargs),
-        )
+        result = await prepare(runtime.context, args)
     else:
-        result = await client.query(
-            runtime.context,
-            name,
-            schema.model_validate(kwargs),
-            runtime.tool_call_id,
-        )
+        result = await client.query(runtime.context, name, args, runtime.tool_call_id)
     runtime.context.store.audit(
         runtime.context.owner, runtime.context.job, name, 'done',
     )

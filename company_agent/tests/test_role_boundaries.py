@@ -46,7 +46,11 @@ class RolePromptTests(unittest.IsolatedAsyncioTestCase):
             enable_web_research=True,
         )
         return SimpleNamespace(
-            settings=settings, store=SimpleNamespace(files=Mock(return_value=[])),
+            settings=settings, store=SimpleNamespace(
+                files=Mock(return_value=[]), delivery_plan=Mock(
+                    return_value=None,
+                ), evidence=Mock(return_value=[]),
+            ),
             owner='alice', job='job',
         )
 

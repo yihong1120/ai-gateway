@@ -7,6 +7,7 @@ from company_agent.runtime.tools import injected_tool
 from company_agent.runtime.tools import tool_receipt
 from company_agent.services.office.revision import revise as revise_artifact
 from company_agent.services.office.schemas import EditArtifact
+from company_agent.services.files.errors import input_error_feedback
 
 
 async def revise(runtime, **kwargs):
@@ -28,5 +29,6 @@ def artifact_edit_tool():
         name='edit_artifact_text_run',
         schema=EditArtifact,
         input_name='EditArtifactInput',
-        description='修訂本工作已產生的 DOCX/PPTX 草稿；先 inspect_artifact 取得 SHA256 及精確 run。只改一個 run，另存不同檔名，新版須審核。不用來源 root/path，不覆寫或操作其他工作。',
+        handle_tool_error=input_error_feedback,
+        description='修訂本工作已產生的 DOCX/PPTX 草稿；先 inspect_artifact 取得 SHA256 及精確 run。只改一個 run。沿用相同檔名時建立新ID版本並原子取代舊草稿，舊版保留稽核；不同核准檔名則保留兩版交付。新版須重新審核，不覆寫來源或其他工作。',
     )

@@ -218,7 +218,7 @@ class EIPToolTests(unittest.IsolatedAsyncioTestCase, Fixture):
         async def session(owner, *args):
             self.assertEqual(owner, 'alice')
             yield SimpleNamespace(read=read)
-        with patch('company_agent.services.eip.client.binding', new=AsyncMock(return_value=object())), patch('official_document_workflow.infrastructure.eip.sessions.manual_session', session):
+        with patch('company_agent.services.eip.client.binding', new=AsyncMock(return_value=object())), patch('examples.official_document_workflow.infrastructure.eip.sessions.manual_session', session):
             found = await query(ctx, 'eip_query', EIPQuery(folder='sent', start='2026-09-01', end='2026-09-06'), 'q')
             document = found['documents'][0]
             handle = document['handle']
@@ -267,7 +267,7 @@ class EIPToolTests(unittest.IsolatedAsyncioTestCase, Fixture):
     async def test_binding_checks_real_owner_and_revision(self):
         from company_agent.services.eip.client import binding
         db = SimpleNamespace(account=lambda owner: {'generation': 'different'})
-        with patch('company_agent.runtime.context.verified_user', new=AsyncMock()) as verified, patch('official_document_workflow.application.automation.store', return_value=db):
+        with patch('examples.identity.adapters.webui.verified_user', new=AsyncMock()) as verified, patch('examples.official_document_workflow.infrastructure.storage.automation_store.store', return_value=db):
             with self.assertRaises(ValueError):
                 await binding(Context('alice', self.job, self.config, self.store))
             verified.assert_awaited_once_with('alice')

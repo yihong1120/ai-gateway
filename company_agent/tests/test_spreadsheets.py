@@ -19,6 +19,7 @@ from company_agent.config import Settings
 from company_agent.runtime.storage import Store
 from company_agent.services.files.operations import ToolBox
 from company_agent.services.files.operations import worker
+from company_agent.services.files.errors import RecoverableToolError
 from company_agent.services.files.tools import FILE_TOOL_SPECS
 from company_agent.services.office.documents import analyze_spreadsheet
 from company_agent.services.office.documents import create_spreadsheet
@@ -138,7 +139,8 @@ class SpreadsheetTests(unittest.TestCase):
             ('xl/worksheets/sheet1.xml', b'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="CW1"/></row></sheetData></worksheet>'),
         ]
         for name, body in malicious:
-            with self.subTest(part=name), self.assertRaises((ValueError, CalledProcessError)):
+            expected = RecoverableToolError if b'row r="10001"' in body else (ValueError, CalledProcessError)
+            with self.subTest(part=name), self.assertRaises(expected):
                 worker('read_spreadsheet', data=replace_part(data, name, body))
         out = io.BytesIO()
         with zipfile.ZipFile(out, 'w', compression=zipfile.ZIP_DEFLATED) as z:

@@ -7,7 +7,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from company_agent.services.files import block_page
 from company_agent.services.files.access import relative_parts
+from company_agent.services.files.errors import RecoverableToolError
 from company_agent.services.office.documents import SUPPORTED
 from company_agent.services.office.documents import TEXT_TYPES
 from company_agent.services.office.schemas import ReadSpreadsheet
@@ -32,6 +34,12 @@ def worker(operation, **args):
     if len(run.stdout) > 40_000_000:
         raise ValueError('文件解析回應超過資源上限。')
     result = json.loads(run.stdout)
+    if 'input_error' in result:
+        error = result['input_error']
+        raise RecoverableToolError(
+            error['code'], error['message'],
+            **{k: v for k, v in error.items() if k not in {'code', 'message', 'executed', 'retryable_argument_error'}},
+        )
     return (
         base64.b64decode(result['binary'], validate=True)
         if 'binary' in result
@@ -100,14 +108,10 @@ class ToolBox:
             self.access.allowed(args.root)
             self.store.finish_tool(self.owner, self.job, key, result)
         source = self._remember_source(args, sha)
-        blocks = result['blocks']
-        end = min(len(blocks), args.start + args.limit)
         return {
             **source,
             **{k: v for k, v in result.items() if k != 'blocks'},
-            'blocks': blocks[args.start: end],
-            'total_blocks': len(blocks),
-            'next_start': end if end < len(blocks) else None,
+            **block_page(result['blocks'], args.start, args.limit),
         }
 
     def create_spreadsheet_report(self, args):
@@ -304,7 +308,11 @@ class ToolBox:
         if Path(args.path).suffix.lower() != '.xlsx':
             raise ValueError('試算表工具僅支援 XLSX；不接受 XLS、XLSM 或 CSV。')
         data, sha = self.access.read(args.root, args.path)
-        result = worker(operation, data=data, **args.model_dump(exclude={'root', 'path'}))
+        try:
+            result = worker(operation, data=data, **args.model_dump(exclude={'root', 'path'}))
+        except RecoverableToolError:
+            self.access.allowed(args.root)
+            raise
         source = self._remember_source(args, sha)
         return {**source, **result}
 

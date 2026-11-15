@@ -49,6 +49,6 @@
 - 沒有清除正式工作紀錄、改動 EIP 行程、重跑公文或重啟正式 WebUI 服務。
   現有服務程序若已載入舊模組，需要另外安排無進行中工作的重啟，才會載入本次重構。
 - 舊程式快照與 wheel 暫存於 `/tmp/company-agent-refactor-0UkbFp/`，不是長期備份。
-- 未處理無關的既有修改，包括 `config.yaml` 原有行尾空白。
+- 未處理無關的既有修改，包括 `examples/litellm/config.yaml` 原有行尾空白。
 
 維護位置與相容性原則見 [公司助理 README](../company_agent/README.md)。

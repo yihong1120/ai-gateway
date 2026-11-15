@@ -1,0 +1,60 @@
+/* Latest status first; native history expands below it on demand. */
+[data-company-status-history] > .company-status-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.25rem 0;
+  text-align: start;
+  border-radius: 0.375rem;
+}
+[data-company-status-history] > .company-status-toggle > div {
+  flex: 1;
+  min-width: 0;
+}
+[data-company-status-history] > .company-status-toggle::after {
+  content: '';
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-inline-end: 0.35rem;
+  flex-shrink: 0;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  opacity: 0.6;
+  transform: rotate(45deg);
+  transition: transform 150ms ease;
+}
+[data-company-status-history] > .company-status-toggle[aria-expanded='true']::after {
+  transform: rotate(225deg);
+}
+[data-company-status-completed='true'] > .company-status-toggle .status-description {
+  display: none;
+}
+[data-company-status-completed='true'] > .company-status-toggle::before {
+  content: '處理過程';
+  font-size: 0.8125rem;
+  opacity: 0.65;
+}
+[data-company-status-history] > .company-status-toggle[aria-expanded='true'] .line-clamp-1 {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+[data-company-status-history] > .company-status-toggle:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+[data-company-status-duplicate], [data-company-redundant-status] {
+  display: none !important;
+}
+[data-company-history-tail] > div:first-child > div:nth-child(2) {
+  display: none;
+}
+[data-company-history-empty='true']::after {
+  content: '尚無較早的處理狀態';
+  padding: 0.4rem 0.5rem;
+  font-size: 0.8125rem;
+  opacity: 0.6;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-company-status-history] > .company-status-toggle::after { transition: none; }
+}

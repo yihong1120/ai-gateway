@@ -154,7 +154,7 @@ class CompactionTests(unittest.IsolatedAsyncioTestCase, Fixture):
     async def test_web_identity_rechecked_before_summary_http(self):
         web = WebBilledModel(self.model.owner, self.model.subject, self.model.client)
         ctx = Context('alice', self.job, self.config, self.store, web)
-        with patch('company_agent.runtime.context.verified_user', AsyncMock(return_value=verified('changed'))):
+        with patch('examples.identity.adapters.webui.verified_user', AsyncMock(return_value=verified('changed'))):
             with self.assertRaisesRegex(ValueError, '計費身分'):
                 await self.compact(transcript(2), ctx)
         self.assertFalse(self.requests)

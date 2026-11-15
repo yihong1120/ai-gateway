@@ -131,7 +131,7 @@ asyncio.run(main())
         pending = await self.pending()
         self.config.roots[0].writers = []
         result = await self.failed_job(DocumentAgent(self.config, self.final_model()).resume('alice', pending['job_id'], self.decision(pending)), ValueError)
-        self.assertEqual(result['status'], 'awaiting_approval', result)
+        self.assertEqual(result['status'], 'error', result)
         self.assertFalse((self.root/'out.txt').exists())
 
     async def test_checkpoint_and_pending_writes_are_encrypted(self):
@@ -196,7 +196,7 @@ asyncio.run(main())
         )
         model = self.final_model()
         resumed = await self.failed_job(DocumentAgent(self.config, model).resume('alice', result['job_id']), ModelCallLimitExceededError)
-        self.assertEqual(resumed['status'], 'running', resumed)
+        self.assertEqual(resumed['status'], 'error', resumed)
         self.assertFalse(model.messages)
         self.assertEqual(self.store.attempts(resumed['job_id']), 2)
 
@@ -212,7 +212,7 @@ asyncio.run(main())
         self.config.roots[0].model_access = False
         model = self.final_model()
         resumed = await self.failed_job(DocumentAgent(self.config, model).resume('alice', result['job_id']), ValueError)
-        self.assertEqual(resumed['status'], 'running')
+        self.assertEqual(resumed['status'], 'error')
         self.assertFalse(model.messages)
 
     async def test_edit_uses_checkpoint_source_version_and_rechecks_current_file(self):
@@ -242,7 +242,7 @@ asyncio.run(main())
                     ]),
                 ).resume('alice', stopped['job_id'])
                 resumed = await self.failed_job(operation, ValueError) if changed else await operation
-                self.assertEqual(resumed['status'], 'running' if changed else 'done', resumed)
+                self.assertEqual(resumed['status'], 'error' if changed else 'done', resumed)
                 self.assertEqual(len(resumed['files']), 0 if changed else 1)
 
     async def test_native_tool_runtime_overrides_model_supplied_identity(self):

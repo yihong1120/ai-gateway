@@ -35,7 +35,8 @@ class SourceDiscoveryTests(NASFixture):
         calls = self.dsm.calls[before:]
         self.assertEqual(sum(c['method'] == 'login' for c in calls), 1)
         self.assertEqual(sum(c['method'] == 'list_share' for c in calls), 1)
-        self.assertEqual([r for r in found if r.get('source') == 'NAS'], roots)
+        self.assertEqual([r for r in found if r.get('source') == 'NAS'],
+                         [{**r, 'label': 'alice / ' + r['label'], 'connection': 'alice'} for r in roots])
         self.assertFalse(self.dsm.sessions)
 
     def test_next_discovery_rechecks_share_revocation(self):

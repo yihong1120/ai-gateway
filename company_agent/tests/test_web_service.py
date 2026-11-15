@@ -8,6 +8,7 @@ import sys
 import types
 import unittest
 from unittest.mock import AsyncMock
+from unittest.mock import Mock
 from unittest.mock import patch
 
 import httpx
@@ -15,6 +16,7 @@ from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi import Request
 
+from examples.shared.runtime.jobs import application_jobs
 from company_agent.api.pipe import current_turn
 from company_agent.api.pipe import run_pipe
 from company_agent.api.service import Service
@@ -74,7 +76,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase, Fixture):
             self.assertEqual(self.submit(request, instruction='查同一筆行程', inputs=[('source.txt', b'one')]), first)
         self.assertEqual(len(self.queue.list('alice')), 1)
         self.assertEqual(self.queue.get('alice', first)['request_aliases'], ['regenerate-queued', 'regenerate-running'])
-        self.assertEqual(len(list(self.queue.sources.iterdir())), 1)
+        self.assertEqual(len([p for p in self.queue.sources.iterdir() if p.name != '.pending']), 1)
         with self.assertRaises(ValueError):
             self.submit('regenerate-running', instruction='改成另外一個問題')
         for status in ['done', 'error', 'interrupted', 'cancelled']:
@@ -177,7 +179,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase, Fixture):
             requests.append(value)
             return script.pop(0)(value)
 
-        def factory(user): return gateway_for_verified_user(
+        def factory(user, model_name=None): return gateway_for_verified_user(
             user, 'https://gateway.example/v1', 'key', 'model', httpx.MockTransport(handler),
         )
 
@@ -208,15 +210,30 @@ class QueueTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertEqual((self.queue.sources/key/(result['files'][0]['id']+'.txt')).read_bytes(), b'actual content')
         self.assertIn('history_1', requests[-1]['messages'][-1]['content'])
 
+    async def test_effective_job_configuration_is_audited_before_execution(self):
+        model = types.SimpleNamespace(subject='oidc-alice')
+        factory = Mock(return_value=model)
+        key = self.submit()
+        engine_job = self.store.job('alice')
+        svc = Service(self.queue, AsyncMock(return_value=verified()), factory, lambda row: self.config)
+        with patch('company_agent.api.service.DocumentAgent') as agent, patch('company_agent.api.service.close_model', AsyncMock()):
+            agent.return_value.run = AsyncMock(return_value={'job_id': engine_job, 'status': 'done'})
+            await svc.execute(self.queue.claim())
+        with self.store.db() as db:
+            revision = db.execute("SELECT status FROM audit WHERE job=%s AND action='configuration'", (key,)).fetchone()[0]
+        import hashlib
+        self.assertEqual(revision, hashlib.sha256(self.config.model_dump_json().encode()).hexdigest())
+        factory.assert_called_once_with(verified(), self.config.model_name)
+
     async def test_identity_changed_before_claim_does_not_call_model(self):
         calls = []
 
-        def factory(user): return gateway_for_verified_user(
+        def factory(user, model_name=None): return gateway_for_verified_user(
             user, 'https://gateway.example/v1',
             'key', 'model', httpx.MockTransport(lambda r: calls.append(r)),
         )
         key = self.submit()
-        svc = Service(self.queue, AsyncMock(return_value=verified('changed')), factory, lambda row: None)
+        svc = Service(self.queue, AsyncMock(return_value=verified('changed')), factory, lambda row: self.config)
         with self.assertRaises(ValueError):
             await svc.execute(self.queue.claim())
         self.assertEqual(self.queue.public('alice', key)['status'], 'running')
@@ -253,7 +270,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase, Fixture):
             requests.append(body)
             return scripts.pop(0)(body)
 
-        def factory(user): return gateway_for_verified_user(
+        def factory(user, model_name=None): return gateway_for_verified_user(
             user, 'https://gateway.example/v1', 'key', 'model', httpx.MockTransport(handler),
         )
 
@@ -299,7 +316,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase, Fixture):
         failure = RuntimeError('upstream failure')
         key = self.submit()
         model = types.SimpleNamespace(subject='oidc-alice')
-        svc = Service(self.queue, AsyncMock(return_value=verified()), lambda _: model, lambda row: self.config)
+        svc = Service(self.queue, AsyncMock(return_value=verified()), lambda _, model_name=None: model, lambda row: self.config)
         with patch('company_agent.api.service.DocumentAgent') as Agent, patch('company_agent.api.service.close_model', new=AsyncMock()) as close:
             Agent.return_value.run = AsyncMock(side_effect=failure)
             with self.assertRaises(RuntimeError) as caught:
@@ -323,7 +340,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase, Fixture):
                 return httpx.Response(429, json={'error': {'message': 'PRIVATE original 429'}})
             return response('complete_job', {'outcome': 'completed', 'summary': '新工作完成', 'artifact_ids': []})
 
-        def factory(user):
+        def factory(user, model_name=None):
             model = gateway_for_verified_user(
                 user, 'https://gateway.example/v1',
                 'key', 'model', httpx.MockTransport(handler),
@@ -342,7 +359,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase, Fixture):
         # Both a new turn in this chat and another user's job must survive the 429.
         same_user = self.submit('second')
         other_user = self.queue.submit('bob', 'oidc-bob', 'other', 'first', '簡單回覆', [])
-        with patch.object(service_module, '_service', svc):
+        with application_jobs(svc):
             svc.task = asyncio.create_task(svc.loop())
             try:
                 async with asyncio.timeout(20):
@@ -436,7 +453,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertTrue(stopped.is_set())
         self.assertEqual(self.queue.get('alice', active)['status'], 'running')
         self.assertEqual(self.queue.get('alice', queued)['status'], 'queued')
-        self.assertFalse(svc.failures)
+        self.assertFalse(hasattr(svc, 'failures'))
         with self.queue.store.mutex('worker'):
             pass
 
@@ -474,7 +491,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase, Fixture):
                     cleaned.set()
             return response('complete_job', {'outcome': 'completed', 'summary': '下一位完成', 'artifact_ids': []})
 
-        def factory(user):
+        def factory(user, model_name=None):
             model = gateway_for_verified_user(
                 user, 'https://gateway.example/v1',
                 'key', 'model', httpx.MockTransport(handler),
@@ -524,7 +541,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase, Fixture):
             self.assertEqual(svc.result('alice', active)['files'][0]['id'], artifact['id'])
             self.assertEqual(svc.result('bob', following)['answer'], '下一位完成')
             self.assertTrue(all(c.http_async_client.is_closed and c.http_client.is_closed for c in clients))
-            self.assertFalse(svc.failures)
+            self.assertFalse(hasattr(svc, 'failures'))
             self.assertFalse(svc.executions)
         finally:
             release.set()
@@ -554,6 +571,9 @@ class QueueTests(unittest.IsolatedAsyncioTestCase, Fixture):
 
 class RouterTests(unittest.IsolatedAsyncioTestCase, Fixture):
     async def asyncSetUp(self):
+        origin = patch.dict(os.environ, {'EIP_WEBUI_ORIGIN': 'https://testserver'})
+        origin.start()
+        self.addCleanup(origin.stop)
         self.queue = WorkQueue(self.private, self.base/'uploads')
 
         async def auth(request: Request):
@@ -607,8 +627,7 @@ class RouterTests(unittest.IsolatedAsyncioTestCase, Fixture):
         svc = Service(self.queue, None, None, None)
         self.router.service.return_value = svc
         failed = self.queue.submit('alice', 'oidc-alice', 'chat', 'failed', 'first', [])
-        self.queue.update(failed, status='error')
-        svc.failures[('alice', failed)] = RuntimeError('PRIVATE upstream failure')
+        self.queue.update(failed, status='error', error_code='execution_failed', progress='執行未完成')
         good = self.queue.submit('alice', 'oidc-alice', 'chat', 'good', 'second', [])
         engine = self.store.job('alice')
         artifact = self.store.artifact('alice', engine, 'result.txt', b'preserved')
@@ -617,7 +636,7 @@ class RouterTests(unittest.IsolatedAsyncioTestCase, Fixture):
         listing = await self.client.get('/agents/jobs', headers=headers)
         self.assertEqual(listing.status_code, 200)
         self.assertNotIn('PRIVATE', listing.text)
-        self.assertEqual((await self.client.get('/agents/jobs/' + failed, headers=headers)).status_code, 500)
+        self.assertEqual((await self.client.get('/agents/jobs/' + failed, headers=headers)).status_code, 200)
         result = await self.client.get('/agents/jobs/' + good, headers=headers)
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.json()['status'], 'done')
@@ -694,7 +713,7 @@ class RouterTests(unittest.IsolatedAsyncioTestCase, Fixture):
         current = types.SimpleNamespace(queue=self.queue, task=task)
         headers = {'x-test-user': 'alice', 'Origin': 'https://testserver', 'X-Company-Action': '1'}
         with (
-            patch.object(service_module, '_service', current),
+            application_jobs(current),
             patch.object(self.router, 'service', service_module.service),
             patch.object(self.router, 'configured_service', service_module.configured_service),
             patch.dict(
@@ -760,3 +779,38 @@ class RouterTests(unittest.IsolatedAsyncioTestCase, Fixture):
             self.assertFalse(dsm.sessions)
             self.assertEqual((await self.client.post('/agents/nas/unlink', json={}, headers=headers)).status_code, 200)
             self.assertFalse((await self.client.get('/agents/nas', headers=headers)).json()['bound'])
+
+
+    async def test_multiple_nas_api_lists_updates_tests_and_removes_only_owned_binding(self):
+        from company_agent.services.files.nas import NASClient
+        from company_agent.tests.test_nas import FakeDSM
+        dsm = FakeDSM()
+        def factory(*a):
+            return NASClient(*a, transport=httpx.MockTransport(dsm.handler))
+        headers = {'x-test-user': 'alice', 'Origin': 'https://testserver', 'X-Company-Action': '1'}
+        with patch.dict(os.environ, {'COMPANY_AGENT_NAS_URL': 'https://nas.example:5001', 'EIP_WEBUI_ORIGIN': 'https://testserver'}), patch('company_agent.services.files.nas.NASClient', factory):
+            one = (await self.client.post('/agents/nas/bind', json={'account': 'alice', 'password': 'alice-password', 'consent': True}, headers=headers)).json()
+            with self.store.db() as db:
+                db.execute('UPDATE nas_login_limits SET next_at=0')
+            response = await self.client.post('/agents/nas/bind', json={'account': 'team', 'password': 'team-password', 'consent': True, 'label': '工程部'}, headers=headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            two = response.json()
+            listed = await self.client.get('/agents/nas', headers=headers)
+            self.assertEqual(len(listed.json()['bindings']), 2)
+            self.assertNotIn('password', listed.text)
+            self.assertEqual(listed.headers['cache-control'], 'no-store')
+            for path in ('test', 'unlink'):
+                self.assertEqual((await self.client.post('/agents/nas/'+path, json={}, headers=headers)).status_code, 500)
+                count = len(dsm.calls)
+                foreign = await self.client.post('/agents/nas/'+path, json={'binding_id': one['binding_id']}, headers={**headers, 'x-test-user': 'bob'})
+                self.assertEqual(foreign.status_code, 500)
+                self.assertEqual(len(dsm.calls), count)
+            tested = await self.client.post('/agents/nas/test', json={'binding_id': two['binding_id']}, headers=headers)
+            self.assertEqual(tested.status_code, 200, tested.text)
+            self.assertEqual(tested.json()['revision'], two['revision'])
+            self.assertFalse(dsm.sessions)
+            no_csrf = await self.client.post('/agents/nas/unlink', json={'binding_id': two['binding_id']}, headers={'x-test-user': 'alice'})
+            self.assertEqual(no_csrf.status_code, 403)
+            removed = await self.client.post('/agents/nas/unlink', json={'binding_id': one['binding_id']}, headers=headers)
+            self.assertEqual(removed.status_code, 200, removed.text)
+            self.assertEqual([b['binding_id'] for b in removed.json()['bindings']], [two['binding_id']])

@@ -53,6 +53,7 @@ class DeploymentTests(unittest.IsolatedAsyncioTestCase):
             modules[name] = module
         self.enterContext(patch.dict('sys.modules', modules))
         self.enterContext(patch.dict('os.environ', {}))
+        self.enterContext(patch('company_agent.ops.deploy_webui.load_service'))
         self.enterContext(patch('company_agent.ops.deploy_webui.function_source', return_value='canonical source'))
         self.enterContext(redirect_stdout(StringIO()))
 

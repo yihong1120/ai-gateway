@@ -70,6 +70,22 @@ class QueueSnapshotTests(Fixture):
         with self.assertRaises(ValueError):
             self.queue.list('alice')
 
+    def test_superseded_draft_is_history_in_both_list_and_detail(self):
+        key, job, old = self.complete('alice', 'old')
+        new = self.store.artifact('alice', job, 'new.txt', b'correct')
+        self.store.supersede_artifact('alice', job, old['id'], old['sha256'], new['id'], new['sha256'])
+        detail = self.queue.public('alice', key)
+        self.assertEqual([f['id'] for f in detail['files']], [new['id']])
+        self.assertEqual([f['id'] for f in detail['artifact_history']], [old['id']])
+        self.assertEqual(detail['artifact_history'][0]['superseded_by'], new['id'])
+        self.assertEqual(detail, self.queue.list('alice')[0])
+
+    def test_office_policy_is_visible_without_guessing_legacy_work(self):
+        key, job, _ = self.complete('alice', 'office')
+        self.assertEqual(self.queue.public('alice', key)['office_execution_mode'], 'flexible')
+        self.store.finish('alice', job, 'done', {'office_execution_mode': 'specialist'})
+        self.assertEqual(self.queue.public('alice', key)['office_execution_mode'], 'specialist')
+
     def test_counting_authorizes_without_loading_results_or_artifacts(self):
         # Ownership and limits remain valid even before a result is serialized.
         with self.store.db() as db:

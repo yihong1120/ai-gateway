@@ -26,7 +26,8 @@ class FormatDispatchTests(Fixture):
         box = ToolBox(self.config, self.store, 'alice', self.job)
         value = box.read_spreadsheet(ReadSpreadsheet(root='project', path='scenario/source.xlsx', sheet='工程'))
         self.assertIn('工作表「'+value['sheet']+'」', SCENARIOS['data_to_document'])
-        with self.assertRaises(CalledProcessError):
+        from company_agent.services.files.errors import RecoverableToolError
+        with self.assertRaises(RecoverableToolError):
             box.read_spreadsheet(ReadSpreadsheet(root='project', path='scenario/source.xlsx', sheet='工程表'))
 
     def test_xlsx_direct_reader_pagination_scope_and_hash(self):

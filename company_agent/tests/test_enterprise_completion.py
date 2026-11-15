@@ -8,7 +8,6 @@ from unittest.mock import patch
 
 import httpx
 from langchain_core.messages import AIMessage
-from langchain_core.tools import ToolException
 
 from company_agent.runtime.execution import DocumentAgent
 from company_agent.runtime.models import close_model
@@ -48,7 +47,7 @@ class EnterpriseTests(unittest.IsolatedAsyncioTestCase, Fixture):
 
         def limit(messages): raise Limited('PRIVATE provider body must not reach user')
         result = await self.failed_job(self.run_model(coordinator=[limit]), Limited)
-        self.assertEqual(result['status'], 'running')
+        self.assertEqual(result['status'], 'error')
         self.assertEqual(self.native_error.status_code, 429)
         self.assertIn('PRIVATE', str(self.native_error))
         self.assertEqual(self.last_model.invocations, ['coordinator'])
@@ -93,7 +92,7 @@ class EnterpriseTests(unittest.IsolatedAsyncioTestCase, Fixture):
     async def test_no_free_text_or_empty_completion_no_retry(self):
         for content in ('', '   ', '已完成所有工作。'):
             result = await self.failed_job(self.run_model(coordinator=[AIMessage(content=content)]), ValueError)
-            self.assertEqual(result['status'], 'running', result)
+            self.assertEqual(result['status'], 'error', result)
             self.assertEqual(self.last_model.invocations, ['coordinator'])
             self.assertFalse(result['files'])
 
@@ -101,13 +100,13 @@ class EnterpriseTests(unittest.IsolatedAsyncioTestCase, Fixture):
         for summary in ('', '  ', '\t\n', '\u3000\u00a0'):
             with self.subTest(summary=repr(summary)):
                 result = await self.failed_job(self.run_model(coordinator=[finish(summary=summary)]), IndexError)
-                self.assertEqual(result['status'], 'running', result)
+                self.assertEqual(result['status'], 'error', result)
                 self.assertEqual(len(self.last_model.invocations), 2)
 
     async def test_unknown_artifact_completion_cannot_succeed(self):
-        result = await self.failed_job(self.run_model(coordinator=[finish(ids=['not-an-artifact']), finish(outcome='blocked', summary='產出無法驗證。')]), ToolException)
-        self.assertEqual(result['status'], 'running', result)
-        self.assertIn('非本工作產出', str(self.native_error))
+        result, _ = await self.run_model(coordinator=[finish(ids=['not-an-artifact']), finish(outcome='blocked', summary='產出無法驗證。')])
+        self.assertEqual(result['status'], 'blocked', result)
+        self.assertIn('非本工作產出', str(result['tool_feedback']))
         self.assertFalse(result['files'])
 
     async def test_native_batch_keeps_valid_private_draft_and_rejects_invalid_one(self):
@@ -118,7 +117,7 @@ class EnterpriseTests(unittest.IsolatedAsyncioTestCase, Fixture):
             ],
         )
         result = await self.failed_job(self.run_model(coordinator=[call('delegate_document', {'task': '建立草稿'}, 'd')], document=[batch]), IndexError)
-        self.assertEqual(result['status'], 'running', result)
+        self.assertEqual(result['status'], 'error', result)
         self.assertEqual([f['name'] for f in result['files']], ['ok.txt'])
 
     async def test_batched_completion_does_not_bypass_final_artifact_validation(self):
@@ -153,10 +152,13 @@ class EnterpriseTests(unittest.IsolatedAsyncioTestCase, Fixture):
             ],
         )
         with patch.object(Store, 'artifact', new=record_created), patch.object(completion, 'complete', new=after_draft):
-            result = await self.failed_job(self.run_model(coordinator=[call('delegate_document', {'task': '建立草稿'}, 'd'), finish()], document=[batch]), ToolException)
-        self.assertEqual(result['status'], 'running', result)
+            result, _ = await self.run_model(
+                coordinator=[call('delegate_document', {'task': '建立草稿'}, 'd'), finish(outcome='blocked')],
+                document=[batch, finish('complete_assignment', outcome='blocked')],
+            )
+        self.assertEqual(result['status'], 'blocked', result)
         self.assertEqual([f['name'] for f in result['files']], ['ok.txt'])
-        self.assertIn('完成工具須單獨', str(self.native_error))
+        self.assertIn('完成工具須單獨', str(result['tool_feedback']))
 
     async def test_native_injection_overrides_supplied_runtime(self):
         request = finish()
@@ -165,17 +167,15 @@ class EnterpriseTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertEqual(result['status'], 'done', result)
 
     async def test_blocked_child_cannot_be_claimed_complete(self):
-        result = await self.failed_job(
-            self.run_model(
+        result, _ = await self.run_model(
                 coordinator=[
                     call('delegate_document', {'task': '建立草稿'}, 'd'),
                     finish(), finish(outcome='blocked', summary='子任務缺來源。'),
                 ],
                 document=[finish('complete_assignment', 'needs_input', summary='缺少來源。')],
-            ), ToolException,
         )
         self.assertNotEqual(result['status'], 'done', result)
-        self.assertIn('尚有子任務未完成', str(self.native_error))
+        self.assertIn('尚有子任務未完成', str(result['tool_feedback']))
 
     async def test_valid_create_review_and_typed_completion(self):
         ids = []
@@ -206,23 +206,20 @@ class EnterpriseTests(unittest.IsolatedAsyncioTestCase, Fixture):
         def document_done(messages):
             ids.append(json.loads(messages[-1].content)['id'])
             return finish('complete_assignment', ids=ids)
-        result = await self.failed_job(
-            self.run_model(
+        result, _ = await self.run_model(
                 coordinator=[
                     call('delegate_document', {'task': '建立草稿'}, 'd'), call('delegate_reviewer', {'task': '核對草稿'}, 'r'),
                     lambda _:finish(ids=ids), lambda _:finish(outcome='blocked', ids=ids, summary='尚未讀取核對。'),
                 ],
                 document=[call('create_text', {'name': 'ok.txt', 'content': 'verified'}, 'create'), document_done],
                 reviewer=[finish('complete_assignment', summary='已核對。')],
-            ), ToolException,
         )
-        self.assertEqual(result['status'], 'running', result)
+        self.assertEqual(result['status'], 'blocked', result)
         self.assertEqual(len(result['files']), 1)
 
     async def test_all_outputs_must_be_disclosed(self):
         self.config.require_artifact_review = False
-        result = await self.failed_job(
-            self.run_model(
+        result, _ = await self.run_model(
                 coordinator=[call('delegate_document', {'task': '建立草稿'}, 'd'), finish(), finish(outcome='blocked')],
                 document=[
                     call(
@@ -230,10 +227,9 @@ class EnterpriseTests(unittest.IsolatedAsyncioTestCase, Fixture):
                         'create',
                     ), finish('complete_assignment'),
                 ],
-            ), ToolException,
         )
-        self.assertEqual(result['status'], 'running', result)
-        self.assertIn('完成清單未列出', str(self.native_error))
+        self.assertEqual(result['status'], 'blocked', result)
+        self.assertIn('完成清單未列出', str(result['tool_feedback']))
         self.assertEqual(len(result['files']), 1)
 
     async def test_rejected_completion_remains_unfinished_when_model_fails(self):
@@ -247,13 +243,13 @@ class EnterpriseTests(unittest.IsolatedAsyncioTestCase, Fixture):
                         'create',
                     ), finish('complete_assignment'),
                 ],
-            ), ToolException,
+            ), IndexError,
         )
-        self.assertEqual(result['status'], 'running', result)
-        self.assertIn('完成清單未列出', str(self.native_error))
-        self.assertEqual(self.last_model.invocations.count('coordinator'), 2)
+        self.assertEqual(result['status'], 'error', result)
+        self.assertTrue(any('完成清單未列出' in m.content for m in result['messages']))
+        self.assertEqual(self.last_model.invocations.count('coordinator'), 4)
 
-    async def test_invalid_completion_stops_before_correction(self):
+    async def test_invalid_completion_returns_feedback_and_correction_can_finish(self):
         self.config.require_artifact_review = False
         ids = []
 
@@ -266,15 +262,13 @@ class EnterpriseTests(unittest.IsolatedAsyncioTestCase, Fixture):
             self.assertIn(ids[0], messages[0].content)
             self.assertIn('伺服器本工作產出清單', messages[0].content)
             return finish(ids=ids)
-        result = await self.failed_job(
-            self.run_model(
+        result, _ = await self.run_model(
                 coordinator=[call('delegate_document', {'task': '建立草稿'}, 'd'), finish(), corrected],
                 document=[call('create_text', {'name': 'ok.txt', 'content': 'verified'}, 'create'), created],
-            ), ToolException,
         )
-        self.assertEqual(result['status'], 'running', result)
+        self.assertEqual(result['status'], 'done', result)
         self.assertNotIn('errors', result)
-        self.assertIn('完成清單未列出', str(self.native_error))
+        self.assertIn('完成清單未列出', str(result['tool_feedback']))
 
     async def test_batched_same_role_assignments_keep_separate_results(self):
         batch = AIMessage(

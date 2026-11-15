@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
+from contextlib import nullcontext
 import json
 import types
 import unittest
@@ -15,14 +15,20 @@ from pydantic import BaseModel
 from company_agent.api.queue import WorkQueue
 from company_agent.api.service import Service
 from company_agent.tests.test_agent import Fixture
-from official_document_workflow.application import background_upload as upload
-from official_document_workflow.infrastructure import concurrency
-from official_document_workflow.infrastructure.storage.processing_cache import upload_outcome
+from examples.official_document_workflow.application import background_upload as upload
+from examples.shared.runtime import concurrency
+from examples.official_document_workflow.infrastructure.storage.processing_cache import upload_outcome
 
 
 class BackgroundUploadTests(unittest.IsolatedAsyncioTestCase, Fixture):
     def setUp(self):
         super().setUp()
+        import sys
+        functions = types.ModuleType('open_webui.models.functions')
+        functions.Functions = types.SimpleNamespace(get_function_by_id=AsyncMock())
+        chats = types.ModuleType('open_webui.models.chats')
+        chats.Chats = types.SimpleNamespace(get_chat_by_id_and_user_id=AsyncMock())
+        self.enterContext(patch.dict(sys.modules, {functions.__name__: functions, chats.__name__: chats}))
         self.queue = WorkQueue(self.private, self.base / 'uploads')
         self.svc = Service(
             self.queue, AsyncMock(return_value={'id': 'alice', 'role': 'user'}),
@@ -37,17 +43,18 @@ class BackgroundUploadTests(unittest.IsolatedAsyncioTestCase, Fixture):
 
         class Valves(BaseModel):
             model: str = 'approved-model'
+            document_analysis_cache_enabled: bool = False
 
         class Pipe:
             def __init__(self):
                 self.valves = Valves()
 
-            async def _get_owned_source_files(self, files, owner):
+            async def owned_sources(self, files, owner):
                 if owner != 'alice':
                     raise ValueError('not owned')
                 return 'pdf', (outer.file,)
 
-            async def _store_derived_bytes(self, **kwargs):
+            async def store_output(self, **kwargs):
                 outer.started.set()
                 if outer.block_store:
                     await outer.release.wait()
@@ -55,18 +62,18 @@ class BackgroundUploadTests(unittest.IsolatedAsyncioTestCase, Fixture):
                 outer.saved.append(item)
                 return item
 
-            async def _delete_derived_file(self, item):
+            async def delete_output(self, item):
                 outer.saved.remove(item)
 
-            async def _emit_processing_status(self, *args):
+            async def emit_status(self, *args):
                 pass
 
             @concurrency.document_request
             async def pipe(self, body, __user__=None, __files__=None, __event_emitter__=None, __metadata__=None):
                 if __metadata__ is not None:
-                    return await upload.submit(self, __user__, __metadata__)
+                    return await upload.submit(self, __user__, __metadata__, __event_emitter__)
                 await __event_emitter__({'type': 'status', 'data': {'description': '讀取公文中'}})
-                await self._store_derived_bytes(user_id=__user__['id'], display_name='letter.docx', kind='document_docx')
+                await self.store_output(user_id=__user__['id'], display_name='letter.docx', kind='document_docx')
                 upload_outcome.get()['status'] = 'done'
                 return '完成公文輸出'
         Pipe.Valves = Valves
@@ -74,7 +81,7 @@ class BackgroundUploadTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.factory = lambda: self.pipe
         self.modules = patch.object(
             upload, 'pipe_module',
-            return_value=types.SimpleNamespace(Pipe=lambda: self.factory()),
+            side_effect=lambda _: nullcontext(types.SimpleNamespace(Pipe=lambda: self.factory())),
         )
         self.modules.start()
         self.addCleanup(self.modules.stop)
@@ -86,13 +93,38 @@ class BackgroundUploadTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.function_patch.start()
         self.addCleanup(self.function_patch.stop)
 
+    async def test_trusted_chat_reply_uses_saved_continuation_without_enqueuing_work(self):
+        from open_webui.models.chats import Chats
+        chat = {'history': {'currentId': 'answer', 'messages': {
+            'question': {'id': 'question', 'role': 'user', 'content': '全部', 'files': []},
+            'answer': {'id': 'answer', 'role': 'assistant', 'parentId': 'question'},
+        }}}
+        self.pipe.clarifications = types.SimpleNamespace(
+            scope=Mock(return_value='trusted-scope'), complete=AsyncMock(return_value='continued CSV'),
+        )
+        with patch.object(Chats, 'get_chat_by_id_and_user_id', AsyncMock(return_value=types.SimpleNamespace(chat=chat))), \
+                patch.object(upload, 'verified_user', AsyncMock(return_value={'id': 'alice'})), \
+                patch.object(upload, 'configured_service', side_effect=AssertionError('must not enqueue')):
+            result = await upload.submit(self.pipe, {'id': 'alice'}, {'chat_id': 'chat', 'message_id': 'answer'})
+        self.assertEqual(result, 'continued CSV')
+        self.pipe.clarifications.complete.assert_awaited_once_with(
+            body={'messages': [{'role': 'user', 'content': '全部'}]}, user_id='alice', scope='trusted-scope', request=None,
+        )
+
     def enqueue(self, request='request'):
         return self.queue.submit_document(
             'alice', 'chat', request, [upload.source_identity(self.file)],
-            self.pipe.valves.model_dump(), hashlib.sha256(self.function.content.encode()).hexdigest(),
+            self.pipe.valves.model_dump(), upload.workflow_revision(self.function.content),
         )
 
-    async def test_submission_does_not_wait_for_document_slot_and_uses_owned_saved_turn(self):
+    async def test_core_update_rejects_queued_work_even_with_unchanged_adapter(self):
+        key = self.enqueue()
+        with patch('examples.official_document_workflow.services.version.implementation_revision', return_value='changed-core'):
+            await self.svc._run_claimed(self.queue.get('alice', key))
+        self.assertEqual(self.queue.get('alice', key)['status'], 'error')
+        self.assertFalse(self.started.is_set())
+
+    async def test_submission_enqueues_before_document_slot_and_disconnect_preserves_owned_job(self):
         from open_webui.models.chats import Chats
         chat = {
             'history': {
@@ -107,17 +139,53 @@ class BackgroundUploadTests(unittest.IsolatedAsyncioTestCase, Fixture):
                 patch.object(Chats, 'get_chat_by_id_and_user_id', AsyncMock(return_value=types.SimpleNamespace(chat=chat))), \
                 patch.object(concurrency, 'DOCUMENTS', concurrency.OwnerSlots(1)):
             async with concurrency.DOCUMENTS.slot('busy'):
-                async with asyncio.timeout(2):
-                    receipt = await self.pipe.pipe(
+                accepted = asyncio.Event()
+
+                async def emit(event):
+                    accepted.set()
+
+                task = asyncio.create_task(self.pipe.pipe(
                         {'messages': [{'content': 'forged'}]}, __user__={'id': 'alice'},
                         __files__=[{'id': 'forged-file'}],
                         __metadata__={'chat_id': 'chat', 'message_id': 'a'},
-                    )
+                        __event_emitter__=emit,
+                    ))
+                try:
+                    await asyncio.wait_for(accepted.wait(), 2)
+                    self.assertFalse(task.done())
+                    self.assertEqual(len(self.queue.list('alice')), 1)
+                finally:
+                    task.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await task
         job = self.queue.list('alice')[0]
-        self.assertIn(job['id'], receipt)
         self.assertEqual(job['status'], 'queued')
         self.assertEqual(self.queue.get('alice', job['id'])['payload']['sources'], [upload.source_identity(self.file)])
         self.assertFalse(self.started.is_set())
+        self.svc.model_factory.assert_not_called()
+
+    async def test_chat_observer_returns_document_result_and_downloads_without_replaying(self):
+        from company_agent.api.pipe import wait_for_result
+
+        key = self.enqueue()
+        events = AsyncMock()
+        task = asyncio.create_task(wait_for_result(self.svc, 'alice', key, events))
+        try:
+            async with asyncio.timeout(3):
+                while not events.await_count:
+                    await asyncio.sleep(.01)
+            self.assertFalse(task.done())
+            await self.svc._run_claimed(self.queue.claim())
+            result = await asyncio.wait_for(task, 3)
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        self.assertIn('完成公文輸出', result)
+        self.assertIn('/api/v1/files/output-id/content?attachment=true', result)
+        self.assertTrue(events.await_args.args[0]['data']['done'])
+        self.assertEqual(len(self.saved), 1)
+        self.assertEqual(len(self.queue.list('alice')), 1)
         self.svc.model_factory.assert_not_called()
 
     async def test_duplicate_and_regeneration_attach_to_one_job_and_setting_changes_reject(self):
@@ -157,20 +225,31 @@ class BackgroundUploadTests(unittest.IsolatedAsyncioTestCase, Fixture):
             restored.public('bob', key)
         self.svc.model_factory.assert_not_called()
 
+    async def test_background_document_binds_the_same_app_content_cache_as_eip(self):
+        from examples.official_document_workflow.runtime import current_resources
+        self.pipe.valves.document_analysis_cache_enabled = True
+        key = self.enqueue('shared-content')
+        await self.svc._run_claimed(self.queue.claim())
+        result = self.queue.public('alice', key)
+        self.assertEqual(result['status'], 'done', result)
+        self.assertIs(self.pipe.content_cache, current_resources().shared_content)
+        self.assertIs(self.pipe.evidence_cache, current_resources().shared_content)
+        self.svc.model_factory.assert_not_called()
+
     async def test_native_pdf_pipeline_records_pdf_word_csv_and_typed_completion(self):
         from tests.test_official_upload_groups import UploadGroupTests, DEADLINE_EVIDENCE, payload
         fixture = UploadGroupTests()
+        fixture.addCleanup = self.addCleanup
         fixture.setUp()
-        self.addCleanup(fixture.doCleanups)
         fixture.add()
         fixture.add(DEADLINE_EVIDENCE)
-        fixture.pipe._cloud_ocr_text_request = AsyncMock(side_effect=fixture.responses([['S1', 'S2']], payload()))
+        fixture.pipe.analyze_text = AsyncMock(side_effect=fixture.responses([['S1', 'S2']], payload()))
         self.factory = lambda: fixture.pipe
         self.pipe = fixture.pipe
         sources = [upload.source_identity(item.source_file) for item in fixture.prepared]
         key = self.queue.submit_document(
             'alice', 'chat', 'native-pdf', sources,
-            fixture.pipe.valves.model_dump(), hashlib.sha256(self.function.content.encode()).hexdigest(),
+            fixture.pipe.valves.model_dump(), upload.workflow_revision(self.function.content),
         )
         await self.svc._run_claimed(self.queue.claim())
         result = self.queue.public('alice', key)

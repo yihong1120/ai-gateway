@@ -180,7 +180,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         )
         model = select_model(root, 'vision')
         self.assertIsInstance(model, WebBilledModel)
-        with patch('company_agent.runtime.context.verified_user', AsyncMock(return_value=verified('changed'))):
+        with patch('examples.identity.adapters.webui.verified_user', AsyncMock(return_value=verified('changed'))):
             with self.assertRaises(ValueError):
                 await model.analyze([HumanMessage(content='test')])
 
@@ -197,7 +197,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         tool_call = model.bind_tools([t for t in file_tools() if t.name == 'read_file']).ainvoke
         for invoke in (tool_call, model.analyze, model.summarize):
             with self.subTest(path=invoke.__name__), patch(
-                'company_agent.runtime.context.verified_user',
+                'examples.identity.adapters.webui.verified_user',
                 AsyncMock(side_effect=[verified(), verified('changed')]),
             ) as check:
                 before = len(requests)
@@ -232,7 +232,7 @@ class RoutingGraphTests(unittest.IsolatedAsyncioTestCase, Fixture):
             valves=SimpleNamespace(cloud_ocr_text_max_input_characters=1000),
             _cloud_json_object=json.loads, _cloud_ocr_text_prompt=lambda kind: 'extract',
         )
-        adapter = BilledPipeAdapter(ctx, pipe, SimpleNamespace(INSTRUCTION_PLANNER_PROMPT='plan'))
+        adapter = BilledPipeAdapter(ctx, pipe)
         with patch('company_agent.services.eip.processing.binding', AsyncMock()):
             await adapter.analyze(SimpleNamespace(text='synthetic document', kind='pdf'))
             await adapter.plan('整理附件')

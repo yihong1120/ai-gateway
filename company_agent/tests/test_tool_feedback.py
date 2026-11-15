@@ -90,7 +90,7 @@ class ToolFeedbackTests(unittest.IsolatedAsyncioTestCase, Fixture):
     async def test_repeated_invalid_arguments_stop_at_job_limit_without_io(self):
         self.config.max_steps = 4
         result = await self.failed_job(self.run_steps([cad(50), cad(30), cad(20), cad(10)]), ModelCallLimitExceededError)
-        self.assertEqual(result['status'], 'running', result)
+        self.assertEqual(result['status'], 'error', result)
         self.assertEqual(self.invoked, [])
         self.assertEqual(self.store.attempts(result['job_id']), 4)
 
@@ -122,7 +122,7 @@ class ToolFeedbackTests(unittest.IsolatedAsyncioTestCase, Fixture):
     async def test_resume_uses_saved_tool_feedback(self):
         def interrupted(messages): raise RuntimeError('model unavailable')
         result = await self.failed_job(self.run_steps([cad(50), interrupted]), RuntimeError)
-        self.assertEqual(result['status'], 'running')
+        self.assertEqual(result['status'], 'error')
         model = self.last_model = RawRoleModel(
             engineering=[cad(10), finish('complete_assignment')], coordinator=[finish()],
         )
@@ -155,7 +155,7 @@ class ToolFeedbackTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertEqual(len(result['sources']), 1)
 
     async def test_feedback_can_end_with_missing_input_without_a_repair_protocol(self):
-        result, model = await self.run_steps(
+        result, _model = await self.run_steps(
             [cad(50), finish('complete_assignment', 'needs_input', summary='需要確認閱讀範圍。')],
             coordinator=[
                 call('delegate_engineering', {'task': '讀CAD'}, 'd'),
@@ -169,7 +169,7 @@ class ToolFeedbackTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertNotIn(str(self.private), str(result['tool_feedback']))
 
     async def test_corrected_delegation_creates_only_one_assignment(self):
-        result, model = await self.run_steps(
+        result, _model = await self.run_steps(
             [cad(), finish('complete_assignment')],
             coordinator=[
                 call('delegate_engineering', {'task': '讀CAD', 'owner': 'admin'}, 'bad'),
@@ -190,7 +190,7 @@ class ToolFeedbackTests(unittest.IsolatedAsyncioTestCase, Fixture):
             return read(box, args)
         self.read = fail_second
         result = await self.failed_job(self.run_steps([cad(), cad(start=10), finish('complete_assignment')]), ValueError)
-        self.assertEqual(result['status'], 'running', result)
+        self.assertEqual(result['status'], 'error', result)
         self.assertEqual(sum(len(execution_summary(s)['read_results']) for s in result['subgraphs'].values()), 1)
         self.assertIn('來源版本已變更', str(self.native_error))
         self.assertEqual(self.last_model.invocations, ['coordinator', 'engineering', 'engineering'])

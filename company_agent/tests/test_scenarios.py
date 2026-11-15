@@ -66,7 +66,7 @@ class ScenarioMeterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(role.meter.budget, budget)
         self.assertIsInstance(role.meter.model, WebBilledModel)
         user = {'oauth': {'oidc': {'sub': 'verified-subject'}}}
-        with patch('company_agent.runtime.context.verified_user', new=AsyncMock(return_value=user)) as verified:
+        with patch('examples.identity.adapters.webui.verified_user', new=AsyncMock(return_value=user)) as verified:
             await role.bind_tools(coordinator_tools()).ainvoke([HumanMessage(content='test')])
             await role.analyze([HumanMessage(content='test')], schema={'type': 'object'}, max_output_tokens=12)
             await role.summarize([HumanMessage(content='test')])
@@ -97,11 +97,11 @@ class ScenarioMeterTests(unittest.IsolatedAsyncioTestCase):
         meter = BilledMeter(inner, 'test', {'input': .000001, 'output': .000001, 'cache': .000001}, Budget(.1))
         self.assertIsInstance(meter, UserBilledModel)
         await meter.bind_tools(coordinator_tools()).ainvoke([HumanMessage(content='test')])
-        self.assertEqual(seen, [{'user': 'verified-subject'}])
+        self.assertEqual(seen, [{'user': 'verified-subject', 'extra_body': {'metadata': {'spend_logs_metadata': {'ai_usage_source': 'company_agent'}}}}])
         with self.assertRaises(ValueError):
             meter.bind_tools(coordinator_tools(), user='someone-else')
         await meter.analyze([HumanMessage(content='synthetic image question')])
-        self.assertEqual(seen[-1], {'user': 'verified-subject', 'response_format': {'type': 'json_object'}})
+        self.assertEqual(seen[-1], {'user': 'verified-subject', 'response_format': {'type': 'json_object'}, 'extra_body': {'metadata': {'spend_logs_metadata': {'ai_usage_source': 'company_agent'}}}})
         self.assertEqual(len(meter.meter.calls), 2)
         self.assertGreater(meter.meter.budget.charged, 0)
 
@@ -202,9 +202,10 @@ class ScenarioStopTests(unittest.IsolatedAsyncioTestCase, Fixture):
         client = Client()
         model = UserBilledModel('alice', 'verified', client)
         output = self.base/'scenario-output'
-        with patch('company_agent.api.service.service', return_value=SimpleNamespace(model_factory=lambda _: model)), \
-            patch('company_agent.runtime.context.verified_user', new=AsyncMock(return_value={'id': 'alice'})), \
-                patch('company_agent.evals.scenario_suite.close_model', new=AsyncMock()):
+        with patch('company_agent.api.service.ServiceConfiguration.model', return_value=model), \
+            patch('company_agent.api.service.ServiceConfiguration.configured_settings', return_value=None), \
+            patch('examples.identity.adapters.webui.verified_user', new=AsyncMock(return_value={'id': 'alice'})), \
+                patch('company_agent.evals.runner.close_model', new=AsyncMock()):
             await run('alice', output, ['missing_source', 'documents', 'word_edit'], .5)
         report = json.loads((output/'report.json').read_text())
         self.assertEqual(client.calls, 1)

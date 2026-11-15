@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import unittest
 from types import ModuleType
 from types import SimpleNamespace
@@ -136,6 +137,93 @@ class ResearchTests(unittest.IsolatedAsyncioTestCase, Fixture):
             await self.invoke()
         self.request.assert_awaited_once()
 
+    async def test_search_dns_failures_preserve_other_sources_and_cache_paid_result(self):
+        self.request.return_value = {'results': [
+            {**ROW, 'url': 'https://missing.example.com'},
+            ROW,
+            {**ROW, 'url': 'https://slow.example.com'},
+        ], 'usage': {'credits': 1}}
+
+        async def addresses(url):
+            if 'missing.example.com' in url:
+                raise socket.gaierror(socket.EAI_NONAME, 'private DNS details')
+            if 'slow.example.com' in url:
+                raise TimeoutError('private DNS details')
+            return ['docs.tavily.com', '8.8.8.8']
+
+        self.addresses.side_effect = addresses
+        for _ in range(2):
+            command = await self.invoke()
+            value = json.loads(command.update['messages'][0].content)
+            self.assertEqual(value['status'], 'ok')
+            self.assertEqual([r['url'] for r in value['results']], [URL])
+            self.assertEqual(value['credits'], 1)
+            self.assertEqual(value['skipped_results'], {'dns_unavailable': 2})
+            self.assertIn('揭露此限制', value['notice'])
+            self.assertNotIn('private DNS details', json.dumps(value))
+        self.request.assert_awaited_once()
+
+    async def test_all_search_dns_failures_are_explicit_no_content_and_cached(self):
+        self.addresses.side_effect = socket.gaierror(socket.EAI_AGAIN, 'private DNS details')
+        for _ in range(2):
+            command = await self.invoke()
+            value = json.loads(command.update['messages'][0].content)
+            self.assertEqual(value['status'], 'no_content')
+            self.assertEqual(value['results'], [])
+            self.assertEqual(value['credits'], 1)
+            self.assertEqual(value['skipped_results'], {'dns_unavailable': 1})
+            self.assertIn('不能據此判斷查無資料', value['notice'])
+            self.assertEqual(command.update['web_sources'], [])
+        self.request.assert_awaited_once()
+
+    async def test_extract_dns_failure_sends_no_request_and_returns_cached_no_content(self):
+        for failure in [socket.gaierror(socket.EAI_NONAME, 'private DNS details'), TimeoutError()]:
+            self.addresses.side_effect = failure
+            with self.subTest(failure=type(failure).__name__):
+                for _ in range(2):
+                    command = await self.invoke('fetch_url', {'url': URL}, call_id=type(failure).__name__)
+                    value = json.loads(command.update['messages'][0].content)
+                    self.assertEqual(value['status'], 'no_content')
+                    self.assertEqual(value['skipped_results'], {'dns_unavailable': 1})
+                    self.assertIsNone(value['credits'])
+                    self.assertIn('未送出網頁擷取', value['notice'])
+                    self.assertNotIn('private DNS details', str(value))
+        self.request.assert_not_awaited()
+
+    async def test_invalid_and_private_result_urls_do_not_discard_valid_results(self):
+        self.request.return_value = {'results': [
+            {**ROW, 'url': 'http://127.0.0.1/private'},
+            {**ROW, 'url': 'https://example.com/?token=private-token-canary'},
+            ROW,
+        ]}
+        command = await self.invoke()
+        value = json.loads(command.update['messages'][0].content)
+        self.assertEqual(value['status'], 'ok')
+        self.assertEqual([r['url'] for r in value['results']], [URL])
+        self.assertEqual(value['skipped_results'], {'unsafe_or_invalid_url': 2})
+        self.assertNotIn('private-token-canary', str(value))
+        self.addresses.assert_awaited_once_with(URL)
+
+    async def test_graph_can_finish_with_remaining_sources_after_dns_error(self):
+        self.request.return_value = {'results': [{**ROW, 'url': 'https://missing.example.com'}, ROW]}
+        self.addresses.side_effect = [socket.gaierror(socket.EAI_NONAME, 'unavailable'), ['docs.tavily.com', '8.8.8.8']]
+        summary = '已依可用來源回答；一筆來源因 DNS 無法解析而略過。'
+        model = RawRoleModel(
+            coordinator=[
+                call('delegate_research', {'task': '查詢公開資料'}, 'delegate'),
+                call('complete_job', {'outcome': 'completed', 'summary': summary, 'artifact_ids': []}, 'done'),
+            ],
+            research=[
+                call('search_web', {'query': '公開資料', 'count': 3}, 'query'),
+                call('complete_assignment', {'outcome': 'completed', 'summary': summary, 'artifact_ids': []}, 'end'),
+            ],
+        )
+        result = await DocumentAgent(self.config, model).run('alice', '查詢公開資料')
+        self.assertEqual(result['status'], 'done', result)
+        self.assertEqual(result['answer'], summary)
+        self.assertEqual(result['web_sources'][0]['url'], URL)
+        self.request.assert_awaited_once()
+
     async def test_official_tools_hide_runtime_and_key(self):
         for tool in research_tools():
             self.assertIsInstance(tool, BaseTool)
@@ -244,7 +332,7 @@ class URLAndTransportTests(unittest.IsolatedAsyncioTestCase):
                 'open_webui.utils.access_control': permissions_module, 'open_webui.config': constants_module,
             },
         ), \
-                patch('company_agent.runtime.context.verified_user', AsyncMock(return_value={'id': 'alice', 'role': 'user'})):
+                patch('examples.identity.adapters.webui.verified_user', AsyncMock(return_value={'id': 'alice', 'role': 'user'})):
             configured = await research.web_config('alice')
             self.assertEqual(configured['key'], 'key-canary')
             permissions_module.has_permission.assert_awaited_with(

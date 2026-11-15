@@ -437,7 +437,7 @@ class GraphTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.config.max_steps = 1
         model = ScriptedModel([call('search_files', {'root': 'project', 'query': 'a'}, 1)])
         result = await self.failed_job(DocumentAgent(self.config, model).run('alice', '找文件'), ModelCallLimitExceededError)
-        self.assertEqual(result['status'], 'running')
+        self.assertEqual(result['status'], 'error')
         self.assertEqual(len(model.messages), 1)
 
     async def test_cross_owner_context_has_no_root(self):
@@ -465,7 +465,7 @@ class GraphTests(unittest.IsolatedAsyncioTestCase, Fixture):
     async def test_model_failure_preserves_created_draft(self):
         model = ScriptedModel([call('create_text', {'name': 'draft.txt', 'content': '保留這份草稿'}, 1)])
         result = await self.failed_job(DocumentAgent(self.config, model).run('alice', '建立草稿'), RuntimeError)
-        self.assertEqual(result['status'], 'running')
+        self.assertEqual(result['status'], 'error')
         self.assertEqual(len(result['files']), 1)
         self.assertEqual(self.store.read_artifact('alice', result['files'][0]['id'])[2], '保留這份草稿'.encode())
 

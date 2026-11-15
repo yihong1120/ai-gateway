@@ -9,6 +9,7 @@ import unicodedata
 import uuid
 from contextlib import contextmanager
 from contextlib import ExitStack
+from contextlib import nullcontext
 from urllib.parse import urlsplit
 
 import httpx
@@ -221,20 +222,52 @@ class NASVault:
     def cipher(self):
         return AESGCM((self.store.directory / 'nas.key').read_bytes())
 
-    def status(self, owner):
+    @staticmethod
+    def binding_id(value):
+        if not isinstance(value, str) or len(value) != 32 or any(c not in '0123456789abcdef' for c in value):
+            raise ValueError('NAS 綁定識別碼無效。')
+        return value
+
+    def bindings(self, owner):
+        with self.store.db() as db:
+            rows = db.execute(
+                'SELECT binding_id,ciphertext,revision,updated,usable FROM nas_bindings WHERE owner=%s ORDER BY binding_id',
+                (owner,),
+            ).fetchall()
+        result = []
+        for binding_id, ciphertext, revision, updated, usable in rows:
+            data = self.decrypt(owner, revision, ciphertext)
+            result.append({'binding_id': binding_id, 'account': data['account'],
+                           'label': data.get('label') or data['account'], 'revision': revision,
+                           'updated': updated, 'usable': usable, 'bound': True, 'read_only': True})
+            data.clear()
+        return result
+
+    def status(self, owner, binding_id=None):
+        if binding_id is not None:
+            self.binding_id(binding_id)
         with self.store.db() as db:
             row = db.execute(
-                'SELECT revision,updated,usable FROM nas_bindings WHERE owner=%s', (owner,),
+                'SELECT revision,updated,usable,binding_id FROM nas_bindings WHERE owner=%s '
+                'AND (%s::text IS NULL OR binding_id=%s) ORDER BY binding_id LIMIT 1',
+                (owner, binding_id, binding_id),
             ).fetchone()
+        if binding_id is not None and row is None:
+            raise ValueError('NAS 綁定不存在或沒有權限。')
         return {
             'bound': bool(row),
             'revision': row[0] if row else None,
             'updated': row[1] if row else None,
             'usable': row[2] if row else False,
+            'binding_id': row[3] if row else None,
             'read_only': True,
         }
 
-    def bind(self, owner, account, password, otp=None):
+    def decrypt(self, owner, revision, ciphertext):
+        return json.loads(self.cipher().decrypt(
+            ciphertext[:12], ciphertext[12:], (owner + ':' + revision).encode()))
+
+    def bind(self, owner, account, password, otp=None, *, binding_id=None, label=None):
         if (
             any(not isinstance(v, str) or not v or len(v) > 256 for v in (account, password))
             or account != account.strip()
@@ -242,6 +275,10 @@ class NASVault:
             raise ValueError('請輸入有效的 NAS 帳號與密碼。')
         if otp is not None and (not isinstance(otp, str) or len(otp) > 16):
             raise ValueError('驗證碼格式錯誤。')
+        if binding_id is not None:
+            self.status(owner, binding_id)  # Authorize before any remote authentication.
+        if label is not None and (not isinstance(label, str) or not label.strip() or len(label) > 80):
+            raise ValueError('NAS 連線名稱須為 1–80 字。')
         url = endpoint()
         now = time.time()
         request_token = uuid.uuid4().hex
@@ -262,7 +299,7 @@ class NASVault:
                 shares = client.shares()
         revision = uuid.uuid4().hex
         plaintext = json.dumps(
-            {'url': url, 'account': account, 'password': password}, ensure_ascii=False,
+            {'url': url, 'account': account, 'password': password, 'label': label or account}, ensure_ascii=False,
         ).encode()
         nonce = os.urandom(12)
         ciphertext = nonce + self.cipher().encrypt(
@@ -279,36 +316,55 @@ class NASVault:
             if not token or token[0] != request_token:
                 raise ValueError('綁定操作已取消或被更新。')
             other = db.execute(
-                'SELECT owner FROM nas_bindings WHERE account_hash=%s', (account_hash,),
+                'SELECT owner,binding_id FROM nas_bindings WHERE account_hash=%s', (account_hash,),
             ).fetchone()
             if other and other[0] != owner:
                 raise ValueError('此 NAS 帳號已綁定另一位使用者；請使用自己的帳號。')
+            if other and binding_id is not None and other[1] != binding_id:
+                raise ValueError('此帳號已有綁定，請更新原連線。')
+            if binding_id is not None:
+                if not db.execute('SELECT 1 FROM nas_bindings WHERE owner=%s AND binding_id=%s',
+                                  (owner, binding_id)).fetchone():
+                    raise ValueError('NAS 綁定已解除，請重新新增連線。')
+            selected = binding_id or (other[1] if other else uuid.uuid4().hex)
+            count = db.execute('SELECT count(*) FROM nas_bindings WHERE owner=%s', (owner,)).fetchone()[0]
+            if not binding_id and not other and count >= 16:
+                raise ValueError('每人最多綁定 16 組 NAS 帳號。')
             db.execute(
-                'INSERT INTO nas_bindings VALUES (%s,%s,%s,%s,%s,TRUE) ON CONFLICT(owner) DO UPDATE SET account_hash=excluded.account_hash,ciphertext=excluded.ciphertext,revision=excluded.revision,updated=excluded.updated,usable=TRUE',
-                (owner, account_hash, ciphertext, revision, now),
+                'INSERT INTO nas_bindings(owner,account_hash,ciphertext,revision,updated,usable,binding_id) '
+                'VALUES (%s,%s,%s,%s,%s,TRUE,%s) ON CONFLICT(owner,binding_id) DO UPDATE SET '
+                'account_hash=excluded.account_hash,ciphertext=excluded.ciphertext,revision=excluded.revision,updated=excluded.updated,usable=TRUE',
+                (owner, account_hash, ciphertext, revision, now, selected),
             )
-        return {**self.status(owner), 'shares': shares}
+        return {**self.status(owner, selected), 'bindings': self.bindings(owner), 'shares': shares}
 
-    def unlink(self, owner):
+    def unlink(self, owner, binding_id=None):
         with self.store.db() as db:
             self.store.lock(db)
-            db.execute('DELETE FROM nas_bindings WHERE owner=%s', (owner,))
+            # Legacy callers with several accounts must explicitly select one.
+            rows = db.execute('SELECT binding_id FROM nas_bindings WHERE owner=%s ORDER BY binding_id', (owner,)).fetchall()
+            if binding_id is None:
+                if len(rows) > 1:
+                    raise ValueError('請選擇要解除的 NAS 連線。')
+                binding_id = rows[0][0] if rows else None
+            else:
+                self.binding_id(binding_id)
+                if binding_id not in {row[0] for row in rows}:
+                    raise ValueError('NAS 綁定不存在或沒有權限。')
+            db.execute('DELETE FROM nas_bindings WHERE owner=%s AND binding_id=%s', (owner, binding_id))
             db.execute(
                 'INSERT INTO nas_login_limits VALUES (%s,%s,%s) ON CONFLICT(owner) DO UPDATE SET next_at=excluded.next_at,request_token=excluded.request_token',
                 (owner, time.time() + 60, uuid.uuid4().hex),
             )
 
-    def credentials(self, owner, revision):
-        with self.store.db() as db:
-            row = db.execute(
-                'SELECT ciphertext,revision,usable FROM nas_bindings WHERE owner=%s', (owner,),
+    def credentials(self, owner, revision, *, db=None):
+        with (nullcontext(db) if db is not None else self.store.db()) as connection:
+            row = connection.execute(
+                'SELECT ciphertext,revision,usable FROM nas_bindings WHERE owner=%s AND revision=%s', (owner, revision),
             ).fetchone()
-        if not row or row[1] != revision or not row[2]:
+        if not row or not row[2]:
             raise ValueError('NAS 綁定已解除、變更或失效；請重新綁定並另開工作。')
-        cipher = self.cipher()
-        data = json.loads(
-            cipher.decrypt(row[0][:12], row[0][12:], (owner + ':' + revision).encode()),
-        )
+        data = self.decrypt(owner, revision, row[0])
         if data['url'] != endpoint():
             raise ValueError('NAS 端點已變更，請重新綁定。')
         return data
@@ -327,17 +383,17 @@ class NASVault:
                 'SELECT pg_advisory_xact_lock(%s)',
                 (self.store.lock_id('nas-session:' + digest),),
             )
-            yield
+            yield db
 
     @contextmanager
     def session(self, owner, revision):
         data = self.credentials(owner, revision)
         try:
-            with self.account_operation(data['url'], data['account']):
-                self.credentials(owner, revision)  # Binding may change while waiting.
+            with self.account_operation(data['url'], data['account']) as db:
+                self.credentials(owner, revision, db=db).clear()  # May change while waiting.
                 with self.client_factory(data['url'], data['account'], data['password']) as client:
                     yield client
-                    self.credentials(owner, revision)  # Do not publish results after unlink/rebind.
+                    self.credentials(owner, revision, db=db).clear()  # Recheck before publishing.
         finally:
             data.clear()
 
@@ -431,6 +487,39 @@ class NASAccess:
                 raise ValueError('NAS 檔案在讀取期間變更；請重新操作。')
         return data, hashlib.sha256(data).hexdigest()
 
+    def listing(self, root, path='', offset=0, limit=50):
+        if type(offset) is not int or not 0 <= offset <= 10000 or type(limit) is not int or not 1 <= limit <= 50:
+            raise ValueError('NAS 分頁範圍無效。')
+        with self.operation(root, path or None) as (client, base, full):
+            real = self.real_base(client, base)
+            parent = client.info(full)
+            extra = parent.get('additional', {})
+            parent_real = extra.get('real_path')
+            # An empty relative path lists the authorized share itself.
+            # Descendant paths must still resolve strictly inside that share.
+            allowed = parent_real == real if not path else self.contained(parent_real, real)
+            if parent.get('isdir') is not True or extra.get('mount_point_type') or not allowed:
+                raise ValueError('NAS 資料夾不存在或沒有授權。')
+            value = client.listing(full, offset, limit)
+            rows = value.get('files')
+            if not isinstance(rows, list) or len(rows) > limit:
+                raise ValueError('NAS 清單回應不完整。')
+            result = []
+            for row in rows:
+                name = row.get('name', '')
+                parts = relative_parts(name)
+                extra = row.get('additional', {})
+                if (len(parts) != 1 or name.startswith(('@', '#'))
+                        or row.get('path') != full + '/' + name or extra.get('mount_point_type')
+                        or not self.contained(extra.get('real_path'), real)):
+                    continue
+                result.append({'name': name, 'path': (path + '/' if path else '') + name,
+                               'is_directory': row.get('isdir') is True})
+            total = value.get('total')
+            has_more = offset + len(rows) < total if type(total) is int else len(rows) == limit
+            return {'entries': result, 'next_offset': offset + len(rows) if has_more and rows else None,
+                    'filtered': len(result) != len(rows)}
+
     def scan(self, root, cap=300):
         found = []
         visited = 0
@@ -494,27 +583,37 @@ class NASAccess:
         return sorted(found, key=lambda r: r['path']), incomplete
 
 
+def binding_revisions(settings):
+    return tuple(getattr(settings, 'nas_binding_revisions', ()) or
+                 ([settings.nas_binding_revision] if settings.nas_binding_revision else []))
+
+
 class CombinedAccess:
     def __init__(self, settings, store, owner):
         self.local = FolderAccess(settings.roots, owner, settings.max_file_bytes)
-        self.remote = (
-            NASAccess(
-                NASVault(store), owner, settings.nas_binding_revision, settings.max_file_bytes,
-            )
-            if settings.nas_binding_revision
-            else None
-        )
+        vault = NASVault(store)
+        self.remotes = [NASAccess(vault, owner, revision, settings.max_file_bytes)
+                        for revision in binding_revisions(settings)]
         self.owner = owner
 
     def backend(self, name):
         if name.startswith('nas_'):
-            if not self.remote:
-                raise ValueError('此工作沒有已綁定的 NAS 來源。')
-            return self.remote
+            candidates = [remote for remote in self.remotes if name.startswith('nas_' + remote.revision[:8] + '_')]
+            if len(candidates) != 1:
+                raise ValueError('此工作沒有該 NAS 來源，或來源識別碼不唯一。')
+            return candidates[0]
         return self.local
 
     def visible_roots(self):
-        return self.local.visible_roots() + (self.remote.visible_roots() if self.remote else [])
+        roots = self.local.visible_roots()
+        for remote in self.remotes:
+            data = remote.vault.credentials(self.owner, remote.revision)
+            label = data.get('label') or data['account']
+            data.clear()
+            for root in remote.visible_roots():
+                roots.append({**root, 'connection': label,
+                              'label': label + ' / ' + root['label']})
+        return roots
 
     def allowed(self, name, write=False):
         return self.backend(name).allowed(name, write)
@@ -524,6 +623,9 @@ class CombinedAccess:
 
     def scan(self, name, cap=300):
         return self.backend(name).scan(name, cap)
+
+    def listing(self, name, path='', offset=0, limit=50):
+        return self.backend(name).listing(name, path, offset, limit)
 
     def directory(self, name, parents=(), write=False):
         self.allowed(name, write)
@@ -537,6 +639,6 @@ class CombinedAccess:
 def file_access(settings, store, owner):
     return (
         CombinedAccess(settings, store, owner)
-        if settings.nas_binding_revision
+        if binding_revisions(settings)
         else FolderAccess(settings.roots, owner, settings.max_file_bytes)
     )

@@ -78,7 +78,7 @@ class SourcePreparationTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.model = SimpleNamespace(subject='sub')
         self.service = Service(
             self.queue, AsyncMock(return_value={'id': 'alice'}),
-            lambda _: self.model, self.settings,
+            lambda _, model_name=None: self.model, self.settings,
         )
 
     def settings(self, row):

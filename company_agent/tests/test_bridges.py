@@ -1,4 +1,5 @@
 from __future__ import annotations
+from examples.official_document_workflow.runtime import current_resources
 
 import hashlib
 import io
@@ -13,10 +14,8 @@ from unittest.mock import patch
 from langchain_core.messages import AIMessage
 from langchain_core.messages import HumanMessage
 from openpyxl import load_workbook
-from openpyxl import Workbook
-from openpyxl.chart import BarChart
-from openpyxl.chart import Reference
 
+from company_agent.evals.fixtures import workbook
 from company_agent.runtime.context import Context
 from company_agent.runtime.models import billed_analysis
 from company_agent.runtime.models import UserBilledModel
@@ -30,30 +29,8 @@ from company_agent.services.office.spreadsheet_edit import edit_spreadsheet
 from company_agent.services.office.vision import understand
 from company_agent.tests.test_agent import Fixture
 from tests.eip_postgres import EIPPostgresTestCase
+from tests.eip_calendar_fixture import new_calendar_matches
 
-
-def workbook():
-    b = Workbook()
-    s = b.active
-    s.title = '工程'
-    s.append(['項目', '數量'])
-    s.append(['A', 10])
-    s.append(['B', 20])
-    s.append(['總計', '=SUM(B2:B3)'])
-    s['B2'].number_format = '0.00'
-    s['B3'].number_format = '0%'
-    s.freeze_panes = 'B2'
-    s.column_dimensions['A'].width = 24
-    s.merge_cells('D1:E1')
-    s['D1'] = '合併'
-    t = b.create_sheet('第二表')
-    t['A1'] = '原值'
-    chart = BarChart()
-    chart.add_data(Reference(s, min_col=2, min_row=2, max_row=3))
-    s.add_chart(chart, 'G2')
-    out = io.BytesIO()
-    b.save(out)
-    return out.getvalue()
 
 
 def change(**kwargs):
@@ -257,7 +234,7 @@ class SemanticTests(unittest.IsolatedAsyncioTestCase, Fixture):
             bind=lambda **kw: (
                 self.assertEqual(
                     kw,
-                    {'user': 'oidc-alice', 'response_format': {'type': 'json_object'}},
+                    {'user': 'oidc-alice', 'response_format': {'type': 'json_object'}, 'extra_body': {'metadata': {'spend_logs_metadata': {'ai_usage_source': 'company_agent'}}}},
                 )
                 or SimpleNamespace(ainvoke=call)
             ),
@@ -300,7 +277,7 @@ class EIPProcessingTests(
     EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase, Fixture,
 ):
     async def test_calendar_preview_confirmation_dedup_and_unknown_stop(self):
-        from official_document_workflow.infrastructure.storage.state import (
+        from examples.official_document_workflow.infrastructure.storage.state import (
             State,
             Link,
             Journal,
@@ -317,6 +294,7 @@ class EIPProcessingTests(
             )
         adapter = SimpleNamespace(
             user_id='EIP-user', commit=AsyncMock(return_value=None),
+            calendar_import_matches=AsyncMock(side_effect=new_calendar_matches),
         )
         link = Link(adapter, '本人帳號')
         read = AsyncMock(return_value=[])
@@ -334,23 +312,21 @@ class EIPProcessingTests(
             },
         ]
         with (
-            patch(
-                'official_document_workflow.infrastructure.storage.state.STATE', state,
-            ),
+            patch.object(current_resources(), 'state', state),
             patch(
                 'company_agent.services.eip.calendar.current_binding',
                 new=AsyncMock(return_value=db),
             ),
             patch(
-                'official_document_workflow.infrastructure.eip.calendar_csv.parse_csv',
+                'examples.official_document_workflow.infrastructure.eip.calendar_csv.parse_csv',
                 return_value=([{}], b'transport'),
             ),
             patch(
-                'official_document_workflow.infrastructure.eip.calendar_sync.verified_events',
+                'examples.official_document_workflow.infrastructure.eip.calendar_sync.verified_events',
                 return_value=events,
             ),
             patch(
-                'official_document_workflow.infrastructure.eip.sessions.manual_session',
+                'examples.official_document_workflow.infrastructure.eip.sessions.manual_session',
                 session,
             ),
         ):
@@ -394,21 +370,23 @@ class EIPProcessingTests(
         pipe = SimpleNamespace(
             valves=SimpleNamespace(
                 cloud_ocr_text_max_input_characters=10000, cloud_ocr_text_model='old',
+                document_analysis_cache_enabled=True,
             ),
             _cloud_json_object=json.loads,
             _cloud_ocr_text_prompt=lambda _: 'analysis',
         )
         ctx = Context(
             'alice', self.job, self.config, self.store,
-            UserBilledModel('alice', 'sub', SimpleNamespace(model_name='fake')),
+            UserBilledModel('alice', 'sub', SimpleNamespace(model_name='fake', openai_api_base='http://127.0.0.1:4000/v1',
+                reasoning_effort=None, max_tokens=4096, temperature=0, model_kwargs={}, extra_body=None)),
         )
         with (
             patch(
-                'official_document_workflow.application.integration.pipe_module',
+                'examples.official_document_workflow.application.integration.module',
                 return_value=module,
             ),
             patch(
-                'official_document_workflow.application.integration.configured_pipe',
+                'examples.official_document_workflow.application.integration.configured_pipe',
                 new=AsyncMock(return_value=pipe),
             ),
             patch('company_agent.services.eip.processing.binding', new=AsyncMock()),
@@ -417,7 +395,9 @@ class EIPProcessingTests(
                 new=AsyncMock(return_value='{"ok":true}'),
             ) as model,
         ):
-            bound, _ = await billed_pipe(ctx)
+            bound = await billed_pipe(ctx)
+            self.assertIs(bound.content_cache, current_resources().shared_content)
+            self.assertIsNone(bound.evidence_cache)
             self.assertEqual(bound.valves.cloud_ocr_text_model, 'fake')
             self.assertEqual(bound.valves.instruction_plan_model, 'fake')
             with self.assertRaises(ValueError):
@@ -426,13 +406,31 @@ class EIPProcessingTests(
                 await bound._cloud_instruction_plan_payload('產生文件'), {'ok': True},
             )
             self.assertEqual(
-                await bound._cloud_ocr_text_request(
+                await bound.analyze_text(
                     SimpleNamespace(text='內容', kind='paddle_layout_ocr'),
                     prompt='analysis',
                 ),
                 {'ok': True},
             )
-            self.assertEqual(model.await_count, 2)
+            await bound.analyze_text(SimpleNamespace(text='內容', kind='paddle_layout_ocr'), prompt='analysis')
+            self.assertEqual(model.await_count, 3)
+            from examples.official_document_workflow.services.analysis_reuse import analyze_content
+            schema = {'type': 'object', 'properties': {'ok': {'type': 'boolean'}}, 'required': ['ok']}
+            original = SimpleNamespace(text='共同公文事實', kind='native_pdf_text')
+            await analyze_content(bound, original, stage='document-group', prompt='analysis', schema=schema)
+            self.assertEqual(model.await_count, 4)
+            self.assertIs(model.await_args.args[0], ctx)
+            bob = Context('bob', self.job, self.config, self.store, UserBilledModel('bob', 'bob-sub', ctx.model.client))
+            other = await billed_pipe(bob)
+            self.assertEqual(await analyze_content(other, original, stage='document-group', prompt='analysis', schema=schema), {'ok': True})
+            self.assertEqual(model.await_count, 4)  # No second user's model reservation or fake charge.
+            self.assertEqual(other._usage_owner, 'bob')
+            from dataclasses import replace
+            resources = current_resources()
+            with patch.object(resources, 'settings', replace(resources.settings, shared_content_cache_enabled=False)):
+                disabled = await billed_pipe(ctx)
+                self.assertIsNone(disabled.content_cache)
+                self.assertIsNone(disabled.analysis_results)
 
     async def test_grouping_private_outputs_receipt_and_no_calendar_write(self):
         from company_agent.services.eip.processing import process
@@ -492,11 +490,11 @@ class EIPProcessingTests(
                 new=AsyncMock(return_value=object()),
             ),
             patch(
-                'official_document_workflow.infrastructure.eip.sessions.manual_session',
+                'examples.official_document_workflow.infrastructure.eip.sessions.manual_session',
                 session,
             ),
             patch(
-                'official_document_workflow.application.integration.source_file',
+                'examples.official_document_workflow.application.integration.source_file',
                 new=AsyncMock(
                     side_effect=[SimpleNamespace(id=str(i)) for i in range(3)],
                 ),
@@ -506,7 +504,7 @@ class EIPProcessingTests(
                 new=AsyncMock(return_value=(None, None)),
             ),
             patch(
-                'official_document_workflow.application.multi_agent.process_with_team',
+                'examples.official_document_workflow.application.multi_agent.process_with_team',
                 new=AsyncMock(return_value=output),
             ) as team,
             patch(
@@ -515,7 +513,7 @@ class EIPProcessingTests(
             ),
         ):
             result = await process(ctx, EIPProcess(handles=handles))
-            self.assertEqual(team.call_args.args[4], [['0', '1'], ['2']])
+            self.assertEqual(team.call_args.args[3], [['0', '1'], ['2']])
             self.assertFalse(result['has_deadlines'])
             self.assertEqual(await process(ctx, EIPProcess(handles=handles)), result)
             self.assertEqual(team.await_count, 1)

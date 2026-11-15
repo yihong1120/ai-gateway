@@ -6,7 +6,10 @@ import json
 import resource
 import sys
 
+from langchain_core.tools import ToolException
+
 from company_agent.services.office import documents
+from company_agent.services.files.errors import RecoverableToolError
 
 
 def main():
@@ -19,6 +22,7 @@ def main():
     if 'data' in args:
         args['data'] = base64.b64decode(args['data'], validate=True)
     from company_agent.services.office.spreadsheet_edit import edit_spreadsheet
+    from company_agent.services.delivery.validation import validate_file
 
     funcs = {
         'edit_spreadsheet': edit_spreadsheet,
@@ -29,8 +33,18 @@ def main():
         'spreadsheet': documents.create_spreadsheet,
         'read_spreadsheet': documents.read_spreadsheet,
         'analyze_spreadsheet': documents.analyze_spreadsheet,
+        'validate_delivery_file': validate_file,
     }
-    result = funcs[operation](**args)
+    try:
+        result = funcs[operation](**args)
+    except RecoverableToolError as error:
+        print(json.dumps({'input_error': json.loads(str(error))}, ensure_ascii=False))
+        return
+    except ToolException as error:
+        if operation != 'validate_delivery_file':
+            raise
+        print(json.dumps({'input_error': {'code': 'delivery_validation_failed', 'message': str(error)}}, ensure_ascii=False))
+        return
     value = (
         {'binary': base64.b64encode(result).decode()}
         if isinstance(result, bytes)

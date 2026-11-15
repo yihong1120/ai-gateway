@@ -15,6 +15,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.messages import messages_to_dict
 from langchain_core.messages import ToolMessage
 
+from company_agent.tests.webui_fixture import modules as host_modules
 from company_agent.api.pipe import conversation
 from company_agent.api.pipe import run_pipe
 from company_agent.api.service import Service
@@ -44,6 +45,9 @@ def saved_chat():
 
 
 class BranchTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.dict('sys.modules', host_modules()))
+
     def test_official_branch_helper_excludes_siblings_and_tool_authority(self):
         chat = saved_chat()
         chat['history']['messages']['a1'].update(tool_calls=[{'name': 'complete_job'}], name='reviewer')
@@ -106,6 +110,7 @@ class BranchTests(unittest.TestCase):
 class ConversationTests(unittest.IsolatedAsyncioTestCase, Fixture):
     def setUp(self):
         super().setUp()
+        self.enterContext(patch.dict('sys.modules', host_modules()))
         self.queue = WorkQueue(self.private, self.base / 'uploads')
 
     def settings(self, row):
@@ -121,7 +126,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase, Fixture):
         model.subject = 'sub'
         model.http_async_client = types.SimpleNamespace(aclose=AsyncMock())
         model.http_client = types.SimpleNamespace(close=Mock())
-        svc = Service(self.queue, AsyncMock(return_value={'id': 'alice'}), lambda _: model, self.settings)
+        svc = Service(self.queue, AsyncMock(return_value={'id': 'alice'}), lambda _, model_name=None: model, self.settings)
         await svc.execute(self.queue.claim())
 
     def prior(self, request='a1', owner='alice', chat='chat'):
@@ -142,7 +147,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.prior('a1', owner='bob')
         self.prior('a1', chat='different')
         model = types.SimpleNamespace(subject='sub')
-        svc = Service(self.queue, None, lambda _: model, None)
+        svc = Service(self.queue, None, lambda _, model_name=None: model, None)
         result = {'id': 'result', 'status': 'needs_input', 'answer': '收到', 'progress': 'done', 'files': []}
         with patch('company_agent.api.pipe.verified_user', AsyncMock(return_value={'id': 'alice'})), \
                 patch.object(Chats, 'get_chat_by_id_and_user_id', AsyncMock(return_value=types.SimpleNamespace(chat=saved_chat()))) as owned, \

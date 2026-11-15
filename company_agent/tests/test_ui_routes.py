@@ -440,7 +440,9 @@ class UIRoutesTests(unittest.IsolatedAsyncioTestCase):
         queue.submit.return_value = 'new-job'
         queue.public.return_value = {'status': 'queued'}
         model = SimpleNamespace(subject='verified-subject')
-        svc = SimpleNamespace(queue=queue, model_factory=Mock(return_value=model))
+        from examples.shared.runtime.io import run_sync
+        svc = SimpleNamespace(queue=queue, model_factory=Mock(return_value=model),
+                              _io=run_sync, result=queue.public)
         verified = {'id': 'test'}
         with patch.object(self.routes_module, 'service', return_value=svc), \
                 patch.object(self.routes_module, 'verified_user', AsyncMock(return_value=verified)) as identity, \

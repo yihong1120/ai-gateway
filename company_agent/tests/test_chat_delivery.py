@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import copy
+import time
+import json
 import types
 import unittest
 from unittest.mock import AsyncMock
 from unittest.mock import patch
 
+from company_agent.tests.webui_fixture import modules as host_modules
 from company_agent.api.chat import publish_pending
 from company_agent.api.queue import WorkQueue
 from company_agent.api.service import Service
@@ -16,6 +19,7 @@ from company_agent.tests.test_agent import Fixture
 class ChatDeliveryTests(unittest.IsolatedAsyncioTestCase, Fixture):
     def setUp(self):
         super().setUp()
+        self.enterContext(patch.dict('sys.modules', host_modules()))
         self.queue = WorkQueue(self.private, self.base/'uploads')
         self.key = self.queue.submit('alice', 'subject', 'chat', 'assistant', '請處理', [])
         self.chat = {
@@ -91,9 +95,10 @@ class ChatDeliveryTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.finish()
         self.events.side_effect = RuntimeError('disconnected')
         await self.publish()
-        self.assertEqual(len(self.queue.chat_pending()), 1)
+        self.assertEqual(self.queue.chat_pending(), [])
         self.events.side_effect = None
-        await self.publish()
+        with patch('company_agent.api.queue.time.time', return_value=time.time()+3):
+            await self.publish()
         self.assertEqual(self.queue.chat_pending(), [])
         self.assertEqual(len(self.queue.list('alice')), 1)
         self.assertEqual(self.queue.get('alice', self.key)['status'], 'done')
@@ -127,3 +132,63 @@ class ChatDeliveryTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertTrue(message['done'])
         self.assertIn('等待您確認', message['content'])
         self.assertIn('/agents?job='+self.key, message['content'])
+
+    async def document(self):
+        await self.publish()
+        self.key = self.queue.submit_document('alice', 'chat', 'document', [{'id': 'source'}], {}, 'hash')
+        self.chat['history']['messages']['document'] = {
+            'id': 'document', 'role': 'assistant', 'parentId': 'user', 'content': '',
+        }
+        return self.chat['history']['messages']['document']
+
+    async def test_document_progress_partial_result_and_downloads_are_delivered(self):
+        message = await self.document()
+        await self.publish()
+        self.assertFalse(message['done'])
+        self.queue.update(self.key, status='running', progress='正在處理第 2/3 份公文')
+        await self.publish()
+        self.assertIn('第 2/3 份', message['content'])
+        self.queue.update(self.key, status='partial', document_result=json.dumps({
+            'answer': '成功兩份；第三份需要重試',
+            'files': [{'id': 'docx', 'name': '公文.docx', 'url': '/api/v1/files/docx/content?attachment=true'}],
+        }))
+        await self.publish()
+        self.assertTrue(message['done'])
+        self.assertIn('第三份需要重試', message['content'])
+        self.assertIn('/api/v1/files/docx/content?attachment=true', message['content'])
+        self.assertEqual(self.queue.chat_pending(), [])
+
+    async def test_existing_document_receipt_is_recovered_after_outbox_restart(self):
+        from open_webui.socket import main as socket
+
+        message = await self.document()
+        message['content'] = f'公文工作已接收，會在背景執行；\n\n[查看進度](/agents?job={self.key})'
+        self.queue.update(self.key, status='done', document_result=json.dumps({'answer': '已完成公文', 'files': []}))
+        restored = WorkQueue(self.private, self.base/'uploads')
+        with patch.object(socket, 'get_event_emitter', AsyncMock(return_value=None)):
+            await publish_pending(restored, Service._io)
+        self.assertIn('已完成公文', message['content'])
+        self.assertTrue(message['done'])
+        self.assertEqual(restored.chat_pending(), [])
+
+    async def test_document_file_changes_invalidate_delivered_revision(self):
+        message = await self.document()
+        self.queue.update(self.key, status='interrupted', progress='已中斷')
+        await self.publish()
+        self.assertEqual(self.queue.chat_pending(), [])
+        self.queue.update(self.key, document_result=json.dumps({
+            'answer': '', 'files': [{'url': '/api/v1/files/kept/content?attachment=true'}],
+        }))
+        self.assertEqual(len(self.queue.chat_pending()), 1)
+        await self.publish()
+        self.assertIn('/api/v1/files/kept/content?attachment=true', message['content'])
+
+    async def test_document_receipt_for_another_job_and_edited_answer_are_preserved(self):
+        message = await self.document()
+        self.events.reset_mock()
+        for content in ['使用者已編輯的公文回答', '公文工作已接收，\n[查看](/agents?job=another-job)']:
+            message['content'] = content
+            self.queue.update(self.key, progress=content)
+            await self.publish()
+            self.assertEqual(message['content'], content)
+        self.events.assert_not_awaited()

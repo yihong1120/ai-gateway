@@ -27,7 +27,7 @@ PROMPT = files('company_agent.agents').joinpath('common.md').read_text(encoding=
 def capability_catalog():
     return {
         'coordinator': {'status': 'implemented', 'scope': '理解指令、委派、整合；不直接操作外部系統'},
-        'knowledge': {'status': 'implemented', 'scope': '授權本機及個人綁定 NAS home／共享資料夾的搜尋與文字閱讀；NAS 唯讀'},
+        'knowledge': {'status': 'implemented', 'scope': '授權本機及個人綁定 NAS home／共享資料夾的搜尋與文字閱讀；NAS 唯讀。可連接管理員明確允許的唯讀 MCP 工具，使用本人 OIDC 身分，由來源服務執行領域授權'},
         'document': {'status': 'implemented', 'scope': 'DOCX／PPTX／文字草稿、來源局部修改、受控存檔；本工作草稿可用 edit_artifact_text_run 依已讀 run／雜湊另存修訂版並重新審核；本地 OCR 讀取文字；啟用 understand_image 可對 PNG/JPEG/PDF 單頁語意分析，非工程認證'},
         'data': {'status': 'implemented', 'scope': 'XLSX 分頁讀取、單欄統計、新建公式與圖表報表；edit_spreadsheet 指定原簿 SHA／原值，跨表修改值、受限同表公式及既有樣式後另存；清除快取待 Excel 重算，不插刪列或執行巨集'},
         'reviewer': {'status': 'implemented', 'scope': '只讀來源及本工作產出，內容校核；不是人工批准或工程簽證'},

@@ -259,8 +259,8 @@ class NASTests(NASFixture):
             row = db.execute('SELECT ciphertext FROM nas_bindings WHERE owner=%s', ('alice',)).fetchone()
             self.assertNotIn(b'alice-password', row[0])
             db.execute(
-                'INSERT INTO nas_bindings VALUES (%s,%s,%s,%s,%s,TRUE)',
-                ('bob', 'other', row[0], state['revision'], 1),
+                'INSERT INTO nas_bindings(owner,account_hash,ciphertext,revision,updated,usable,binding_id) VALUES (%s,%s,%s,%s,%s,TRUE,%s)',
+                ('bob', 'other', row[0], state['revision'], 1, state['binding_id']),
             )
         with self.assertRaises(InvalidTag):
             self.vault.credentials('bob', state['revision'])

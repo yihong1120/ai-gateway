@@ -6,8 +6,12 @@ import json
 import os
 from datetime import timedelta
 
+from examples.shared.config import load_service
+
 
 async def main():
+    load_service('webui')
+    os.environ['PYTHON_DOTENV_DISABLED'] = '1'
     os.environ['FROM_INIT_PY'] = 'true'
     from open_webui.models.users import Users
     from open_webui.models.config import Config

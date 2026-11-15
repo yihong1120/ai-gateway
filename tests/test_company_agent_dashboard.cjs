@@ -2,10 +2,11 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');const vm=require('node:vm');
 class Element{constructor(tag){this.tag=tag;this.children=[];this.hidden=false;this.value='';this.textContent='';}append(...x){this.children.push(...x);}replaceChildren(...x){this.children=x;}}
-const nodes={};const calls=[];let redirect;
+const nodes={};const calls=[];let redirect;let timerDelay=null;const events={};
 const context={console,URL,URLSearchParams,Date,JSON,encodeURIComponent,Error,crypto:{randomUUID:()=> 'request-id'},
- document:{getElementById:id=>nodes[id]??=new Element(id),createElement:tag=>new Element(tag)},
- location:{search:'',replace:value=>{redirect=value;}},history:{replaceState(){}},setInterval(){},
+ window:{addEventListener:(name,fn)=>events[name]=fn},
+ document:{hidden:false,addEventListener:(name,fn)=>events[name]=fn,getElementById:id=>nodes[id]??=new Element(id),createElement:tag=>new Element(tag)},
+ location:{search:'',replace:value=>{redirect=value;}},history:{replaceState(){}},setInterval(){},setTimeout(fn,delay){timerDelay=delay;return fn;},clearTimeout(){},
  fetch:async(path,options)=>{calls.push({path,options});return {ok:true,status:200,json:async()=>({jobs:[]})};}};
 vm.createContext(context);
 vm.runInContext(fs.readFileSync('company_agent/ui/web_dashboard.js','utf8')+'\nglobalThis.test={render,api,previewCalendar,refresh,select:id=>{selected=id;}};',context);
@@ -73,5 +74,14 @@ vm.runInContext(fs.readFileSync('company_agent/ui/web_dashboard.js','utf8')+'\ng
  context.fetch=async()=>({ok:false,status:401});
  await assert.rejects(context.test.api('/agents/jobs'),e=>e.status===401);
  assert.equal(redirect,undefined);
+ context.fetch=async()=>({ok:true,json:async()=>({jobs:[]})});
+ context.test.select('');await context.test.refresh();assert.equal(timerDelay,30000);
+ const stable={id:'stable',created:0,status:'done',progress:'完成',files:[]};
+ context.fetch=async()=>({ok:true,json:async()=>({jobs:[stable]})});
+ context.test.select('stable');await context.test.refresh();
+ const stableList=nodes.jobs.children,stableFiles=nodes.files.children;
+ await context.test.refresh();assert.equal(nodes.jobs.children,stableList);assert.equal(nodes.files.children,stableFiles);
+ stable.status='running';await context.test.refresh();assert.equal(timerDelay,5000);
+ const beforeHidden=calls.length;context.document.hidden=true;await context.test.refresh(false);assert.equal(calls.length,beforeHidden);context.document.hidden=false;
  console.log('Company Agent dashboard safe rendering, status, CSRF and native HTTP errors passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

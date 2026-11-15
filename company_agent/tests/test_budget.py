@@ -38,7 +38,7 @@ class BudgetTests(unittest.IsolatedAsyncioTestCase, Fixture):
             ),
         ])
         result = await self.failed_job(DocumentAgent(self.config, model).run('alice', '製作文字'), ModelCallLimitExceededError)
-        self.assertEqual(result['status'], 'running')
+        self.assertEqual(result['status'], 'error')
         self.assertEqual(self.store.attempts(result['job_id']), 2)
         self.assertEqual([f['name'] for f in result['files']], ['draft.txt'])
         self.assertTrue(result['checkpoint'].next)

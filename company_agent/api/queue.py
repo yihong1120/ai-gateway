@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import time
 import uuid
 from pathlib import Path
@@ -12,6 +11,7 @@ from psycopg.rows import dict_row
 
 from company_agent.config import MAX_STEPS
 from company_agent.runtime.storage import Store
+from company_agent.api.source_snapshots import SourceSnapshots
 
 SUPPORTED = {
     '.pdf',
@@ -41,32 +41,14 @@ TERMINAL = {
 
 
 class WorkQueue:
-    def __init__(self, state_dir, source_dir, eip_binding=None, *, max_pending=500, max_per_user=20):
+    def __init__(self, state_dir, source_dir, eip_binding=None, *, max_pending=500, max_per_user=20, store=None):
         if max_pending < 1 or max_per_user < 1:
             raise ValueError('工作佇列上限必須大於零。')
         self.max_pending, self.max_per_user = max_pending, max_per_user
         self.eip_binding = eip_binding
-        self.store = Store(state_dir)
-        self.sources = Path(source_dir)
-        self.sources.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if self.sources.is_symlink() or self.sources.stat().st_mode & 0o077:
-            raise ValueError('附件目錄必須為私人一般資料夾。')
-        with self.store.db() as db:
-            self.store.lock(db)
-            db.execute("""CREATE TABLE IF NOT EXISTS web_jobs (
-                id TEXT PRIMARY KEY,owner TEXT NOT NULL,subject TEXT NOT NULL,chat TEXT NOT NULL,
-                request_id TEXT NOT NULL,request_hash TEXT NOT NULL,status TEXT NOT NULL,
-                payload TEXT NOT NULL,engine_job TEXT,progress TEXT NOT NULL,created DOUBLE PRECISION NOT NULL,
-                UNIQUE(owner,chat,request_id))""")
-            db.execute("ALTER TABLE web_jobs ADD COLUMN IF NOT EXISTS request_aliases TEXT[] NOT NULL DEFAULT '{}'")
-            db.execute("ALTER TABLE web_jobs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'company'")
-            db.execute("ALTER TABLE web_jobs ADD COLUMN IF NOT EXISTS document_result TEXT NOT NULL DEFAULT '{}'")
-            db.execute('ALTER TABLE web_jobs ADD COLUMN IF NOT EXISTS started DOUBLE PRECISION')
-            db.execute('ALTER TABLE web_jobs ADD COLUMN IF NOT EXISTS cancel_requested BOOLEAN NOT NULL DEFAULT FALSE')
-            db.execute("ALTER TABLE web_jobs ADD COLUMN IF NOT EXISTS chat_revision TEXT NOT NULL DEFAULT ''")
-            db.execute('CREATE INDEX IF NOT EXISTS web_jobs_owner_created ON web_jobs(owner,created DESC)')
-            db.execute('CREATE INDEX IF NOT EXISTS web_jobs_owner_started ON web_jobs(owner,started DESC) WHERE started IS NOT NULL')
-            db.execute('CREATE INDEX IF NOT EXISTS web_jobs_dispatch ON web_jobs(status,owner,started,created)')
+        self.store = store if store is not None else Store(state_dir)
+        self.snapshots = SourceSnapshots(source_dir, self.store)
+        self.sources = self.snapshots.root
 
     def check_capacity(self, db, owner):
         total, owned = db.execute(
@@ -81,8 +63,23 @@ class WorkQueue:
     def submit(self, owner, subject, chat, request_id, instruction, inputs, references=(), conversation=(), *, allow_pending_references=False):
         from company_agent.services.files.nas import NASVault
 
-        binding = NASVault(self.store).status(owner)
-        nas_revision = binding['revision'] if binding['usable'] else None
+        vault = NASVault(self.store)
+        with self.store.db() as db:
+            nas_revisions = sorted(row[0] for row in db.execute(
+                'SELECT revision FROM nas_bindings WHERE owner=%s AND usable', (owner,)).fetchall())
+            # A continuation keeps its original source scope even when a new account was added.
+            inherited = []
+            for reference in references:
+                row = db.execute('SELECT payload FROM web_jobs WHERE owner=%s AND id=%s', (owner, reference)).fetchone()
+                if row:
+                    old = json.loads(row[0])
+                    revisions = old.get('nas_binding_revisions') or ([old['nas_binding_revision']] if old.get('nas_binding_revision') else [])
+                    inherited.append(sorted(revisions))
+            if inherited:
+                if any(revisions != inherited[0] for revisions in inherited):
+                    raise ValueError('歷史工作的 NAS 來源範圍不同，請分別接續工作。')
+                nas_revisions = inherited[0]
+        nas_revision = nas_revisions[0] if len(nas_revisions) == 1 else None
         eip_revision = self.eip_binding(owner) if self.eip_binding else None
         if not all(
             isinstance(v, str) and v.strip() and len(v) <= 255
@@ -104,8 +101,17 @@ class WorkQueue:
                 ensure_ascii=False,
             ).encode(),
         ).hexdigest()
-        with self.store.db() as db:
-            self.store.lock(db)
+        for name, data in inputs:
+            if (
+                not isinstance(name, str)
+                or Path(name).suffix.lower() not in SUPPORTED
+                or not data
+                or len(data) > 20_000_000
+            ):
+                raise ValueError(
+                    '附件格式或大小不支援；接受 PDF、DOCX、PPTX、XLSX、TXT、MD、CSV、DWG、DXF，單檔 20 MB。',
+                )
+        def existing_submission(db):
             prior = db.execute(
                 'SELECT id,request_hash FROM web_jobs WHERE owner=%s AND chat=%s AND (request_id=%s OR %s=ANY(request_aliases))',
                 (owner, chat, request_id, request_id),
@@ -114,82 +120,95 @@ class WorkQueue:
                 if prior[1] != digest:
                     raise ValueError('同一訊息內容已變更；請另送新訊息，不重播舊操作。')
                 return prior[0]
-            # Regeneration creates a new assistant ID while the same owned work
-            # is still running. Attach that ID to the existing work and its sources.
-            active = db.execute(
-                'SELECT id,payload FROM web_jobs WHERE owner=%s AND subject=%s AND chat=%s '
-                "AND request_hash=%s AND status IN ('queued','running') ORDER BY created,id",
-                (owner, subject, chat, digest),
-            ).fetchall()
-            for key, stored in active:
-                payload = json.loads(stored)
-                if (payload.get('nas_binding_revision'), payload.get('eip_binding_revision')) == (nas_revision, eip_revision):
-                    db.execute(
-                        'UPDATE web_jobs SET request_aliases=array_append(request_aliases,%s) WHERE id=%s', (
-                            request_id, key,
-                        ),
-                    )
-                    return key
-            key = str(uuid.uuid4())
-            self.check_capacity(db, owner)
-            manifest = []
-            for name, data in inputs:
-                if (
-                    not isinstance(name, str)
-                    or Path(name).suffix.lower() not in SUPPORTED
-                    or not data
-                    or len(data) > 20_000_000
-                ):
-                    raise ValueError(
-                        '附件格式或大小不支援；接受 PDF、DOCX、PPTX、XLSX、TXT、MD、CSV、DWG、DXF，單檔 20 MB。',
-                    )
-            for reference in references:
-                old = self.get(owner, reference)
-                for field, revision in (('nas_binding_revision', nas_revision), ('eip_binding_revision', eip_revision)):
-                    if old['payload'].get(field) and old['payload'][field] != revision:
-                        raise ValueError(f"歷史工作的 {field.split('_')[0].upper()} 帳號已解除或變更，請另開聊天室。")
-                if (
-                    old['chat'] != chat
-                    or old['subject'] != subject
-                    or old['kind'] != 'company'
-                    or old['status'] not in (TERMINAL - {'awaiting_approval'} | ({'queued', 'running'} if allow_pending_references else set()))
-                ):
-                    raise ValueError('僅能引用同一聊天室、同一計費身分且已停止的本人工作。')
-            directory = self.sources / key
-            directory.mkdir(mode=0o700)
-            for index, (name, data) in enumerate(inputs):
-                filename = f"input_{index+1}" + Path(name).suffix.lower()
-                with open(directory / filename, 'xb') as stream:
-                    stream.write(data)
-                os.chmod(directory / filename, 0o600)
-                manifest.append({'path': filename, 'display_name': name})
+        with self.store.db() as db:
+            prior = existing_submission(db)
+        if prior:
+            return prior
+        registration_written = False
+        def register(key, manifest):
+            nonlocal registration_written
             payload = {
-                'instruction': instruction,
-                'manifest': manifest,
-                'references': references,
-                'conversation': conversation,
-                'operation': 'run',
-                'nas_binding_revision': nas_revision,
-                'eip_binding_revision': eip_revision,
+                'instruction': instruction, 'manifest': manifest,
+                'references': references, 'conversation': conversation, 'operation': 'run',
+                'nas_binding_revision': nas_revision, 'eip_binding_revision': eip_revision,
+                'nas_binding_revisions': nas_revisions,
             }
-            db.execute(
-                'INSERT INTO web_jobs (id,owner,subject,chat,request_id,request_hash,status,payload,engine_job,progress,created) '
-                'VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)',
-                (
-                    key,
-                    owner,
-                    subject,
-                    chat,
-                    request_id,
-                    digest,
-                    'queued',
-                    json.dumps(payload, ensure_ascii=False),
-                    None,
-                    '等待執行',
-                    time.time(),
-                ),
-            )
-        return key
+            with self.store.db() as db:
+                self.store.lock(db)
+                prior = existing_submission(db)
+                if prior:
+                    return prior
+                # Regeneration creates a new assistant ID while the same owned work
+                # is still running. Attach that ID to the existing work and its sources.
+                active = db.execute(
+                    'SELECT id,payload FROM web_jobs WHERE owner=%s AND subject=%s AND chat=%s '
+                    "AND request_hash=%s AND status IN ('queued','running') ORDER BY created,id",
+                    (owner, subject, chat, digest),
+                ).fetchall()
+                for existing, stored in active:
+                    stored_payload = json.loads(stored)
+                    stored_nas = stored_payload.get('nas_binding_revisions') or (
+                        [stored_payload['nas_binding_revision']] if stored_payload.get('nas_binding_revision') else [])
+                    if sorted(stored_nas) == nas_revisions and stored_payload.get('eip_binding_revision') == eip_revision:
+                        db.execute(
+                            'UPDATE web_jobs SET request_aliases=array_append(request_aliases,%s) WHERE id=%s', (
+                                request_id, existing,
+                            ),
+                        )
+                        return existing
+                self.check_capacity(db, owner)
+                for revision in nas_revisions:
+                    # Validate each frozen binding under the same mutation lock as unlink/rebind.
+                    vault.credentials(owner, revision, db=db).clear()
+                for reference in references:
+                    with db.cursor(row_factory=dict_row) as cursor:
+                        old = cursor.execute('SELECT chat,subject,kind,status,payload FROM web_jobs WHERE owner=%s AND id=%s',
+                                             (owner, reference)).fetchone()
+                    if old is None:
+                        raise ValueError('工作不存在或沒有權限。')
+                    old['payload'] = json.loads(old['payload'])
+                    for field, revision in (('nas_binding_revision', nas_revision), ('eip_binding_revision', eip_revision)):
+                        if old['payload'].get(field) and old['payload'][field] != revision:
+                            raise ValueError(f"歷史工作的 {field.split('_')[0].upper()} 帳號已解除或變更，請另開聊天室。")
+                    if (
+                        old['chat'] != chat
+                        or old['subject'] != subject
+                        or old['kind'] != 'company'
+                        or old['status'] not in (TERMINAL - {'awaiting_approval'} | ({'queued', 'running'} if allow_pending_references else set()))
+                    ):
+                        raise ValueError('僅能引用同一聊天室、同一計費身分且已停止的本人工作。')
+                db.execute(
+                    'INSERT INTO web_jobs (id,owner,subject,chat,request_id,request_hash,status,payload,engine_job,progress,created) '
+                    'VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)',
+                    (
+                        key,
+                        owner,
+                        subject,
+                        chat,
+                        request_id,
+                        digest,
+                        'queued',
+                        json.dumps(payload, ensure_ascii=False),
+                        None,
+                        '等待執行',
+                        time.time(),
+                    ),
+                )
+                registration_written = True
+            return key
+
+        with self.snapshots.prepare(inputs) as (key, manifest):
+            try:
+                registered = register(key, manifest)
+            except BaseException:
+                if not registration_written:
+                    self.snapshots.discard(key)
+                raise
+            if registered != key:
+                self.snapshots.discard(key)
+            else:
+                self.snapshots.registered(key)
+            return registered
 
     def submit_document(self, owner, chat, request_id, sources, valves, content_hash):
         """Only the authenticated upload bridge constructs this fixed workflow."""
@@ -259,24 +278,43 @@ class WorkQueue:
     def list(self, owner):
         return self._public(owner)
 
+    def output_changed(self, owner, key):
+        with self.store.db() as db:
+            return db.execute("UPDATE web_jobs SET chat_version=chat_version+1 WHERE owner=%s AND id=%s AND kind='document'",
+                              (owner,key)).rowcount == 1
+
     def chat_pending(self, limit=32):
         """Bounded durable outbox; observe job changes without fetching input payloads."""
         with self.store.db() as db:
             db.row_factory = dict_row
             return db.execute(
-                """WITH updates AS (
-                SELECT w.id,w.owner,w.chat,w.request_id,w.request_aliases,w.chat_revision,
-                    md5(jsonb_build_array(w.status,w.progress,w.engine_job,
-                        w.request_aliases,j.result)::text) AS revision,w.created
-                FROM web_jobs w LEFT JOIN jobs j ON j.id=w.engine_job AND j.owner=w.owner
-                WHERE w.kind='company'
-            ) SELECT * FROM updates WHERE revision<>chat_revision
-              ORDER BY created,id LIMIT %s""", (limit,),
+                """WITH due AS (
+                    SELECT id,owner,chat,request_id,request_aliases,chat_version AS revision,
+                        created,chat_last_attempt,
+                        row_number() OVER(PARTITION BY owner ORDER BY chat_last_attempt NULLS FIRST,created,id) AS turn
+                    FROM web_jobs
+                    WHERE chat_delivered_version < chat_version AND kind IN ('company','document')
+                      AND chat_next_attempt <= %s
+                ) SELECT * FROM due ORDER BY turn,chat_last_attempt NULLS FIRST,created,id LIMIT %s""",
+                (time.time(), limit),
             ).fetchall()
+
+    def chat_failed(self, key, revision):
+        # A failure for an older snapshot must not delay a newer result.
+        with self.store.db() as db:
+            db.execute(
+                'UPDATE web_jobs SET chat_failures=chat_failures+1,chat_last_attempt=%s,'
+                'chat_next_attempt=%s+LEAST(300,power(2,LEAST(chat_failures+1,9))) '
+                'WHERE id=%s AND chat_version=%s AND chat_delivered_version<%s',
+                (time.time(), time.time(), key, revision, revision),
+            )
 
     def chat_delivered(self, key, revision):
         with self.store.db() as db:
-            db.execute('UPDATE web_jobs SET chat_revision=%s WHERE id=%s', (revision, key))
+            db.execute(
+                'UPDATE web_jobs SET chat_delivered_version=GREATEST(chat_delivered_version,%s) '
+                'WHERE id=%s AND chat_version>=%s', (revision, key, revision),
+            )
 
     def _public(self, owner, key=None):
         # One owned snapshot for both list and detail. Never fetch input payloads
@@ -285,12 +323,13 @@ class WorkQueue:
             db.row_factory = dict_row
             rows = db.execute(
                 """WITH selected AS (
-                    SELECT id,owner,status,progress,created,engine_job,kind,document_result FROM web_jobs
+                    SELECT id,owner,status,progress,created,engine_job,kind,document_result,error_code FROM web_jobs
                     WHERE owner=%s AND (%s::text IS NULL OR id=%s)
                     ORDER BY created DESC LIMIT 100
                 )
                 SELECT w.*,j.result,b.step_limit,COALESCE(m.attempts,0) AS attempts,
-                    COALESCE(f.files,'[]'::json) AS files
+                    COALESCE(f.files,'[]'::json) AS files,
+                    COALESCE(f.artifact_history,'[]'::json) AS artifact_history
                 FROM selected w
                 LEFT JOIN jobs j ON j.id=w.engine_job AND j.owner=w.owner
                 LEFT JOIN job_budgets b ON b.job=j.id AND b.owner=w.owner
@@ -298,8 +337,12 @@ class WorkQueue:
                 LEFT JOIN LATERAL (
                     SELECT json_agg(json_build_object(
                         'id',a.id,'name',a.name,'sha256',a.sha,
-                        'calendar_preview',c.artifact IS NOT NULL
-                    )) AS files
+                        'calendar_preview',c.artifact IS NOT NULL,'lifecycle',a.lifecycle
+                    )) FILTER (WHERE a.lifecycle <> 'superseded') AS files,
+                    json_agg(json_build_object(
+                        'id',a.id,'name',a.name,'sha256',a.sha,
+                        'lifecycle',a.lifecycle,'superseded_by',a.superseded_by
+                    )) FILTER (WHERE a.lifecycle = 'superseded') AS artifact_history
                     FROM artifacts a LEFT JOIN eip_calendar_sources c
                         ON c.owner=a.owner AND c.job=a.job AND c.artifact=a.id
                     WHERE a.owner=w.owner AND a.job=j.id
@@ -314,11 +357,23 @@ class WorkQueue:
 
         value = {k: row[k] for k in ('id', 'status', 'progress', 'created', 'kind')}
         value.update(files=[], proposals=[], answer='')
+        if row['error_code']:
+            value['error'] = {'code': row['error_code'], 'message': row['progress']}
         if row['status'] == 'queued':
             value['progress'] = '等待執行（多人並行排程，同一帳號依序處理）'
         if row['kind'] == 'document':
             result = json.loads(row['document_result'])
-            value.update(answer=result.get('answer', ''), files=result.get('files', []), resumable=False)
+            value.update(answer=result.get('answer', ''), files=result.get('files', []),
+                         notices=result.get('notices', []), resumable=False)
+            return value
+        if row['kind'] != 'company':
+            result = json.loads(row['result'] or '{}')
+            value.update(
+                answer=result.get('notice', ''), notices=result.get('notices', []),
+                warnings=result.get('warnings', []), analysis_errors=result.get('errors', []),
+                resumable=False,
+                files=[{**f, 'url': f'/agents/artifacts/{f["id"]}'} for f in row['files']],
+            )
             return value
         if row['engine_job']:
             if row['result'] is None:
@@ -339,10 +394,14 @@ class WorkQueue:
                     'limit': row['step_limit'], 'maximum': MAX_STEPS,
                 }
             value['files'] = [{**f, 'url': f'/agents/artifacts/{f["id"]}'} for f in row['files']]
+            value['artifact_history'] = [{**f, 'url': f'/agents/artifacts/{f["id"]}'} for f in row['artifact_history']]
+            value['delivery_validation'] = result.get('delivery_validation', [])
+            value['orchestration_mode'] = result.get('orchestration_mode', 'delegated')
+            value['office_execution_mode'] = result.get('office_execution_mode', 'flexible')
         return value
 
     def update(self, key, **values):
-        if not values or set(values) - {'status', 'progress', 'engine_job', 'payload', 'document_result'}:
+        if not values or set(values) - {'status', 'progress', 'engine_job', 'payload', 'document_result', 'error_code'}:
             raise ValueError('工作更新格式錯誤。')
         with self.store.db() as db:
             db.execute(
@@ -350,18 +409,19 @@ class WorkQueue:
                 (*values.values(), key),
             )
 
-    def claim(self, excluded_owners=(), kinds=('company', 'document')):
+    def claim(self, excluded_owners=(), kinds=None):
         with self.store.db() as db:
             self.store.lock(db)
             db.row_factory = dict_row
             row = db.execute(
                 """SELECT w.* FROM web_jobs w WHERE w.status='queued'
-                AND NOT(w.owner=ANY(%s)) AND w.kind=ANY(%s) AND NOT w.cancel_requested
+                AND NOT(w.owner=ANY(%s)) AND (%s::text[] IS NULL OR w.kind=ANY(%s)) AND NOT w.cancel_requested
                 AND NOT EXISTS(SELECT 1 FROM web_jobs busy WHERE busy.owner=w.owner AND busy.status='running')
                 AND NOT EXISTS(SELECT 1 FROM web_jobs earlier WHERE earlier.owner=w.owner
                     AND earlier.status='queued' AND (earlier.created,earlier.id)<(w.created,w.id))
                 ORDER BY COALESCE((SELECT max(prior.started) FROM web_jobs prior WHERE prior.owner=w.owner),0),
-                    w.created,w.id LIMIT 1 FOR UPDATE OF w SKIP LOCKED""", (list(excluded_owners), list(kinds)),
+                    w.created,w.id LIMIT 1 FOR UPDATE OF w SKIP LOCKED""",
+                (list(excluded_owners), None if kinds is None else list(kinds), None if kinds is None else list(kinds)),
             ).fetchone()
             if not row:
                 return None
@@ -424,7 +484,7 @@ class WorkQueue:
             self.store.lock(db)
             self.check_capacity(db, owner)
             cursor = db.execute(
-                "UPDATE web_jobs SET payload=%s,status='queued',progress='等待恢復',cancel_requested=FALSE WHERE id=%s AND owner=%s AND status=%s",
+                "UPDATE web_jobs SET payload=%s,status='queued',progress='等待恢復',error_code=NULL,cancel_requested=FALSE WHERE id=%s AND owner=%s AND status=%s",
                 (json.dumps(payload, ensure_ascii=False), key, owner, row['status']),
             )
             if cursor.rowcount != 1:

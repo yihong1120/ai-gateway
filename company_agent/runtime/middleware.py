@@ -6,6 +6,7 @@ owns job limits, company prompts and publication approval.
 from __future__ import annotations
 
 import asyncio
+import time
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware import hook_config
@@ -72,7 +73,9 @@ class CompanyPolicy(AgentMiddleware):
         # These fields only select prompt guidance. The model-visible schema
         # remains LangChain's tool_call_schema, with runtime injection hidden.
         parameters = {field for tool in request.tools for field in tool.get_input_schema().model_fields}
-        if 'NAS' in ctx.source_errors:
+        if role == 'coordinator' and ctx.settings.orchestration_mode == 'chat':
+            visible = []
+        elif 'NAS' in ctx.source_errors:
             visible = FolderAccess(ctx.settings.roots, ctx.owner, ctx.settings.max_file_bytes).visible_roots()
         else:
             try:
@@ -101,6 +104,7 @@ class CompanyPolicy(AgentMiddleware):
             + '請依剩餘次數安排操作與審核；不足以完成時如實交回已有成果及待辦。',
         )
         request.runtime.stream_writer({'stage': 'model', 'agent': role, 'step': step})
+        started = time.monotonic()
         response = await handler(
             request.override(
                 messages=messages[1:],
@@ -128,6 +132,7 @@ class CompanyPolicy(AgentMiddleware):
                 'response_metadata': {
                     **message.response_metadata,
                     'model_step': step,
+                    'latency_seconds': round(time.monotonic() - started, 4),
                     'provider_tool_ids_by_call': {
                         c['id']: original['id'] for c, original in zip(calls, message.tool_calls)
                     },

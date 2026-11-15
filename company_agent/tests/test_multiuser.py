@@ -121,8 +121,11 @@ class MultiuserTests(unittest.IsolatedAsyncioTestCase, Fixture):
                 await self.wait_for(lambda: self.queue.get('bob', good)['status'] == 'done' and not service.executions)
                 self.assertEqual(self.queue.get('alice', bad)['status'], 'error')
                 self.assertCountEqual(calls, [bad, good])
-                with self.assertRaisesRegex(RuntimeError, 'native private'):
-                    service.result('alice', bad)
+                result = service.result('alice', bad)
+                self.assertEqual(result['error']['code'], 'execution_failed')
+                self.assertNotIn('native private', str(result))
+                restored = Service(self.queue, None, None, None)
+                self.assertEqual(restored.result('alice', bad), result)
                 self.assertFalse(service.task.done())
             finally:
                 await self.stop(service)

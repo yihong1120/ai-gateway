@@ -5,6 +5,7 @@ import asyncio
 import json
 from pathlib import Path
 
+from company_agent.services.files import block_page
 from company_agent.services.files.operations import worker
 
 
@@ -50,13 +51,8 @@ async def inspect_artifact(ctx, args):
         blocks = await asyncio.to_thread(
             worker, 'extract', data=data, suffix=suffix,
         )
-        selected = blocks[args.start: args.start + args.limit]
         result.update({
-            'blocks': selected,
-            'total_blocks': len(blocks),
-            'next_start': (
-                args.start + len(selected) if args.start + len(selected) < len(blocks) else None
-            ),
+            **block_page(blocks, args.start, args.limit),
             'notice': '僅讀取產出的文字，不代表視覺排版、公式或工程安全已通過驗證。',
         })
     if len(json.dumps(result, ensure_ascii=False)) > 18000:

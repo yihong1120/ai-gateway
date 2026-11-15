@@ -8,12 +8,12 @@ from subprocess import CalledProcessError
 from types import SimpleNamespace
 
 from langchain_core.messages import ToolMessage
-from langchain_core.tools import ToolException
 
 from company_agent.agents.document.revision import artifact_edit_tool
 from company_agent.agents.document.revision import revise
 from company_agent.runtime.context import Context
 from company_agent.runtime.execution import DocumentAgent
+from company_agent.services.files.errors import RecoverableToolError
 from company_agent.services.office.documents import create_slides
 from company_agent.services.office.documents import create_spreadsheet
 from company_agent.services.office.documents import create_word
@@ -74,10 +74,10 @@ class PrivateRevisionTests(unittest.IsolatedAsyncioTestCase, Fixture):
             {**args, 'location': 'ppt/slides/slide1.xml#t:99'},
         ]
         for value in bad:
-            with self.assertRaises(ValueError):
+            with self.assertRaises((ValueError, RecoverableToolError)):
                 await revise(runtime, **value)
         runtime.state = {'messages': []}
-        with self.assertRaises(ValueError):
+        with self.assertRaises((ValueError, RecoverableToolError)):
             await revise(runtime, **args)
         runtime.context = Context('alice', self.store.job('alice'), self.config, self.store)
         with self.assertRaises(ValueError):
@@ -87,9 +87,9 @@ class PrivateRevisionTests(unittest.IsolatedAsyncioTestCase, Fixture):
             await revise(runtime, **args)
         self.assertEqual(len(self.store.files('alice', self.job)), 1)
 
-    async def test_different_filename_required_and_no_newlines(self):
+    async def test_paths_and_newlines_rejected_without_partial_revision(self):
         _, _artifact, runtime, args = self.seed()
-        for index, extra in enumerate([{'name': 'draft.pptx'}, {'name': '../escape.pptx'}, {'replacement': '換\n行'}]):
+        for index, extra in enumerate([{'name': '../escape.pptx'}, {'replacement': '換\n行'}]):
             runtime.tool_call_id = str(index)
             with self.assertRaises((ValueError, CalledProcessError)):
                 await revise(runtime, **{**args, **extra})
@@ -180,8 +180,7 @@ class RevisionGraphTests(unittest.IsolatedAsyncioTestCase, Fixture):
             ids.append(json.loads(messages[-1].content)['id'])
             return finish('complete_assignment', ids=ids)
         self.config.max_steps = 20
-        result = await self.failed_job(
-            self.run_model(
+        result, _ = await self.run_model(
                 coordinator=[
                     call('delegate_document', {'task': '建立草稿'}, 'd1'), call('delegate_reviewer', {'task': '讀原草稿'}, 'r'),
                     call('delegate_document', {'task': '讀取再修訂草稿'}, 'd2'), lambda _:finish(ids=ids),
@@ -203,10 +202,9 @@ class RevisionGraphTests(unittest.IsolatedAsyncioTestCase, Fixture):
                         'read-old',
                     ), lambda _:finish('complete_assignment', ids=ids),
                 ],
-            ), ToolException,
         )
-        self.assertEqual(result['status'], 'running', result)
-        self.assertIn('未經獨立審核', str(self.native_error))
+        self.assertEqual(result['status'], 'blocked', result)
+        self.assertIn('未經獨立審核', str(result['tool_feedback']))
         self.assertEqual({f['id'] for f in result['files']}, set(ids))
 
     async def test_statistics_handoff_to_word_uses_real_result_and_review(self):
@@ -261,7 +259,7 @@ class RevisionGraphTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertEqual(result['status'], 'done', result)
         self.assertEqual(set(result['agent_visits']), {'coordinator', 'data', 'document', 'reviewer'})
 
-    async def test_missing_sheet_propagates_before_further_model_calls(self):
+    async def test_missing_sheet_feedback_allows_correct_name_without_replaying_success(self):
         self.file('source.xlsx', create_spreadsheet([{'name': '工程', 'rows': [[10], [20]]}]))
         model = self.last_model = RawRoleModel(
             coordinator=[call('delegate_data', {'task': '讀工作表'}, 'd'), finish(summary='實際工作表為工程，已完成讀取。')],
@@ -276,10 +274,12 @@ class RevisionGraphTests(unittest.IsolatedAsyncioTestCase, Fixture):
                 finish('complete_assignment', summary='實際工作表為工程，已讀取。'),
             ],
         )
-        result = await self.failed_job(DocumentAgent(self.config, model).run('alice', '讀取 Excel，回報實際內容。'), CalledProcessError)
-        self.assertEqual(result['status'], 'running', result)
+        result = await DocumentAgent(self.config, model).run('alice', '讀取 Excel，回報實際內容。')
+        self.assertEqual(result['status'], 'done', result)
         self.assertNotIn('errors', result)
-        self.assertIn(b'ToolException', self.native_error.stderr)
+        self.assertEqual(len(result['tool_feedback']), 1)
+        self.assertIn('工程', result['tool_feedback'][0]['message'])
+        self.assertEqual(len(result['sources']), 1)
 
     async def test_document_role_can_verify_excel_without_generic_file_reader(self):
         self.file('source.xlsx', create_spreadsheet([{'name': '工程', 'rows': [[10], [20]]}]))

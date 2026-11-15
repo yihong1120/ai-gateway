@@ -5,7 +5,10 @@ import asyncio
 import json
 import os
 import time
+from importlib.resources import files
 from pathlib import Path
+
+from examples.shared.config import load_service
 
 
 ENTRIES = {
@@ -27,11 +30,13 @@ def updated_banners(banners):
 
 
 def function_source():
-    """Read the repository-owned WebUI entry before any deployment writes."""
-    return (Path(__file__).resolve().parents[2] / 'openwebui/functions/company_agent_pipe.py').read_text(encoding='utf-8')
+    """Read the packaged WebUI entry before any deployment writes."""
+    return files('examples.openwebui.functions').joinpath('company_agent_pipe.py').read_text(encoding='utf-8')
 
 
 async def deploy():
+    load_service('webui')
+    os.environ['PYTHON_DOTENV_DISABLED'] = '1'
     content = function_source()
     # Match the installed-package launcher before importing Open WebUI paths.
     os.environ['FROM_INIT_PY'] = 'true'

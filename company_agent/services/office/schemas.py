@@ -53,13 +53,24 @@ class Slides(Strict):
     )
 
 
-class Edit(Strict):
+class SingleRunReplacement(Strict):
+    replacement: str = Field(max_length=5000,
+        description='單一文字run的替換文字，不接受CR、LF換行或tab。多段內容另製新版；不要在此欄新增段落。')
+
+    @field_validator('replacement')
+    @classmethod
+    def one_run_only(cls, value):
+        if any(char in value for char in ('\r', '\n', '\t')):
+            raise ValueError('單一文字run不接受換行或tab；請改用單段文字，或另製新版文件。尚未執行修改。')
+        return value
+
+
+class Edit(SingleRunReplacement):
     root: str
     path: str
     sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
     location: str
     expected: str = Field(max_length=5000)
-    replacement: str = Field(max_length=5000)
     name: str
 
 
@@ -231,7 +242,7 @@ class UnderstandImage(Strict):
     )
 
 
-class EditArtifact(Strict):
+class EditArtifact(SingleRunReplacement):
     artifact_id: str = Field(min_length=1, max_length=100)
     sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
     location: str = Field(
@@ -240,9 +251,8 @@ class EditArtifact(Strict):
         description='inspect_artifact 的 blocks[].runs[].location，不是段落位置。',
     )
     expected: str = Field(max_length=5000)
-    replacement: str = Field(max_length=5000)
     name: str = Field(
         min_length=6,
         max_length=180,
-        description='新的 .docx/.pptx 檔名，須與既有草稿不同；保留原版。',
+        description='單一 .docx/.pptx 檔名；沿用原交付檔名時建立新ID並取代舊稿，不同已核准檔名保留兩版。',
     )

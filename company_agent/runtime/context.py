@@ -17,13 +17,9 @@ class Context:
     store: Store
     model: Any = None  # Runtime only; never serialized into graph/checkpoints.
     delegation_id: str | None = None
+    required_evidence: tuple[str, ...] = ()
     source_errors: dict[str, str] = field(default_factory=dict)  # This run only; no credentials.
-
-
-async def verified_user(owner):
-    from open_webui.utils.auth import get_verified_user_by_id
-
-    user = await get_verified_user_by_id(owner)
-    if not user:
-        raise ValueError('請先以已啟用帳號登入。')
-    return user.model_dump()
+    role: str = 'coordinator'
+    assignment_outputs: tuple[str, ...] = ()
+    external_tools: Any = field(default=None, repr=False)  # Runtime MCP/token adapter; never checkpointed.
+    authorize_resources: Any = field(default=None, repr=False)  # Runtime-only resource grant guard.

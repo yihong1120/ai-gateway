@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import patch
 
-from langchain_core.tools import ToolException
 from pydantic import ValidationError
 
 from company_agent.agents.eip.tools import eip_tools
@@ -26,11 +25,11 @@ from company_agent.tests.test_agent import call
 from company_agent.tests.test_agent import Fixture
 from company_agent.tests.test_enterprise_completion import finish
 from company_agent.tests.test_enterprise_completion import RawRoleModel
-from official_document_workflow.infrastructure.eip.calendar_csv import parse_csv
-from official_document_workflow.infrastructure.eip.calendar_read import detail
-from official_document_workflow.infrastructure.eip.calendar_read import occurrences
-from official_document_workflow.infrastructure.eip.netask import js_escape
-from official_document_workflow.infrastructure.eip.netask import Netask
+from examples.official_document_workflow.infrastructure.eip.calendar_csv import parse_csv
+from examples.official_document_workflow.infrastructure.eip.calendar_read import detail
+from examples.official_document_workflow.infrastructure.eip.calendar_read import occurrences
+from examples.official_document_workflow.infrastructure.eip.netask import js_escape
+from examples.official_document_workflow.infrastructure.eip.netask import Netask
 
 
 def event(**kw):
@@ -145,8 +144,8 @@ class CalendarAdapterTests(unittest.IsolatedAsyncioTestCase):
 class CalendarToolTests(unittest.IsolatedAsyncioTestCase, Fixture):
     async def test_pipeline_download_format_survives_artifact_copy_and_preview(self):
         from tests.test_eip_calendar_csv import fixture
-        from official_document_workflow.infrastructure.eip.calendar_csv import export_eip_csv
-        from official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT
+        from examples.official_document_workflow.infrastructure.eip.calendar_csv import export_eip_csv
+        from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT
         import hashlib
 
         rows, _ = parse_csv(fixture())
@@ -169,25 +168,42 @@ class CalendarToolTests(unittest.IsolatedAsyncioTestCase, Fixture):
         from company_agent.runtime.storage import Store
         from tests.test_eip_calendar_csv import fixture
 
+        import os
+        from psycopg import sql
+        from company_agent.runtime.migrations import _initial
+
         artifact = self.store.artifact('alice', self.job, 'legacy.csv', fixture())
-        with self.store.db() as db:
-            db.execute('DROP TABLE eip_calendar_sources')
-            db.execute(
-                'CREATE TABLE eip_calendar_sources(owner TEXT,job TEXT,artifact TEXT,revision TEXT, PRIMARY KEY(owner,job,artifact))',
-            )
-            db.execute(
-                'INSERT INTO eip_calendar_sources VALUES(%s,%s,%s,%s)',
-                ('alice', self.job, artifact['id'], 'rev'),
-            )
-        upgraded = Store(self.private)
-        with upgraded.db() as db:
-            self.assertEqual(db.execute('SELECT csv_format FROM eip_calendar_sources').fetchone()[0], 'plain')
-        self.assertEqual(calendar_source(upgraded, 'alice', artifact['id'])[2], fixture())
+        legacy = self.store.schema + '_legacy'
+        try:
+            with self.store.db() as db:
+                db.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(legacy)))
+                db.execute(sql.SQL('SET LOCAL search_path TO {}').format(sql.Identifier(legacy)))
+                _initial(db)
+                for table in ('jobs', 'artifacts'):
+                    db.execute(sql.SQL('INSERT INTO {} SELECT * FROM {}.{}').format(
+                        sql.Identifier(table), sql.Identifier(self.store.schema), sql.Identifier(table),
+                    ))
+                db.execute('ALTER TABLE eip_calendar_sources DROP COLUMN csv_format')
+                db.execute('INSERT INTO eip_calendar_sources VALUES(%s,%s,%s,%s)',
+                           ('alice', self.job, artifact['id'], 'rev'))
+                db.execute("""INSERT INTO web_jobs(id,owner,subject,chat,request_id,request_hash,status,payload,progress,created)
+                              VALUES('legacy-delivered','alice','subject','chat','turn','hash','done','{}','完成',0)""")
+                db.execute("""UPDATE web_jobs SET chat_revision=md5(jsonb_build_array(
+                              status,progress,engine_job,request_aliases,NULL::text,document_result)::text)""")
+            with patch.dict(os.environ, {'COMPANY_AGENT_DB_SCHEMA': legacy}):
+                upgraded = Store(self.private)
+                with upgraded.db() as db:
+                    self.assertEqual(db.execute('SELECT csv_format FROM eip_calendar_sources').fetchone()[0], 'plain')
+                    self.assertEqual(db.execute('SELECT chat_version=chat_delivered_version FROM web_jobs').fetchone(), (True,))
+                self.assertEqual(calendar_source(upgraded, 'alice', artifact['id'])[2], fixture())
+        finally:
+            with self.store.db() as db:
+                db.execute(sql.SQL('DROP SCHEMA IF EXISTS {} CASCADE').format(sql.Identifier(legacy)))
 
     def setUp(self):
         super().setUp()
         from tests.test_eip_connector import SCHEMA
-        mock = patch('official_document_workflow.application.integration.pipe_module', return_value=SCHEMA)
+        mock = patch('examples.official_document_workflow.application.integration.module', return_value=SCHEMA)
         mock.start()
         self.addCleanup(mock.stop)
 
@@ -226,7 +242,7 @@ class CalendarToolTests(unittest.IsolatedAsyncioTestCase, Fixture):
         async def session(*a, **kw): yield SimpleNamespace(read=read)
         args = CalendarQuery(start='2026-09-01', end='2026-09-30')
         ctx = self.ctx()
-        with patch('company_agent.services.eip.client.binding', new=AsyncMock()), patch('official_document_workflow.infrastructure.eip.sessions.manual_session', session):
+        with patch('company_agent.services.eip.client.binding', new=AsyncMock()), patch('examples.official_document_workflow.infrastructure.eip.sessions.manual_session', session):
             result = await query(ctx, 'eip_calendar_query', args, 'q')
             self.assertEqual(await query(ctx, 'eip_calendar_query', args, 'q'), result)
         read.assert_awaited_once_with('calendar', '2026-09-01', '2026-09-30')
@@ -240,7 +256,7 @@ class CalendarToolTests(unittest.IsolatedAsyncioTestCase, Fixture):
         @asynccontextmanager
         async def session(*a, **kw): yield SimpleNamespace(read=read)
         ctx = self.ctx()
-        with patch('company_agent.services.eip.client.binding', new=AsyncMock()), patch('official_document_workflow.infrastructure.eip.sessions.manual_session', session):
+        with patch('company_agent.services.eip.client.binding', new=AsyncMock()), patch('examples.official_document_workflow.infrastructure.eip.sessions.manual_session', session):
             listing = await query(ctx, 'eip_calendar_query', CalendarQuery(start='2026-09-01', end='2026-09-30'), 'list')
             args = EIPAttachments(handle=listing['events'][0]['handle'])
             result = await query(ctx, 'eip_calendar_detail', args, 'detail-1')
@@ -264,7 +280,7 @@ class CalendarToolTests(unittest.IsolatedAsyncioTestCase, Fixture):
             Context('alice', self.store.job('alice'), self.config, self.store),
             Context('alice', self.job, self.config.model_copy(update={'eip_binding_revision': 'new'}), self.store),
         ]
-        with patch('company_agent.services.eip.client.binding', new=AsyncMock()), patch('official_document_workflow.infrastructure.eip.sessions.manual_session') as session:
+        with patch('company_agent.services.eip.client.binding', new=AsyncMock()), patch('examples.official_document_workflow.infrastructure.eip.sessions.manual_session') as session:
             for other in contexts:
                 with self.assertRaises(ValueError):
                     await query(other, 'eip_calendar_detail', args, 'detail')
@@ -295,7 +311,7 @@ class CalendarToolTests(unittest.IsolatedAsyncioTestCase, Fixture):
             coordinator=[call('delegate_eip', {'task': '查這筆會勘詳細內容'}, 'delegate'), finish()],
             eip=[call('eip_calendar_query', {'start': '2026-09-01', 'end': '2026-09-30'}, 'list'), select, complete],
         )
-        with patch('company_agent.services.eip.client.binding', new=AsyncMock()), patch('official_document_workflow.infrastructure.eip.sessions.manual_session', session), patch('company_agent.services.eip.drafts.prepare', new=AsyncMock()) as write:
+        with patch('company_agent.services.eip.client.binding', new=AsyncMock()), patch('examples.official_document_workflow.infrastructure.eip.sessions.manual_session', session), patch('company_agent.services.eip.drafts.prepare', new=AsyncMock()) as write:
             result = await DocumentAgent(self.config, model).run('alice', '查會議詳細內容')
         self.assertEqual(result['status'], 'done', result)
         write.assert_not_awaited()
@@ -337,14 +353,15 @@ class CalendarToolTests(unittest.IsolatedAsyncioTestCase, Fixture):
             f = self.store.files('alice', next(iter(self.jobs_seen)))[0]
             return call('complete_job', {'outcome': 'completed', 'summary': '準備完成', 'artifact_ids': [f['id']]}, 'final')
         model = RawRoleModel(
-            coordinator=[call('delegate_eip', {'task': '準備 9/18 9-10 點測試會議'}, 'd'), final],
+            coordinator=[call('delegate_eip', {'task': '準備 9/18 9-10 點測試會議'}, 'd'), final,
+                         finish(outcome='blocked', summary='CSV 已保留，仍待獨立審核。')],
             eip=[call('eip_calendar_prepare', {'events': [event()]}, 'p'), done],
         )
         with patch('company_agent.services.eip.client.binding', new=bind), patch.object(Netask, 'commit', new=AsyncMock()) as commit:
-            result = await self.failed_job(DocumentAgent(self.config, model).run('alice', '新增測試會議，2026/9/18 09:00 至 10:00，台北時間'), ToolException)
+            result = await DocumentAgent(self.config, model).run('alice', '新增測試會議，2026/9/18 09:00 至 10:00，台北時間')
         commit.assert_not_awaited()
-        self.assertEqual(result['status'], 'running', result)
-        self.assertIn('獨立審核', str(self.native_error))
+        self.assertEqual(result['status'], 'blocked', result)
+        self.assertIn('獨立審核', str(result['tool_feedback']))
         self.assertEqual(len(result['files']), 1)
 
     async def test_complete_draft_review_handoff_never_commits(self):

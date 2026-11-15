@@ -1,5 +1,11 @@
 # 公司工作助理
 
+安裝、測試與發布統一使用根目錄的 [開發指南](../CONTRIBUTING.md)。
+
+knowledge 角色可使用管理員設定的唯讀 MCP 工具；工具描述、schema 與領域權限由來源服務維護。
+在 `COMPANY_AGENT_CONFIG` 的 JSON 設定 `mcp_servers` 與明確工具允許清單才啟用，預設為空；
+個人 OIDC 身分、schema 變更與工作恢復規則見[外部工具連接](../docs/external-tools.md)。
+
 Open WebUI 是唯一正式入口。選擇「公司工作助理（文件／Excel／CAD）」提出任務；
 在 [/agents](/agents) 查看進度、下載成果及確認操作，在 [/connections](/connections) 管理本人 EIP／NAS 綁定。
 
@@ -7,13 +13,38 @@ Open WebUI 是唯一正式入口。選擇「公司工作助理（文件／Excel�
 
 主協調、知識、文件、資料分析、研究、工程圖、EIP 與審核共八個角色，
 使用官方 `create_agent`／LangGraph agent loop；主協調透過工具呼叫獨立子 agent，獨立委派與工具由官方 ToolNode 並行執行。
-目前為 v25；舊成果保留，更新前未完成工作須重新開始。
+目前 checkpoint 為 graph31；舊成果保留，更新前未完成工作須依既有版本檢查重新開始。
 
 預設同時執行 4 件工作，同一使用者跨聊天依序執行；`max_concurrent_jobs`、`max_pending_jobs`、`max_pending_per_user` 可在伺服器 JSON 調整。其他帳號優先取得自己的執行機會，不會被單一帳號的待處理清單擋住。共用模型及 OCR 設有獨立並行上限；詳見[部署設定](../README.md)。
 
 2026-10-04 本機正式設定採 8 件公司工作並行，共用待處理佇列上限 1000 件、每人 20 件；公文及 EIP 各 8 件，共用模型 16、OCR 2。公司工作與公文對同一帳號依序執行。模型供應商的限流仍需在正式使用中觀察。
 
 單一工作失敗不影響後續佇列；資料庫連線中斷後 worker 自動重連，保留成果並將失去執行者的工作標示中斷，不重送模型或外部操作。NAS 網路不可用時顯示明確限制，上傳附件等可用來源仍可處理。
+
+## 多組 NAS 帳號
+
+在 `/connections#nas` 可新增、命名、測試、更新或解除個別 NAS 連線，每人最多 16 組。
+目前各組帳號連向管理員設定的 `COMPANY_AGENT_NAS_URL`；使用者不能指定任意伺服器。
+同一個公司助理工作可讀取多組已綁定帳號；新工作由伺服器保存當時所有可用帳號的版本，
+資料夾以「連線名稱 / 資料夾」顯示，內部 root 各自獨立，兩組 `home` 不會混用。
+帳密加密保存於 `COMPANY_AGENT_DATABASE_URL` 的 `nas_bindings`，金鑰仍為私人
+`state_dir/nas.key`；密碼與 NAS session 不交給模型，每次操作依所屬帳號登入並登出，
+仍是唯讀。可讀範圍由各 NAS 帳號的實際權限決定，同一 NAS 帳號不能綁給不同 WebUI 使用者。
+
+新增帳號只影響新工作；舊工作及接續工作保留原本的版本清單，不自動擴張權限。
+更新帳密或解除其中一組時，該組的舊版本立即失效，舊工作不能改用其他帳號讀取同名路徑。
+其餘綁定、EIP、既有私人成果均保留；需要新來源範圍時另開公司助理工作。
+
+`GET /agents/nas` 回傳本人的 `bindings` 清單（`binding_id`、名稱、帳號、版本及可用狀態），
+不包含密碼。既有 `POST /agents/nas/bind` 增加可選的 `label`、`binding_id`：
+未指定 ID 時新增或更新同一帳號，指定時只更新本人該組連線。`test` 與 `unlink` 接受
+`{"binding_id":"…"}`，多組時必須明確選取；單組仍接受舊的 `{}`。
+所有操作沿用已驗證本人身分、同站來源與 `X-Company-Action` 檢查，回應不快取；
+每人每分鐘一次的登入限制不因新增多組帳號而放寬。
+
+公司助理 schema 5 將 NAS 唯一鍵改為 `(owner,binding_id)`；升級保留既有密文與版本，
+單組帳號的既有工作仍能引用原版本。升級前須備份 PostgreSQL 與私人金鑰；
+舊版程式不支援此多組 schema，回退需使用升級前備份，不能只更改版本標記。
 
 ## 模型分流
 
@@ -39,9 +70,22 @@ Open WebUI 是唯一正式入口。選擇「公司工作助理（文件／Excel�
 - 未填的路由沿用預設模型；未指定 summary 路由時，摘要輸出上限維持 2048。
 - [Gemini 範本](configs/config.gemini.example.json) 與[本機正式配置](configs/config.production.json) 的八個角色均固定使用 `gemini-3.5-flash-lite`／`medium`／4096；摘要使用同模型的 `minimal`／2048。
 - 圖片及 EIP 附件子分析預設沿用 Lite；可選清單僅有 Gemini `lite`、`flash`、`pro`，一般工作優先 Lite，確需較強能力時才明確選用其他輔助模型。這不改變呼叫工具的角色模型，也不提供失敗後自動切換。
-  Pro 可直接填入任一路由，例如 `{"model":"gemini-3.1-pro-preview","reasoning_effort":"high","max_tokens":8192}`。
+  `pro` 輔助模型使用 Gemini 4 Argon；也可直接填入任一路由，例如 `{"model":"gemini-4-argon","reasoning_effort":"high","max_tokens":8192}`。
 
 EIP 附件分析的 JSON Schema 直接透過 LiteLLM 原生 `response_format` 傳遞，保留來源與日期驗證。
+
+Office 分工由伺服器的 `office_execution_mode` 設定，於工作建立時固定：
+
+- `flexible`：相容原有 hybrid，主協調可直接計算及製作常見 Office 文件。
+- `specialist`：hybrid 主協調只保留搜尋、讀取與整合；Excel 計算／產製交 data，Word／PPT／文字產製交 document，reviewer 維持唯讀獨立校核。
+- 專責分工必須啟用 `structured_completion=true`，否則在初始化時拒絕，不允許文字回覆繞過子任務產出驗證。
+- 專責模式每次委派填唯一穩定 `work_key` 及 `outputs`；唯讀、純統計或審核填 `outputs=[]`。data／document 不得製作清單外檔案，完成時須交回本次實際產製的全部指定檔案。
+- 委派前在資料庫原子保留子任務與檔名，阻止相同 key、完全相同任務或同名檔案再次派工。已完成產檔的修訂使用新 key＋`revises_assignments`；未完成的補做使用新 key＋`resolves_assignments`，均引用真實前次委派 ID。
+- 同一原生工具呼叫恢復時可重入原 claim，不重建委派；不自動重試結果不明的外部操作。EIP／CAD 沿用各自領域契約。
+
+[一般優化範例](configs/config.optimized.example.json) 與[混合模型候選](configs/config.mixed-candidate.example.json) 現在皆採專責模式；後者只有 data 使用 Argon。production 設定未切換。詳細設計、限制與驗證見[優化設計](../docs/company-agent-optimization-design-2026-10-17.md)。
+
+[data Flash 候選](configs/config.data-flash-candidate.example.json) 與 Argon 候選只差 data 的模型名稱，其餘設定相同。替換測試包含22題直接 data 與4題完整流程，來源、工具、驗收及其他七個角色固定；執行方式見[模型替換評測](evals/README.md#data-角色的模型替換評測)。候選檔案不代表模型已通過替換門檻，也不會自動部署。
 
 所有路由仍使用本人同一個已驗證的 LiteLLM 身分及工作步數額度；不會失敗後偷偷換模型或重送工具。
 模型、思考等級與輸出上限會記錄在新工作的 checkpoint；設定改變時，舊工作須以原設定續跑或另開工作。
@@ -79,6 +123,16 @@ company_agent/
 工作持久化與查詢集中於 `api/queue.py`，背景執行與設定在 `api/service.py`。
 工作台清單與狀態共用單次查詢，背景工作共用 Store，模型呼叫計數由資料庫原子更新。
 
+共用名額、用量歸屬、聊天觀察及交易連線在 `examples/shared/runtime/`；應用組裝入口為
+`examples.openwebui.app:create_app`，以 `ai-gateway exec webui -- python -m examples.openwebui.serve` 啟動。Store 的 schema 升級集中於
+`runtime/migrations.py`，一般交易使用有上限的共用連線池，worker lease 使用專用連線。
+聊天同步以交易內更新的版本號及待同步索引查詢，舊版本回條不會消耗新的待同步進度。
+
+候選設定的可編輯來源為 `configs/presets.json`，執行
+`python -m company_agent.configs.build` 產生完整 JSON；加 `--check` 可檢查是否過期。
+服務只讀完整 JSON，不在執行時展開設定繼承。v28／v29 範例保存在 `configs/archive/`；
+正式設定與歷史評測結果不由產生器覆寫。
+
 ## 功能與界線
 
 | 領域 | 已提供的能力 |
@@ -103,6 +157,24 @@ company_agent/
 不另建每個 Agent 的額度，也不改用公文免扣額度金鑰。
 
 PostgreSQL 保存工作及成果；checkpoint blobs 加密，不能據此宣稱全庫資料皆加密。
+
+應用生命週期各自建立工作服務、設定與一般模型連線快照；變更部署設定後需重啟應用。
+請求與背景工作透過 app 綁定取得服務，不共用程序全域工作實例。工作失敗回報為持久化的
+安全錯誤代碼與訊息，重新啟動後仍可查詢，既有成果繼續依 owner 授權下載。
+
+附件先在私人 `.preparing_<UUID>` 目錄寫入並 fsync，再原子改名為工作來源目錄；
+資料庫鎖只涵蓋容量、去重及工作登記。相同訊息先查既有工作，重試不重新落盤。
+提交結果不明時保留來源，由 worker 每 5 分鐘至多檢查 100 個舊準備紀錄；
+只有超過一天、沒有活躍準備 lease、且 PostgreSQL 沒有對應工作的目錄才回收。
+新準備收條存於 `.pending/<namespace>`，不混入長期工作來源；舊版收條採漸進掃描。
+每輪最多走訪 100 個項目，掃描位置會延續，無效項目也計入上限。另有 0.1 秒的操作間
+耗時預算，已開始的交易或刪除會等待完成；停止 worker 時關閉掃描 iterator。
+資料庫無法查詢時保留檔案；舊版未管理的目錄及所有已登記工作來源都不自動刪除。
+
+容量盤點預設使用 PostgreSQL 估算筆數，`rows_kind` 區分 `estimate`、`unknown` 與 `exact`。
+需要精確數字時明列資料表，例如
+`python -m examples.shared.runtime.retention --scope company --exact-table web_jobs`。
+此選項只計數，不清理工作或成果；文件快取清理預覽仍使用實際候選資料。
 備份需包含資料庫、私人來源附件及 checkpoint 金鑰。不要因整理程式目錄而移動或清除正式資料。
 
 Open WebUI 是聊天歷史與分支的唯一來源。Pipe 從本人已儲存的目前分支擷取對話，
@@ -135,11 +207,10 @@ python -m company_agent.ops.smoke_webui
 
 第一項統一備份並更新 Pipe、模型與三個自有首頁入口，不是診斷命令；
 第二項只做讀取與無效請求防護檢查，不送出生成工作。不再保留獨立的 deploy_connections 指令。
-部署工具需要工作區中的 openwebui/functions/company_agent_pipe.py；
+部署工具從安裝套件的 `examples.openwebui.functions` 讀取公司助理入口；
 資料庫儲存的 Function、啟動器及套件必須使用一致的新路徑。
 
 設定範本在 [configs/](configs/)；範本不會自動覆蓋正式設定，正式環境的授權、模型及額度仍由部署設定決定。
-如需安裝開發環境，可在儲存庫根目錄執行 python -m pip install -e '.[company-agent]'。
 
 ## 測試與評測
 
@@ -165,3 +236,26 @@ evals 下的工具供明確授權的合成測試使用，不是正式入口；�
 主協調依問題需要選擇網頁、本人可讀 NAS／附件、EIP 及 CAD，亦可加入 Excel 計算。獨立子任務可同批委派，由 ToolNode 並行呼叫獨立子圖，每次委派有自己的訊息與 checkpoint；角色內的獨立工具也可並行執行。有依賴的查證按結果接續，例如先從 NAS 找圖，再由工程圖角色讀 CAD。不是每題固定查全部來源。
 
 專責角色可在結構化完成回條的 `evidence_requests` 提出其他來源的唯讀補證需求，主協調依原問題判斷與委派；建議本身不會自動執行或授予權限。最終回答保留來源、版本、衝突與缺口；必要來源不可用時交付已有發現並說明未完成部分。內部內容不因跨來源整合而送到公開搜尋，存檔與行事曆寫入仍須既有確認。
+
+
+工作流程優化包含成果版本與歷史下載、產檔前交付規格、統計憑據及確定性驗收；提供 delegated／hybrid／chat 三種固定模式與各角色請求時限。設定、適用範圍與遷移說明見[完整設計](../docs/company-agent-optimization-design-2026-10-17.md)。
+
+隔離評測、失敗紀錄與費用核對方式見[評測說明](evals/README.md)。模型替換須以目前版本重跑驗收。
+
+來源與交付可靠度的graph29設計見[新版設計](../docs/company-agent-reliability-v29-design-2026-10-19.md)：原簿保留計畫先核對實讀來源與工作表、產檔及交付重驗來源SHA、原簿修改須有實際edit_spreadsheet回條；未綁定統計的預留符號與明確同列範圍的錯誤對應在計畫鎖定前退回修正。舊checkpoint不能直接以graph29續跑，既有成果仍依擁有權匯出。
+
+本輪Office候選可審閱[Flash設定](configs/archive/config.office-v29-flash.example.json)與[Argon設定](configs/archive/config.office-v29-argon.example.json)，兩份只有data模型不同，固定hybrid＋specialist與完整驗收。這些是待依來源綁定配置的範例；加入範例不會部署、重啟或切換正式服務。付費測試結果與環境限制見[評測說明](evals/README.md)。
+
+最新工作區為graph31，包含明確原簿修改值的型別驗收、版本鏈錯誤回復與單一文字run的CR／LF／tab輸入檢查。[架構、角色與模型](../docs/company-agent-reliability-v31-design-2026-10-19.md)。候選設定另存[Flash版](configs/config.office-v31-flash.example.json)與[Argon版](configs/config.office-v31-argon.example.json)；兩份只有data模型不同，沒有自動套用正式配置。重跑方式與獨立判分見[評測說明](evals/README.md)。
+
+## 公司 Codex／Claude 資源 MCP
+
+`company_mcp/` 以獨立 ASGI程序提供預設停用的 `/company-mcp` Streamable HTTP入口，
+沿用本人 NAS／EIP綁定與來源 ACL，完成各 CLI原生公司 OAuth後預設可使用全部有效綁定。
+密碼由後端連接器使用；NAS唯讀，公文分析及行事曆寫入仍需本人網站確認。
+每次資源 workspace固定綁定版本，撤銷、停權或改綁會阻止續用。
+
+配置、16個工具、MCP與模型憑證邊界、schema 6升級及發布條件，見
+[公司 CLI整合設計](../docs/company-ai-codex-design.md)；
+[獨立服務驗證](../docs/company-mcp-service-validation-2026-11-15.json)。
+本輪僅完成本機實作與候選來源包，尚未部署或替換正式 EXE。

@@ -8,7 +8,7 @@ from langchain.agents import AgentState
 
 from company_agent.services.research.web import merge_web_sources
 
-GRAPH_VERSION = 25
+GRAPH_VERSION = 31
 
 
 def merge_sources(existing, updates):
@@ -33,3 +33,8 @@ class State(AgentState):
     billing_identity: dict | None
     model_policy: dict | None
     nas_binding_revision: str | None
+    nas_binding_revisions: list[str] | None
+    orchestration_mode: str
+    office_execution_mode: str
+    require_delivery_plan: bool
+    external_tools_policy: list[dict] | None

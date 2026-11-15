@@ -187,20 +187,25 @@ class FailureRecoveryTests(unittest.IsolatedAsyncioTestCase, Fixture):
         result = await self.artifact_workflow(steps)
         self.assertEqual(result['sources'][0]['path'], 'draft.txt')
 
-    async def test_unknown_missing_path_and_unauthorized_root_still_fail(self):
+    async def test_unknown_missing_path_returns_feedback_and_unauthorized_root_still_fails(self):
         for root, path, error in [
-            ('project', 'unknown.txt', FileNotFoundError),
+            ('project', 'unknown.txt', None),
             ('secret', 'draft.txt', ValueError),
         ]:
             with self.subTest(root=root):
                 model = RawRoleModel(
-                    coordinator=[call('delegate_reviewer', {'task': '讀取草稿'}, 'r')],
-                    reviewer=[call('read_file', {'root': root, 'path': path}, 'read')],
+                    coordinator=[call('delegate_reviewer', {'task': '讀取草稿'}, 'r'), finish(outcome='blocked', summary='必要來源未提供。')],
+                    reviewer=[call('read_file', {'root': root, 'path': path}, 'read'), finish('complete_assignment', outcome='blocked', summary='必要來源未提供。')],
                 )
-                await self.failed_job(
-                    DocumentAgent(self.config, model).run('alice', '讀取資料'), error,
-                )
-                self.assertEqual(model.invocations, ['coordinator', 'reviewer'])
+                operation = DocumentAgent(self.config, model).run('alice', '讀取資料')
+                if error:
+                    await self.failed_job(operation, error)
+                    self.assertEqual(model.invocations, ['coordinator', 'reviewer'])
+                else:
+                    result = await operation
+                    self.assertEqual(result['status'], 'blocked')
+                    self.assertEqual(len(result['tool_feedback']), 1)
+                    self.assertFalse(result['sources'])
 
     async def test_inconsistent_completed_outcome_returns_validation_feedback(self):
         for field, outcome in [

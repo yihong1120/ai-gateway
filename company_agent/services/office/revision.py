@@ -9,6 +9,8 @@ from langchain_core.messages import ToolMessage
 
 from company_agent.services.files.operations import output_name
 from company_agent.services.files.operations import worker
+from company_agent.services.delivery.validation import prepare_output
+from company_agent.services.files.errors import RecoverableToolError
 
 
 def require_inspected(messages, args):
@@ -30,7 +32,7 @@ def require_inspected(messages, args):
                 for r in block.get('runs', [])
             ):
                 return
-    raise ValueError(
+    raise RecoverableToolError('artifact_inspection_required',
         '須先用 inspect_artifact 實際讀到指定草稿版本與文字 run，不能猜測位置或原文。',
     )
 
@@ -44,14 +46,15 @@ async def revise(ctx, messages, call_id, args):
         raise ValueError('草稿文字修訂僅支援 DOCX／PPTX。')
     target = output_name(args.name, {suffix})
     require_inspected(messages, args)
+    await asyncio.to_thread(prepare_output, ctx, target)
     result = ctx.store.begin_tool(
         ctx.owner, ctx.job, call_id, 'edit_artifact_text_run', args.model_dump(),
     )
     if result is None:
-        if any(
+        if target != name and any(
             f['name'].casefold() == target.casefold() for f in ctx.store.files(ctx.owner, ctx.job)
         ):
-            raise ValueError('修訂草稿須使用不同的新檔名；既有成果不覆蓋。')
+            raise RecoverableToolError('revision_name_conflict', '另一檔名已有成果，不能混用版本；沿用來源交付檔名修訂最新版，或指定尚未使用的已核准檔名。')
         changed = await asyncio.to_thread(
             worker,
             'edit',
@@ -62,6 +65,10 @@ async def revise(ctx, messages, call_id, args):
             replacement=args.replacement,
         )
         await asyncio.to_thread(worker, 'extract', data=changed, suffix=suffix)
+        if target == name:
+            result = await asyncio.to_thread(ctx.store.revise_artifact, ctx.owner, ctx.job,
+                                             args.artifact_id, sha, changed, call_id)
+            return result
         result = {
             **ctx.store.artifact(ctx.owner, ctx.job, target, changed),
             'revises': {'artifact_id': args.artifact_id, 'sha256': sha},

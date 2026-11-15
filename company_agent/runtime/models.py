@@ -15,7 +15,9 @@ from openai import APIConnectionError
 from openai import APITimeoutError
 from openai import RateLimitError
 
-from company_agent.runtime import context
+from examples.identity.providers.subjects import linked_subject
+
+from examples.identity.adapters import webui as webui_identity
 from company_agent.runtime.gemini import provider_tools
 from company_agent.runtime.gemini import signed_history
 
@@ -37,6 +39,16 @@ async def close_model(model):
         model = model.client
     await model.http_async_client.aclose()
     model.http_client.close()
+
+
+def request_options(client):
+    timeout = getattr(client, 'request_timeout', None)
+    options = {'timeout': timeout} if timeout is not None else {}
+    options['extra_body'] = {
+        **(getattr(client, 'extra_body', None) or {}),
+        'metadata': {'spend_logs_metadata': {'ai_usage_source': 'company_agent'}},
+    }
+    return options
 
 
 @dataclass(frozen=True)
@@ -72,13 +84,14 @@ class UserBilledModel:
                 'model_name': route.model,
                 'reasoning_effort': route.reasoning_effort,
                 'max_tokens': route.max_tokens,
+                'request_timeout': route.request_timeout_seconds or getattr(self.client, 'request_timeout', None),
             },
         )
         return replace(self, client=client, routes={})
 
     def checked(self, runnable):
         """Web bindings add per-invocation identity verification at this boundary."""
-        from official_document_workflow.infrastructure.concurrency import MODELS
+        from examples.shared.runtime.concurrency import MODELS
 
         async def limited(messages, config):
             async with MODELS:
@@ -93,17 +106,17 @@ class UserBilledModel:
         options = {'response_format': response_format}
         if max_output_tokens is not None:
             options['max_tokens'] = max_output_tokens
-        return await self.checked(self.client.bind(user=self.subject, **options)).ainvoke(messages)
+        return await self.checked(self.client.bind(user=self.subject, **request_options(self.client), **options)).ainvoke(messages)
 
     async def summarize(self, prompt):
-        return await self.checked(self.client.bind(user=self.subject)).ainvoke(prompt)
+        return await self.checked(self.client.bind(user=self.subject, **request_options(self.client))).ainvoke(prompt)
 
     def bind_tools(self, tools, **kwargs):
         if any(k in kwargs for k in ('user', 'extra_body', 'extra_headers', 'model_kwargs')):
             raise ValueError('不允許覆寫已驗證的使用者計費設定。')
         name = self.client.model_name
         bound = self.client.bind_tools(
-            provider_tools(tools, name), user=self.subject, **kwargs,
+            provider_tools(tools, name), user=self.subject, **request_options(self.client), **kwargs,
         )
         if name.lower().split('/')[-1].startswith('gemini-'):
             bound = RunnableLambda(signed_history) | bound
@@ -115,12 +128,15 @@ def select_model(model, name):
 
 
 def routed_model(model, settings):
-    if not settings.role_models and not settings.purpose_models and not settings.model_profiles:
+    if not settings.role_models and not settings.purpose_models and not settings.model_profiles and settings.model_timeout_seconds == 60:
         return model
     if not isinstance(model, UserBilledModel):
         raise ValueError('分流設定需要已驗證的個人計費模型。')
+    client = model.client
+    if getattr(client, 'request_timeout', 60) != settings.model_timeout_seconds:
+        client = client.model_copy(update={'request_timeout': settings.model_timeout_seconds})
     return replace(
-        model, routes={
+        model, client=client, routes={
             k: v.model_copy(deep=True)
             for k, v in {**settings.role_models, **settings.purpose_models}.items()
         }, profiles={k: v.model_copy(deep=True) for k, v in settings.model_profiles.items()},
@@ -134,6 +150,7 @@ def model_policy(model):
         'default': model.client.model_name,
         'reasoning_effort': model.client.reasoning_effort,
         'max_tokens': model.client.max_tokens,
+        'request_timeout_seconds': getattr(model.client, 'request_timeout', 60),
         'routes': {k: v.model_dump() for k, v in model.routes.items()},
     }
     if model.profiles:
@@ -165,9 +182,7 @@ def gateway_for_verified_user(user, base_url, api_key, model, transport=None):
     if not isinstance(user, dict) or user.get('role') not in ('user', 'admin'):
         raise ValueError('須先驗證啟用中的使用者身分，未呼叫模型。')
     owner = user.get('id')
-    oauth = user.get('oauth')
-    provider = oauth.get('oidc') if isinstance(oauth, dict) else None
-    subject = provider.get('sub') if isinstance(provider, dict) else None
+    subject = linked_subject(user.get('oauth'))
     if any(
         not isinstance(v, str) or not v.strip() or v != v.strip() or len(v) > 255
         for v in (owner, subject)
@@ -245,7 +260,7 @@ class WebBilledModel(UserBilledModel):
         return super().checked(RunnableLambda(self.verified_messages) | runnable)
 
     async def verified_messages(self, messages):
-        user = await context.verified_user(self.owner)
+        user = await webui_identity.verified_user(self.owner)
         if (user.get('oauth') or {}).get('oidc', {}).get('sub') != self.subject:
             raise ValueError('登入計費身分已變更，已停止後續模型請求。')
         return messages

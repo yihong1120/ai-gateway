@@ -14,6 +14,7 @@ SPEC = AgentSpec(
             'read_ocr',
             'search_files',
             'understand_image',
+            'plan_delivery',
         ),
     ),
 )

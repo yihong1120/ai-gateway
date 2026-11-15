@@ -1,5 +1,7 @@
 """Reuse EIP document workers with an explicit user-billed semantic adapter."""
 from __future__ import annotations
+from examples.official_document_workflow.services.output_delivery import output_part
+from examples.shared.runtime.io import run_sync
 
 import asyncio
 import hashlib
@@ -8,6 +10,7 @@ from pathlib import Path
 
 from langchain_core.messages import HumanMessage
 from langchain_core.messages import SystemMessage
+from openai import RateLimitError
 
 from company_agent.runtime.models import analysis_model
 from company_agent.runtime.models import billed_analysis
@@ -15,15 +18,16 @@ from company_agent.runtime.models import select_profile
 from company_agent.services.eip.client import attachment_list
 from company_agent.services.eip.client import binding
 from company_agent.services.eip.client import source
-from official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT_KEY
-from official_document_workflow.infrastructure.eip import calendar_csv
+from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT_KEY
+from examples.official_document_workflow.infrastructure.eip import calendar_csv
+from examples.official_document_workflow.application.prompts import INSTRUCTION_PLANNER_PROMPT
 
 
 class BilledPipeAdapter:
     """One private Pipe instance and verified user context per processing call."""
 
-    def __init__(self, ctx, pipe, module, model_profile=None):
-        self.ctx, self.pipe, self.module = ctx, pipe, module
+    def __init__(self, ctx, pipe, model_profile=None):
+        self.ctx, self.pipe = ctx, pipe
         self.model_profile = model_profile
 
     async def analyze(self, original, *, prompt=None, schema=None, max_output_tokens=None):
@@ -51,13 +55,13 @@ class BilledPipeAdapter:
         )
 
     async def plan(self, instruction):
-        ctx, pipe, module = self.ctx, self.pipe, self.module
+        ctx, pipe = self.ctx, self.pipe
         await binding(ctx)
         return pipe._cloud_json_object(
             await billed_analysis(
                 ctx,
                 [
-                    SystemMessage(content=module.INSTRUCTION_PLANNER_PROMPT),
+                    SystemMessage(content=INSTRUCTION_PLANNER_PROMPT),
                     HumanMessage(content=instruction),
                 ],
                 purpose='attachment_plan',
@@ -68,19 +72,36 @@ class BilledPipeAdapter:
     def no_exemption(self):
         raise ValueError('公司助理禁止使用免扣額度公文連線。')
 
+    async def authorize(self):
+        await binding(self.ctx)
+
 
 async def billed_pipe(ctx, model_profile=None):
-    from official_document_workflow.application.integration import configured_pipe, pipe_module
+    from examples.official_document_workflow.application.integration import configured_pipe
+    from examples.official_document_workflow.runtime import current_resources
 
     pipe = await configured_pipe()
-    module = pipe_module()
-    adapter = BilledPipeAdapter(ctx, pipe, module, model_profile)
-    pipe._cloud_ocr_text_request = adapter.analyze
+    pipe._usage_owner = ctx.owner
+    pipe.content_cache = await run_sync(lambda: current_resources().shared_content)
+    pipe.evidence_cache = None
+    pipe.analysis_results = current_resources().analysis_results if pipe.content_cache is not None and pipe.valves.document_analysis_cache_enabled else None
+    adapter = BilledPipeAdapter(ctx, pipe, model_profile)
+    pipe._analysis_authorize = adapter.authorize
+    pipe._analysis_declined_errors = (RateLimitError,)
+    pipe.analyze_text = adapter.analyze
     pipe._cloud_instruction_plan_payload = adapter.plan
     pipe._official_document_litellm_connection = adapter.no_exemption
     pipe.valves.cloud_ocr_text_model = analysis_model(ctx.model, model_profile, 'attachment').client.model_name
     pipe.valves.instruction_plan_model = analysis_model(ctx.model, model_profile, 'attachment_plan').client.model_name
-    return pipe, module
+    client = analysis_model(ctx.model, model_profile, 'attachment').client
+    # Hits return already authorized source facts without another paid call.
+    # Misses continue through the original verified-user billing adapter.
+    pipe._analysis_model_identity = (
+        'company-agent', str(client.openai_api_base), client.model_name,
+        client.reasoning_effort, client.max_tokens, client.temperature,
+        client.model_kwargs, client.extra_body,
+    )
+    return pipe
 
 
 def read_output(path):
@@ -107,10 +128,11 @@ async def owned_bytes(owner, file_id):
 
 
 async def process(ctx, args, emitter=None):
-    from official_document_workflow.application import integration
-    from official_document_workflow.application.multi_agent import process_with_team
-    from official_document_workflow.infrastructure.eip.sessions import manual_session
-    from official_document_workflow.infrastructure.storage.state import STATE
+    from examples.official_document_workflow.application import integration
+    from examples.official_document_workflow.application.multi_agent import process_with_team
+    from examples.official_document_workflow.infrastructure.eip.sessions import manual_session
+    from examples.official_document_workflow.runtime import current_resources
+    state = current_resources().state
     from company_agent.runtime.models import UserBilledModel
 
     if not ctx.settings.enable_eip_processing:
@@ -120,7 +142,7 @@ async def process(ctx, args, emitter=None):
     if args.model_profile:
         select_profile(ctx.model, args.model_profile)
     db = await binding(ctx)
-    selected = [source(ctx, h, 'attachment') for h in args.handles]
+    selected = [await run_sync(source,ctx, h, 'attachment') for h in args.handles]
     if any(
         Path(s['attachment']['name']).suffix.lower() not in {'.pdf', '.docx', '.doc'}
         for s in selected
@@ -133,7 +155,7 @@ async def process(ctx, args, emitter=None):
         ).encode(),
     ).hexdigest()
     key = 'eip_process:' + fingerprint
-    cached = ctx.store.begin_tool(
+    cached = await run_sync(ctx.store.begin_tool,
         ctx.owner,
         ctx.job,
         key,
@@ -145,11 +167,11 @@ async def process(ctx, args, emitter=None):
     if cached is not None:
         return cached
     files = []
-    async with STATE.processing.slot(ctx.owner):
+    async with state.processing.slot(ctx.owner):
         ids = []
         groups = {}
         total = 0
-        async with manual_session(ctx.owner, STATE, db) as current:
+        async with manual_session(ctx.owner, state, db) as current:
             fresh = {}
             for item in selected:
                 doc = item['doc']
@@ -171,16 +193,17 @@ async def process(ctx, args, emitter=None):
                     total += size
                     if size > 20_000_000 or total > 50_000_000:
                         raise ValueError('附件超過 20 MB／本批 50 MB 上限。')
-                    f = await integration.source_file(
-                        ctx.owner, payload, attachment['name'],
-                    )
+                    with output_part(attachment['url']):
+                        f = await integration.source_file(
+                            ctx.owner, payload, attachment['name'],
+                        )
                 ids.append(f.id)
                 groups.setdefault(group, []).append(f.id)
         await binding(ctx)
-        pipe, module = await billed_pipe(ctx, args.model_profile)
+        pipe = await billed_pipe(ctx, args.model_profile)
         result = await process_with_team(
             pipe,
-            module,
+
             ctx.owner,
             ids,
             list(groups.values()),
@@ -216,5 +239,5 @@ async def process(ctx, args, emitter=None):
             'workspace': '/agents',
             'notice': 'CSV 下載旁可預覽並由本人確認行事曆；尚未寫入 EIP。沒有期限不會建立行程。',
         }
-    ctx.store.finish_tool(ctx.owner, ctx.job, key, output)
+    await run_sync(ctx.store.finish_tool,ctx.owner, ctx.job, key, output)
     return output

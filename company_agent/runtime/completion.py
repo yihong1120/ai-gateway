@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Annotated
 from typing import Literal
 
 from langchain_core.tools import ToolException
+from langchain_core.messages import ToolMessage
 from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command
 from pydantic import Field
@@ -16,6 +18,9 @@ from pydantic import StringConstraints
 from company_agent.runtime.tools import injected_tool
 from company_agent.runtime.tools import tool_receipt
 from company_agent.schemas import Strict
+from company_agent.services.delivery.validation import validate_delivery
+from company_agent.services.delivery.validation import statistics_for_plan
+from company_agent.services.delivery.validation import verify_evidence_sources
 
 
 def review_evidence(state):
@@ -24,6 +29,20 @@ def review_evidence(state):
         if report['agent'] == 'reviewer' and report['status'] == 'completed'
         for item in report['reviewed_artifacts']
     ]
+
+
+def unresolved_assignments(state):
+    reports = state.get('reports', {})
+    pending = [key for report in reports.values() if report['status'] == 'completed'
+               for key in report.get('resolves_assignments', [])]
+    resolved = set()
+    while pending:
+        key = pending.pop()
+        if key in resolved or key not in reports:
+            continue
+        resolved.add(key)
+        pending.extend(reports[key].get('resolves_assignments', []))
+    return [key for key, report in reports.items() if report['status'] != 'completed' and key not in resolved]
 
 
 class EvidenceRequest(Strict):
@@ -76,23 +95,48 @@ async def complete(runtime: ToolRuntime, *, role, **kwargs):
     if len(runtime.state['messages'][-1].tool_calls) != 1:
         raise ToolException('完成工具須單獨呼叫，先等待其他操作與子任務結果。')
     ctx = runtime.context
-    files = await asyncio.to_thread(ctx.store.files, ctx.owner, ctx.job)
+    history = await asyncio.to_thread(ctx.store.files, ctx.owner, ctx.job)
+    files = [f for f in history if f.get('lifecycle', 'draft') != 'superseded']
     actual = {f['id'] for f in files}
     declared = set(args.artifact_ids)
-    if not declared <= actual:
+    if not declared <= {f['id'] for f in history}:
         raise ToolException('完成清單含非本工作產出，未接受完成宣告。')
     # Reopen/hash verification; completion cannot bypass artifact ownership.
     await asyncio.to_thread(ctx.store.verify_artifacts, ctx.owner, ctx.job, args.artifact_ids)
+    if ctx.settings.office_execution_mode == 'specialist' and role in {'data', 'document'}:
+        produced = {
+            json.loads(m.content).get('id') for m in runtime.state['messages']
+            if isinstance(m, ToolMessage) and m.status == 'success'
+            and m.name in {'create_spreadsheet', 'create_spreadsheet_report', 'edit_spreadsheet',
+                           'create_word', 'create_slides', 'create_text', 'edit_text_run', 'edit_artifact_text_run'}
+        }
+        names = {f['name'] for f in history if f['id'] in declared}
+        if not declared <= produced or not names <= set(ctx.assignment_outputs):
+            raise ToolException('專責子任務只能交回本次實際產製且在 outputs 內的檔案；唯讀／統計任務填 artifact_ids=[]。')
+        if args.outcome == 'completed' and names != set(ctx.assignment_outputs):
+            raise ToolException('本次 outputs 尚未全部產製，不得宣告 completed；補齊或明列 needs_input／blocked。')
     if role == 'coordinator' and args.outcome == 'completed':
-        if any(
-            report['status'] != 'completed'
-            for report in runtime.state.get('reports', {}).values()
-        ):
+        from langchain_core.messages import HumanMessage
+        from company_agent.services.delivery.explicit import check_explicit_cells
+        from company_agent.services.delivery.schemas import DeliveryPlan
+
+        plan = await asyncio.to_thread(ctx.store.delivery_plan, ctx.owner, ctx.job)
+        if plan is not None or ctx.settings.require_delivery_plan:
+            instruction = next(m.text for m in reversed(runtime.state['messages']) if isinstance(m, HumanMessage))
+            check_explicit_cells(instruction, DeliveryPlan.model_validate(plan or {}))
+        from company_agent.services.delivery.preservation import verify_preservation_sources
+        await asyncio.to_thread(verify_preservation_sources, ctx, DeliveryPlan.model_validate(plan or {}))
+        unresolved = unresolved_assignments(runtime.state)
+        if unresolved:
             raise ToolException(
-                '尚有子任務未完成，請明列待補資料或阻礙，不得宣告全部完成。',
+                '尚有子任務未完成：' + ', '.join(unresolved)
+                + '。若已補足條件，重新委派同角色並以 resolves_assignments 明確補做；否則明列待補資料或阻礙，不得宣告全部完成。',
             )
         if declared != actual:
-            raise ToolException('完成清單未列出所有本工作產出，未接受完成宣告。')
+            raise ToolException('完成清單未列出所有本工作產出或混入已取代舊稿；須恰為全部有效成果，舊稿須明確 supersede_artifact 後才可省略。')
+        _, evidence = await asyncio.to_thread(statistics_for_plan, ctx.store, ctx.owner, ctx.job)
+        await asyncio.to_thread(verify_evidence_sources, ctx, evidence.values())
+        await asyncio.to_thread(validate_delivery, ctx.store, ctx.owner, ctx.job)
         if ctx.settings.require_artifact_review:
             reviewed = {
                 (r['id'], r['sha256'])
@@ -100,6 +144,7 @@ async def complete(runtime: ToolRuntime, *, role, **kwargs):
             }
             if any((f['id'], f['sha256']) not in reviewed for f in files):
                 raise ToolException('尚有產出未經獨立審核實際讀取，未接受完成宣告。')
+        await asyncio.to_thread(ctx.store.finalize_artifacts, ctx.owner, ctx.job, args.artifact_ids)
     value = args.model_dump()
     ctx.store.audit(ctx.owner, ctx.job, name, args.outcome)
     return Command(
@@ -115,5 +160,5 @@ def completion_tool(role):
         'complete_job' if role == 'coordinator' else 'complete_assignment', Completion,
         '提交本工作結果，必須列出所有實際產出並完成要求的審核；缺資料或無法完成須明列 outcome。'
         if role == 'coordinator' else '提交本次子任務結果並交回主協調；只列實際產出，不代替審核或批准存檔。',
-        complete, role=role,
+        complete, role=role, handle_tool_error=True,
     )

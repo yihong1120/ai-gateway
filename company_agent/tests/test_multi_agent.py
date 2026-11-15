@@ -30,7 +30,7 @@ class RawRoleModel:
         names = {tool.name for tool in tools}
         role = (
             'coordinator'
-            if names == {'complete_job'}
+            if names == {'complete_job'} or any(name.startswith('delegate_') for name in names)
             else self.invocations[-1]
             if names == {'complete_assignment'} and self.invocations
             else next(
@@ -174,7 +174,7 @@ class MultiAgentTests(unittest.IsolatedAsyncioTestCase, Fixture):
             knowledge=[AIMessage(content='不應執行')],
         )
         result = await self.failed_job(DocumentAgent(self.config, model).run('alice', '查文件'), ModelCallLimitExceededError)
-        self.assertEqual(result['status'], 'running', result)
+        self.assertEqual(result['status'], 'error', result)
         self.assertEqual(model.invocations, ['coordinator'])
         self.assertEqual(self.store.attempts(result['job_id']), 1)
 

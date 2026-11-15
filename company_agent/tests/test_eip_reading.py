@@ -6,12 +6,14 @@ import threading
 import unittest
 from contextlib import asynccontextmanager
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import patch
 
 from company_agent.runtime.context import Context
 from company_agent.services.eip.client import remember
+from company_agent.services.eip import reading
 from company_agent.services.eip.reading import read_attachment
 from company_agent.services.eip.schemas import EIPRead
 from company_agent.tests.test_agent import Fixture
@@ -42,7 +44,7 @@ class EIPReadingTests(unittest.IsolatedAsyncioTestCase, Fixture):
             self.streams.append(stream)
             return stream
 
-        async def convert(*args):
+        async def convert(*args, **kwargs):
             stream = io.BytesIO(b'pdf')
             self.streams.append(stream)
             return stream, '公文.pdf'
@@ -51,9 +53,9 @@ class EIPReadingTests(unittest.IsolatedAsyncioTestCase, Fixture):
         async def session(*args): yield SimpleNamespace(read=read)
         patches = [
             patch('company_agent.services.eip.reading.binding', new=AsyncMock()), patch(
-                'official_document_workflow.infrastructure.eip.sessions.manual_session', new=session,
+                'examples.official_document_workflow.infrastructure.eip.sessions.manual_session', new=session,
             ),
-            patch('official_document_workflow.infrastructure.office.office_input.to_pdf', new=AsyncMock(side_effect=convert)),
+            patch('examples.official_document_workflow.infrastructure.office.office_input.to_pdf', new=AsyncMock(side_effect=convert)),
             patch(
                 'company_agent.services.files.operations.worker', return_value=[
                     {'location': f'page:{i}', 'text': 'body'} for i in range(8)
@@ -83,6 +85,147 @@ class EIPReadingTests(unittest.IsolatedAsyncioTestCase, Fixture):
             await read_attachment(self.ctx, EIPRead(handle=self.handle))
         self.assertFalse(self.downloads)
 
+    def owned_attachment(self, owner, *, name='另一份公文.doc', url='second-private-url'):
+        ctx = Context(owner, self.store.job(owner), self.config, self.store)
+        attachment = {'name': name, 'url': url}
+        handle = remember(ctx, {
+            'kind': 'attachment', 'doc': {'id': 'other-document', 'folder': 'inbox'},
+            'attachment': attachment,
+        })
+        return ctx, handle, attachment
+
+    async def test_authorized_owners_share_only_blocks_after_independent_downloads(self):
+        bob, handle, attachment = self.owned_attachment('bob')
+        owners = []
+
+        @asynccontextmanager
+        async def session(owner, *_):
+            owners.append(owner)
+            own = self.att if owner == 'alice' else attachment
+
+            async def read(operation, *args):
+                if operation == 'attachments':
+                    return [own]
+                self.assertEqual(args, (own['url'], own['name']))
+                return io.BytesIO(b'original')
+
+            yield SimpleNamespace(read=read)
+
+        with patch('examples.official_document_workflow.infrastructure.eip.sessions.manual_session', session), \
+                patch('company_agent.services.files.operations.worker', return_value=[{'location': 'page:1', 'text': 'shared body'}]) as parser:
+            alice_result, bob_result = await asyncio.gather(
+                read_attachment(self.ctx, EIPRead(handle=self.handle)),
+                read_attachment(bob, EIPRead(handle=handle)),
+            )
+            self.assertEqual(parser.call_count, 1)
+        self.assertCountEqual(owners, ['alice', 'bob'])
+        self.assertEqual(alice_result['blocks'], bob_result['blocks'])
+        self.assertEqual(alice_result['handle'], self.handle)
+        self.assertEqual(bob_result['handle'], handle)
+        self.assertEqual(bob_result['name'], attachment['name'])
+        self.assertNotIn(self.handle, str(bob_result))
+        self.assertNotIn('private-url', str(bob_result))
+        self.assertEqual(self.store.files('bob', bob.job), [])
+        with self.store.db() as db:
+            rows = db.execute('SELECT owner,job,handle FROM eip_read_inputs ORDER BY owner').fetchall()
+        self.assertEqual(rows, [('alice', self.job, self.handle), ('bob', bob.job, handle)])
+
+    async def test_content_hit_cannot_bypass_removed_source_or_job_ownership(self):
+        await read_attachment(self.ctx, EIPRead(handle=self.handle))
+        bob, handle, _ = self.owned_attachment('bob')
+        read = AsyncMock(return_value=[])
+
+        @asynccontextmanager
+        async def session(*_):
+            yield SimpleNamespace(read=read)
+
+        with patch('examples.official_document_workflow.infrastructure.eip.sessions.manual_session', session), \
+                patch('company_agent.services.files.operations.worker') as parser:
+            with self.assertRaisesRegex(ValueError, '附件清單已變更'):
+                await read_attachment(bob, EIPRead(handle=handle))
+            with self.assertRaisesRegex(ValueError, '不屬於本工作'):
+                await read_attachment(bob, EIPRead(handle=self.handle))
+        read.assert_awaited_once_with('attachments', 'other-document', 'inbox')
+        parser.assert_not_called()
+
+    async def test_same_source_url_with_changed_bytes_does_not_reuse_content(self):
+        with patch('company_agent.services.files.operations.worker', side_effect=[
+            [{'location': 'page:1', 'text': 'old body'}],
+            [{'location': 'page:1', 'text': 'changed body'}],
+        ]) as parser:
+            first = await read_attachment(self.ctx, EIPRead(handle=self.handle))
+            other, handle, _ = self.owned_attachment('alice', name=self.att['name'], url=self.att['url'])
+            with patch('examples.official_document_workflow.infrastructure.office.office_input.to_pdf', AsyncMock(return_value=(io.BytesIO(b'changed-pdf'), '公文.pdf'))):
+                second = await read_attachment(other, EIPRead(handle=handle))
+        self.assertEqual(parser.call_count, 2)
+        self.assertNotEqual(first['sha256'], second['sha256'])
+        self.assertEqual(second['blocks'][0]['text'], 'changed body')
+
+    async def test_same_owner_other_job_requires_its_own_authorized_source(self):
+        await read_attachment(self.ctx, EIPRead(handle=self.handle))
+        other, handle, _ = self.owned_attachment('alice', name=self.att['name'], url=self.att['url'])
+        with patch('company_agent.services.files.operations.worker') as parser:
+            result = await read_attachment(other, EIPRead(handle=handle))
+        parser.assert_not_called()
+        self.assertEqual(result['handle'], handle)
+        self.assertEqual(len(self.downloads), 2)
+        with self.store.db() as db:
+            count = db.execute('SELECT count(*) FROM eip_read_inputs WHERE owner=%s', ('alice',)).fetchone()[0]
+        self.assertEqual(count, 2)
+
+    async def test_binding_revocation_after_shared_hit_prevents_receipt_completion(self):
+        await read_attachment(self.ctx, EIPRead(handle=self.handle))
+        other, handle, _ = self.owned_attachment('alice', name=self.att['name'], url=self.att['url'])
+        with patch('company_agent.services.eip.reading.binding', AsyncMock(side_effect=[None, None, ValueError('revoked')])), \
+                patch('company_agent.services.files.operations.worker') as parser:
+            with self.assertRaisesRegex(ValueError, 'revoked'):
+                await read_attachment(other, EIPRead(handle=handle))
+        parser.assert_not_called()
+        with self.store.db() as db:
+            result = db.execute('SELECT result FROM tool_receipts WHERE owner=%s AND job=%s', ('alice', other.job)).fetchone()[0]
+        self.assertIsNone(result)
+
+    async def test_content_cache_keeps_text_ocr_pages_and_configuration_separate(self):
+        await read_attachment(self.ctx, EIPRead(handle=self.handle))
+        with patch('company_agent.services.office.ocr.ocr_page', return_value={'blocks': [{'location': 'page:1', 'text': 'OCR'}], 'notice': 'check'}) as ocr:
+            await read_attachment(self.ctx, EIPRead(handle=self.handle, mode='ocr', page=1))
+            await read_attachment(self.ctx, EIPRead(handle=self.handle, mode='ocr', page=2))
+            other, handle, _ = self.owned_attachment('alice', name=self.att['name'], url=self.att['url'])
+            await read_attachment(other, EIPRead(handle=handle, mode='ocr', page=1))
+            self.assertEqual(ocr.call_count, 2)
+            another, another_handle, _ = self.owned_attachment('alice', name=self.att['name'], url=self.att['url'])
+            with patch.dict('os.environ', {'COMPANY_AGENT_OCR_URL': 'http://127.0.0.1:8299'}):
+                await read_attachment(another, EIPRead(handle=another_handle, mode='ocr', page=1))
+            self.assertEqual(ocr.call_count, 3)
+            image_ctx, image_handle, _ = self.owned_attachment('alice', name=self.att['name'], url=self.att['url'])
+            with patch('company_agent.services.office.sandbox.IMAGE', 'ai-gateway/company-office:next'):
+                await read_attachment(image_ctx, EIPRead(handle=image_handle, mode='ocr', page=1))
+            self.assertEqual(ocr.call_count, 4)
+
+    async def test_native_cache_tracks_installed_parser_code_and_pymupdf_version(self):
+        self.addCleanup(reading._reader_identity.cache_clear)
+        with patch('company_agent.services.files.operations.worker', return_value=[{'location': 'page:1', 'text': 'body'}]) as parser:
+            await read_attachment(self.ctx, EIPRead(handle=self.handle))
+            other, handle, _ = self.owned_attachment('alice', name=self.att['name'], url=self.att['url'])
+            reading._reader_identity.cache_clear()
+            with patch.object(reading, 'version', return_value='synthetic-new-PyMuPDF'):
+                await read_attachment(other, EIPRead(handle=handle))
+            self.assertEqual(parser.call_count, 2)
+
+            original = Path.read_bytes
+
+            def changed_parser(path):
+                payload = original(path)
+                if path.name == 'documents.py' and path.parent.name == 'office':
+                    return payload + b'\n# synthetic parser revision\n'
+                return payload
+
+            another, another_handle, _ = self.owned_attachment('alice', name=self.att['name'], url=self.att['url'])
+            reading._reader_identity.cache_clear()
+            with patch.object(Path, 'read_bytes', changed_parser):
+                await read_attachment(another, EIPRead(handle=another_handle))
+            self.assertEqual(parser.call_count, 3)
+
     async def test_ocr_requires_explicit_mode_reuses_snapshot(self):
         await read_attachment(self.ctx, EIPRead(handle=self.handle))
         with patch('company_agent.services.office.ocr.ocr_page', return_value={'blocks': [{'location': 'page:2', 'text': '掃描內容'}], 'notice': 'OCR需核對'}) as ocr:
@@ -101,7 +244,7 @@ class EIPReadingTests(unittest.IsolatedAsyncioTestCase, Fixture):
 
     async def test_calendar_attachment_uses_detail_and_downloads_once_for_pagination(self):
         from company_agent.tests.test_calendar_tools import row, detail_rows
-        from official_document_workflow.infrastructure.eip.calendar_read import detail
+        from examples.official_document_workflow.infrastructure.eip.calendar_read import detail
         rows = detail_rows()
         attachment = detail(rows, row()[2])['attachments'][0]
         handle = remember(
@@ -115,7 +258,7 @@ class EIPReadingTests(unittest.IsolatedAsyncioTestCase, Fixture):
         read = AsyncMock(side_effect=[rows, raw])
         @asynccontextmanager
         async def session(*args): yield SimpleNamespace(read=read)
-        with patch('official_document_workflow.infrastructure.eip.sessions.manual_session', session):
+        with patch('examples.official_document_workflow.infrastructure.eip.sessions.manual_session', session):
             first = await read_attachment(self.ctx, EIPRead(handle=handle))
             await read_attachment(self.ctx, EIPRead(handle=handle, start=first['next_start']))
         self.assertEqual([c.args[0] for c in read.await_args_list], ['calendar_detail', 'download'])
@@ -125,7 +268,7 @@ class EIPReadingTests(unittest.IsolatedAsyncioTestCase, Fixture):
 
     async def test_stream_is_closed_when_conversion_fails_or_input_exceeds_limit(self):
         failure = ValueError('conversion failed')
-        with patch('official_document_workflow.infrastructure.office.office_input.to_pdf', new=AsyncMock(side_effect=failure)):
+        with patch('examples.official_document_workflow.infrastructure.office.office_input.to_pdf', new=AsyncMock(side_effect=failure)):
             with self.assertRaises(ValueError) as raised:
                 await read_attachment(self.ctx, EIPRead(handle=self.handle))
         self.assertIs(raised.exception, failure)
@@ -141,7 +284,7 @@ class EIPReadingTests(unittest.IsolatedAsyncioTestCase, Fixture):
                 }, 'attachment': self.att,
             },
         )
-        with patch('official_document_workflow.infrastructure.eip.sessions.manual_session', session):
+        with patch('examples.official_document_workflow.infrastructure.eip.sessions.manual_session', session):
             with self.assertRaisesRegex(ValueError, '單檔上限'):
                 await read_attachment(self.ctx, EIPRead(handle=handle))
         self.assertTrue(raw.closed)
@@ -160,7 +303,7 @@ class EIPReadingTests(unittest.IsolatedAsyncioTestCase, Fixture):
         read = AsyncMock(return_value=detail_rows())
         @asynccontextmanager
         async def session(*args): yield SimpleNamespace(read=read)
-        with patch('official_document_workflow.infrastructure.eip.sessions.manual_session', session):
+        with patch('examples.official_document_workflow.infrastructure.eip.sessions.manual_session', session):
             with self.assertRaisesRegex(ValueError, '附件清單已變更'):
                 await read_attachment(self.ctx, EIPRead(handle=handle))
         read.assert_awaited_once_with('calendar_detail', row()[2])

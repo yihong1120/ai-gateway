@@ -7,7 +7,6 @@ from unittest.mock import patch
 
 from langchain_core.messages import AIMessage
 from langchain_core.messages import ToolMessage
-from langchain_core.tools import ToolException
 
 from company_agent.api.progress import progress_text
 from company_agent.runtime.execution import DocumentAgent
@@ -112,7 +111,7 @@ class EIPBatchTests(unittest.IsolatedAsyncioTestCase, Fixture):
     async def test_native_batch_reports_failure_without_dropping_other_results(self):
         query = AsyncMock(side_effect=[{'documents': []}, ValueError('EIP 登入失效'), {'documents': []}])
         result = await self.failed_job(self.execute(batch(['inbox', 'sign', 'sent']), query), ValueError)
-        self.assertEqual(result['status'], 'running', result)
+        self.assertEqual(result['status'], 'error', result)
         self.assertEqual(query.await_count, 3)
         self.assertIn('登入失效', str(str(self.native_error)))
 
@@ -122,8 +121,12 @@ class EIPBatchTests(unittest.IsolatedAsyncioTestCase, Fixture):
                 {**finish('complete_assignment').tool_calls[0], 'id': str(i)} for i in range(2)
             ],
         )
-        with self.assertRaisesRegex(ToolException, '完成工具須單獨'):
-            await self.execute(request, AsyncMock())
+        query = AsyncMock()
+        result, _ = await self.execute(request, query)
+        self.assertEqual(result['status'], 'done', result)
+        self.assertEqual(len(result['tool_feedback']), 2)
+        self.assertTrue(all('完成工具須單獨' in x['message'] for x in result['tool_feedback']))
+        query.assert_not_awaited()
 
     async def test_successful_query_links_survive_invalid_model_completion(self):
         url = '/agents/eip/11111111-1111-4111-8111-111111111111/'+'a'*32
@@ -141,7 +144,7 @@ class EIPBatchTests(unittest.IsolatedAsyncioTestCase, Fixture):
         with patch('company_agent.services.eip.client.query', new=query), \
                 patch('company_agent.services.eip.client.binding', new=AsyncMock()):
             result = await self.failed_job(DocumentAgent(self.config, model).run('alice', '列出 EIP 待簽公文，讓我點進去看內文'), ValueError)
-        self.assertEqual(result['status'], 'running', result)
+        self.assertEqual(result['status'], 'error', result)
         self.assertTrue(str(self.native_error))
         self.assertNotIn(url, str(result['messages']))
         self.assertIn(url, str(result['subgraphs']))
@@ -243,7 +246,7 @@ class EIPBatchTests(unittest.IsolatedAsyncioTestCase, Fixture):
                 else:
                     result, _model = await self.execute(request, AsyncMock())
             self.assertEqual(len(order), 3)
-            self.assertEqual(result['status'], 'running' if fail else 'done', result)
+            self.assertEqual(result['status'], 'error' if fail else 'done', result)
 
     async def test_attachment_limit_corrects_once_before_read(self):
         read = AsyncMock(return_value={'handle': 'a'*32, 'name': 'a.pdf', 'sha256': 'a'*64, 'blocks': [{'text': '內容'}]})

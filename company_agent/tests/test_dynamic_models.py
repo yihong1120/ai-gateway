@@ -124,7 +124,7 @@ class DynamicModelTests(unittest.IsolatedAsyncioTestCase, Fixture):
             valves=SimpleNamespace(cloud_ocr_text_max_input_characters=1000),
             _cloud_json_object=json.loads, _cloud_ocr_text_prompt=lambda kind: 'extract',
         )
-        adapter = BilledPipeAdapter(ctx, pipe, SimpleNamespace(INSTRUCTION_PLANNER_PROMPT='plan'), 'text')
+        adapter = BilledPipeAdapter(ctx, pipe, 'text')
         with patch('company_agent.services.eip.processing.binding', AsyncMock()):
             await adapter.analyze(SimpleNamespace(text='synthetic', kind='pdf'))
             await adapter.plan('整理')
@@ -132,7 +132,7 @@ class DynamicModelTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertEqual({r['user'] for r in requests}, {'oidc-alice'})
 
     async def test_eip_native_schema_and_output_budget_reach_billed_gateway(self):
-        from official_document_workflow.domain.calendar.contracts import GROUP_ANALYSIS_SCHEMA
+        from examples.official_document_workflow.domain.calendar.contracts import GROUP_ANALYSIS_SCHEMA
         requests = []
         base = self.model(lambda request: (requests.append(json.loads(request.content)), response(content='{}'))[1])
         ctx = Context('alice', self.job, self.config, self.store, routed_model(base, self.config))
@@ -140,7 +140,7 @@ class DynamicModelTests(unittest.IsolatedAsyncioTestCase, Fixture):
             valves=SimpleNamespace(cloud_ocr_text_max_input_characters=1000),
             _cloud_json_object=json.loads, _cloud_ocr_text_prompt=lambda kind: 'extract',
         )
-        adapter = BilledPipeAdapter(ctx, pipe, SimpleNamespace(), 'small')
+        adapter = BilledPipeAdapter(ctx, pipe, 'small')
         with patch('company_agent.services.eip.processing.binding', AsyncMock()):
             await adapter.analyze(
                 SimpleNamespace(text='synthetic', kind='pdf'),
@@ -162,7 +162,7 @@ class DynamicModelTests(unittest.IsolatedAsyncioTestCase, Fixture):
         root = routed_model(WebBilledModel(base.owner, base.subject, base.client), self.config)
         selected = select_profile(root, 'small')
         self.assertIsInstance(selected, WebBilledModel)
-        with patch('company_agent.runtime.context.verified_user', AsyncMock(return_value=verified('changed'))):
+        with patch('examples.identity.adapters.webui.verified_user', AsyncMock(return_value=verified('changed'))):
             with self.assertRaises(ValueError):
                 await selected.analyze([HumanMessage(content='synthetic')])
 

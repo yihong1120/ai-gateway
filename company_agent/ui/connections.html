@@ -15,20 +15,29 @@
 <form id="eip-form"><label for="eip-account">本人 EIP 帳號</label><input id="eip-account" name="eip-account" autocomplete="username" maxlength="100" required>
 <label for="eip-password">EIP 密碼</label><input id="eip-password" name="eip-password" type="password" autocomplete="current-password" maxlength="256" required>
 <label class="check"><input id="eip-http" type="checkbox" required>我了解 EIP 目前使用未加密 HTTP，僅在可信任網路使用；建議由管理員啟用 HTTPS／VPN。</label>
-<label class="check"><input id="eip-auto" type="checkbox">同意保存加密 EIP 密碼，啟用每小時公文下載、雲端分析及自動匯入我的私人行事曆。</label>
-<p>自動處理不預先勾選。未勾選而儲存時，僅建立短期 Session，且會停止既有排程並移除已保存密碼；不是單純暫停。</p>
+<label class="check"><input id="eip-persist" type="checkbox">同意加密保存 EIP 憑證，供公司助理及已授權的 Codex／Claude 使用。</label>
+<label class="check"><input id="eip-auto" type="checkbox">另啟用每小時公文下載、雲端分析及自動匯入我的私人行事曆（需要保存憑證）。</label>
+<p>保存憑證與自動處理各自選擇，均不預先勾選。只保存憑證不啟動排程；未同意保存時只建立短期 Session，停止既有排程並移除原保存密碼。既有成果、去重紀錄及 NAS 綁定保留。</p>
 <p>啟用後，通過驗證的 CSV 直接匯入私人行事曆。只有開始日期／時間、沒有結束資料時，預設預留 1 小時（管理員可設定為 2 小時），明確標註為系統預留，不當成公文事實；原始檔案不變。匯入後核對詳細資料，結果不明不自動重送。</p>
 <p>待處理文件匣（待簽核／待經辦）不限日期、不分已讀／未讀，已完成的不重做。簽核紀錄、通知紀錄與我送出的簽核仍以首次啟用前 24 小時為固定抓取起點；同帳號重新綁定保留起點與處理紀錄。每輪最多處理 10 份，其餘留至後續排程。不會替你簽核或送出公文。查看附件可能更新閱讀紀錄。沒有明確期限不新增行程；匯入結果不明不自動重送。關閉網頁不影響排程。</p>
 <button type="submit" id="eip-save">儲存 EIP 綁定</button></form></details>
 <p id="eip-notice" role="status" aria-live="polite"></p><a href="/eip">查看公文處理狀態、成果下載與行事曆</a></section>
 <section id="nas"><h2>公司助理 NAS 帳號</h2><p id="nas-status" role="status">讀取連線狀態中…</p>
+<p>可保存多組帳號；新的公司助理工作可讀取當時已綁定且可用的所有帳號。每個資料夾標示所屬連線，權限仍由各帳號的 NAS 授權決定。</p>
 <p>可綁定 NAS 一般或管理員帳號。可讀目錄依該帳號的 NAS 權限決定，包含 NAS 授權的 homes。若使用管理員帳號，Agent 可能讀到其他使用者家目錄。仍為唯讀，不提供寫入、刪除或覆寫；修改文件另產生私人下載檔。</p>
-<button type="button" id="nas-refresh">重新整理狀態</button><button type="button" id="nas-test" disabled>測試 NAS 連線與可用資料夾</button><button type="button" id="nas-unlink" disabled>解除 NAS 綁定並移除憑證</button>
-<details><summary>首次綁定／更換 NAS 帳號或密碼</summary>
-<form id="nas-form"><label for="nas-account">本人 NAS 帳號</label><input id="nas-account" name="nas-account" autocomplete="username" maxlength="256" required>
+<label for="nas-binding">要管理的 NAS 連線</label><select id="nas-binding" disabled></select>
+<button type="button" id="nas-refresh">重新整理狀態</button><button type="button" id="nas-test" disabled>測試選取的連線與資料夾</button><button type="button" id="nas-unlink" disabled>解除選取的連線並移除憑證</button>
+<details><summary>新增帳號／更新既有連線</summary>
+<form id="nas-form"><label for="nas-edit-binding">新增或更新</label><select id="nas-edit-binding"><option value="">新增 NAS 帳號</option></select>
+<label for="nas-label">連線名稱（例如：工程部、個人帳號）</label><input id="nas-label" name="nas-label" maxlength="80">
+<label for="nas-account">本人 NAS 帳號</label><input id="nas-account" name="nas-account" autocomplete="username" maxlength="256" required>
 <label for="nas-password">NAS 密碼</label><input id="nas-password" name="nas-password" type="password" autocomplete="current-password" maxlength="256" required>
 <label class="check"><input id="nas-consent" type="checkbox" required>我使用本人 NAS 帳號，同意加密保存憑證；依我的指令，必要的檔名與文件內容可交由已設定雲端模型分析。</label>
 <button type="submit" id="nas-save">驗證並綁定 NAS</button></form></details>
-<p>每次操作以本人帳號重新登入、用後登出。密碼不交給模型。目前不支援每次需驗證碼的登入，請勿為此關閉雙因素驗證。解除或更換帳號後，舊 NAS 工作不能沿用新帳號；請另開工作。既有私人成果不會自動刪除。</p>
+<p>新增或更新帳號每分鐘限一次；測試與解除只作用於選取的連線。</p>
+<p>每人最多保存 16 組帳號，連線端點由管理員設定。每次操作使用所屬帳號重新登入、用後登出，密碼不交給模型。目前不支援每次需驗證碼的登入，請勿為此關閉雙因素驗證。新增帳號僅供新工作使用，接續工作維持原有來源範圍；解除或更新連線後，舊工作不能改用另一組帳號，請另開工作。既有私人成果不會自動刪除。</p>
 <p id="nas-notice" role="status" aria-live="polite"></p><div id="nas-shares"></div><a href="/agents">查看公司助理任務與下載成果</a></section>
+<section id="mcp"><h2>Codex／Claude 公司資源</h2>
+<p>完成公司工具授權後，預設可使用本人所有有效 NAS／EIP 綁定及原有讀取權限，無須逐帳號或資料夾勾選。新增綁定供新工作使用；撤回某工具不影響其他綁定或背景排程。</p>
+<p id="mcp-status" role="status">讀取公司工具狀態中…</p><div id="mcp-clients"></div></section>
 </main></body></html>

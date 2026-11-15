@@ -62,7 +62,7 @@ class ArchitectureTests(unittest.TestCase):
             self.assertEqual(agent.name, role)
             self.assertIn('tools', agent.get_graph().nodes)
         self.assertEqual({tool.name for tool in delegation_tools(specialists)}, expected)
-        self.assertEqual(ROLE_TOOLS['coordinator'], expected)
+        self.assertEqual(ROLE_TOOLS['coordinator'], expected | {'plan_delivery', 'supersede_artifact', 'validate_delivery'})
 
     def test_unregistered_tool_in_role_definition_fails_at_graph_construction(self):
         with patch('company_agent.graph.ROLE_TOOLS', {'document': {'misspelled_tool'}}):
@@ -70,7 +70,7 @@ class ArchitectureTests(unittest.TestCase):
                 build_graph(None, InMemorySaver())
 
     def test_native_factory_owns_the_loop_and_uses_new_checkpoint_version(self):
-        self.assertEqual(GRAPH_VERSION, 25)
+        self.assertEqual(GRAPH_VERSION, 31)
         for typed in (False, True):
             graph = build_graph(None, InMemorySaver(), typed).get_graph()
             self.assertEqual(

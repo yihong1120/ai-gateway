@@ -216,7 +216,7 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase, Fixture):
             reviewer=[AIMessage(content='全部合格，已核對')],
         )
         result = await self.failed_job(DocumentAgent(self.config, model).run('alice', '建立並審核'), ValueError)
-        self.assertEqual(result['status'], 'running', result)
+        self.assertEqual(result['status'], 'error', result)
         self.assertFalse(review_evidence(result))
         self.assertEqual(len(result['files']), 1)
 

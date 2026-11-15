@@ -20,6 +20,7 @@ from company_agent.runtime.results import execution_summary
 from company_agent.services.eip.client import document_link
 from company_agent.services.files.nas import NASClient
 from company_agent.services.files.operations import worker
+from company_agent.services.files.errors import RecoverableToolError
 from company_agent.services.office.documents import spreadsheet_books
 from company_agent.services.office.revision import require_inspected
 from company_agent.services.research.web import tavily_request
@@ -69,7 +70,7 @@ class ReceiptTests(unittest.TestCase):
                     artifact_id='file', sha256='sha', location='p:0', expected='text',
                 )
                 receipt = message.model_copy(update={'name': 'inspect_artifact'})
-                with self.assertRaises((ValueError, TypeError, AttributeError)):
+                with self.assertRaises((ValueError, TypeError, AttributeError, RecoverableToolError)):
                     require_inspected([receipt], args)
 
     def test_bad_read_receipts_do_not_become_evidence(self):
