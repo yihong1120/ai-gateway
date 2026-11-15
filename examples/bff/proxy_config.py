@@ -1,11 +1,13 @@
 """BFF config operations."""
-
 from __future__ import annotations
 
 import logging
 
-
 from fastapi import HTTPException
+
+from examples.shared.runtime.modules import ModuleReference
+
+_identity_bff = ModuleReference('examples.identity.settings.bff')
 
 logger = logging.getLogger('uvicorn.error')
 
@@ -67,4 +69,4 @@ def resolve_upstream(path: str) -> tuple[str, str]:
     return base.rstrip('/'), suffix if separator else ''
 
 
-from examples.identity.settings.bff import get_bff_options
+get_bff_options = _identity_bff.attribute('get_bff_options')

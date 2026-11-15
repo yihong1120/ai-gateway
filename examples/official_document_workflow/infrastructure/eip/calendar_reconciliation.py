@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import re
-from datetime import date, timedelta
+from datetime import date
+from datetime import timedelta
 from difflib import SequenceMatcher
 
+from .calendar_read import unescape
+from .calendar_verification import validate_wire
 from examples.official_document_workflow.domain.calendar import identity
 from examples.official_document_workflow.domain.calendar.deduplication import (
     original_schedule_days,
@@ -12,9 +15,9 @@ from examples.official_document_workflow.domain.calendar.deduplication import (
 from examples.official_document_workflow.domain.calendar.match_review import (
     REVISION_DAYS,
 )
+from examples.shared.runtime.modules import ModuleReference
 
-from .calendar_read import unescape
-from .calendar_verification import validate_wire
+_workflow_calendar_csv = ModuleReference('examples.official_document_workflow.infrastructure.eip.calendar_csv')
 
 ASCII_UPPER = str.maketrans('abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ')
 MAX_DETAILS = 100
@@ -34,7 +37,7 @@ def related_title(left, right):
     if a == b:
         return True
     work_a, work_b = str(a[1]), str(b[1])
-    grams = lambda value: {value[i:i+2] for i in range(len(value)-1)}
+    def grams(value): return {value[i:i+2] for i in range(len(value)-1)}
     overlap = grams(work_a) & grams(work_b)
     return len(overlap) >= 4 and SequenceMatcher(None, work_a, work_b, autojunk=False).ratio() >= .45
 
@@ -70,7 +73,7 @@ def same_slot(row, fields):
 
 def distinct_all_day_segments(detail, fields):
     """A proven sibling day is not a revision or duplicate of this segment."""
-    from .calendar_csv import ALL_DAY_SEGMENT_NOTICE
+    ALL_DAY_SEGMENT_NOTICE = _workflow_calendar_csv.attribute('ALL_DAY_SEGMENT_NOTICE')
 
     row = detail[0]
     if fields[5] != '1' or str(row[10]) != '1':
@@ -81,8 +84,10 @@ def distinct_all_day_segments(detail, fields):
     if not new or not old or (new['start'], new['end']) != (old['start'], old['end']):
         return False
     actual_day = event_day(row[9]).replace('-', '/')
-    if (new['segment'] != fields[1].replace('-', '/') or old['segment'] != actual_day
-            or new['segment'] == old['segment']):
+    if (
+        new['segment'] != fields[1].replace('-', '/') or old['segment'] != actual_day
+        or new['segment'] == old['segment']
+    ):
         return False
     if identity.title(unescape(fields[0])) != identity.title(unescape(str(row[8]))):
         return False
@@ -148,9 +153,14 @@ async def inspect_imports(client, lines):
     listings = {}
     for day in dict.fromkeys(fields[1] for fields in parsed):
         day_value = date.fromisoformat(day)
-        start, end = (day_value-timedelta(days=REVISION_DAYS)).isoformat(), (day_value+timedelta(days=REVISION_DAYS)).isoformat()
-        old_days = {old for fields in parsed if fields[1] == day for old in original_schedule_days(incoming_snapshot(fields))
-                    if not start <= old <= end}
+        start, end = (day_value-timedelta(days=REVISION_DAYS)).isoformat(), (
+            day_value +
+            timedelta(days=REVISION_DAYS)
+        ).isoformat()
+        old_days = {
+            old for fields in parsed if fields[1] == day for old in original_schedule_days(incoming_snapshot(fields))
+            if not start <= old <= end
+        }
         if len(old_days) > 2:
             raise ValueError('同日來源包含過多原訂日期，請分批核對；未新增行程。')
         candidates = []
@@ -199,7 +209,11 @@ async def inspect_imports(client, lines):
                 raise ValueError('EIP 清單與詳細資料日期不符，請重新核對；未新增。')
             if not recurring and distinct_all_day_segments(detail, fields):
                 continue
-            decision = compare(detail, fields, client.user_id, event_id, expected_owner=str(row[0]), occurrence_day=listed_day if recurring else None)
+            decision = compare(
+                detail, fields, client.user_id, event_id, expected_owner=str(
+                    row[0],
+                ), occurrence_day=listed_day if recurring else None,
+            )
             if decision in {'same', 'conflict'}:
                 snapshot = existing_snapshot(detail)
                 if recurring:

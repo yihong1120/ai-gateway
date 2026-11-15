@@ -1,4 +1,18 @@
 repos:
+-   repo: local
+    hooks:
+    -   id: dependency-lock
+        name: dependency lock matches pyproject
+        entry: uv lock --check
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|uv\.lock)$
+    -   id: candidate-settings
+        name: candidate settings match presets
+        entry: python -m company_agent.configs.build --check
+        language: system
+        pass_filenames: false
+        files: ^company_agent/configs/
 -   repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -10,17 +24,11 @@ repos:
     -   id: name-tests-test
         args: [--pytest-test-first]
         files: (^|/)test_[^/]+\.py$
-    -   id: requirements-txt-fixer
--   repo: https://github.com/asottile/setup-cfg-fmt
-    rev: v3.2.0
-    hooks:
-    -   id: setup-cfg-fmt
 -   repo: https://github.com/asottile/reorder-python-imports
     rev: v3.17.0
     hooks:
     -   id: reorder-python-imports
-        exclude: ^pre_commit/resources/
-        args: [--py310-plus, --add-import, 'from __future__ import annotations']
+        args: [--py311-plus, --add-import, 'from __future__ import annotations']
 -   repo: https://github.com/asottile/add-trailing-comma
     rev: v4.0.0
     hooks:
@@ -29,7 +37,7 @@ repos:
     rev: v3.21.2
     hooks:
     -   id: pyupgrade
-        args: [--py310-plus]
+        args: [--py311-plus]
 -   repo: https://github.com/hhatto/autopep8
     rev: v2.3.2
     hooks:
@@ -46,10 +54,9 @@ repos:
     hooks:
     -   id: mypy
         # Framework adapters and dynamic test stubs do not yet have a typing baseline.
-        files: ^examples/(auth|bff|db_management|deployment_registry|ai_usage)/.*\.py$
+        files: ^examples/(identity|bff|db_management|deployment/registry|ai_usage)/.*\.py$
         additional_dependencies: [types-pyyaml]
     -   id: mypy
         name: mypy (full repository audit)
         stages: [manual]
         additional_dependencies: [types-pyyaml]
-        exclude: ^testing/resources/

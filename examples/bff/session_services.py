@@ -8,14 +8,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from examples.identity.deployment_context import DeploymentBinding
-from examples.identity.deployment_context import resolve_request_deployment
-from examples.identity.models import User
-from examples.identity.sessions.store import auth_tokens
-from examples.identity.sessions.store import create_auth_session
-from examples.identity.sessions.store import delete_auth_session
-from examples.identity.sessions.store import get_auth_session
-from examples.identity.sessions.store import touch_auth_session
 from examples.bff.oidc_services import create_oidc_global_logout_url
 from examples.bff.proxy import get_proxy_access_token
 from examples.bff.proxy import proxy_request
@@ -26,11 +18,19 @@ from examples.bff.schemas import UserSummary
 from examples.bff.security import check_csrf
 from examples.bff.security import clear_session_cookie
 from examples.bff.security import require_trusted_origin
-from examples.identity.settings.bff import get_bff_options
 from examples.bff.security import set_session_cookie
+from examples.identity.deployment_context import DeploymentBinding
+from examples.identity.deployment_context import resolve_request_deployment
+from examples.identity.models import User
 from examples.identity.schemas.auth import DeploymentInfo
 from examples.identity.sessions.authentication import login_user
 from examples.identity.sessions.authentication import logout_user
+from examples.identity.sessions.store import auth_tokens
+from examples.identity.sessions.store import create_auth_session
+from examples.identity.sessions.store import delete_auth_session
+from examples.identity.sessions.store import get_auth_session
+from examples.identity.sessions.store import touch_auth_session
+from examples.identity.settings.bff import get_bff_options
 
 
 async def _session(

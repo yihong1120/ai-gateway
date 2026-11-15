@@ -39,8 +39,10 @@ def check_explicit_cells(instruction, plan):
     """
     missing = explicit_outputs(instruction) - {f.name for f in plan.files}
     if missing:
-        raise ToolException('交付規格漏列使用者明確要求的檔名：' + '、'.join(sorted(missing))
-                            + '。請在產檔前登記完整清單，不能只登記目前角色的一份。')
+        raise ToolException(
+            '交付規格漏列使用者明確要求的檔名：' + '、'.join(sorted(missing))
+            + '。請在產檔前登記完整清單，不能只登記目前角色的一份。',
+        )
     if '{value}' not in instruction and any(r.statistic is None and '{{value}}' in r.text for f in plan.files for r in f.texts):
         raise ToolException('使用者要求真實數值時，須以statistic的key／metric引用工具憑據；不可改登記字面預留符號來迴避統計驗收。')
     for file in plan.files:
@@ -64,18 +66,23 @@ def check_explicit_cells(instruction, plan):
         assigned = {literal for _, literal in assignments}
         # A bounded, explicit row-aligned range requirement is also a cell contract.
         # Never infer metrics from an unrelated narrative or a source range.
-        metric_labels = {'合計': 'sum', '總和': 'sum', '筆數': 'count',
-                         '最小': 'min', '最大': 'max', '平均': 'mean'}
+        metric_labels = {
+            '合計': 'sum', '總和': 'sum', '筆數': 'count',
+            '最小': 'min', '最大': 'max', '平均': 'mean',
+        }
         ranges = re.finditer(
             r'(?<![A-Z0-9])([A-Z]{1,2})([1-9][0-9]{0,3}):\1([1-9][0-9]{0,3})'
-            r'\s*依序填(?:入)?對應的(?:真實)?(?:工具|統計|計算)數值', specification)
+            r'\s*依序填(?:入)?對應的(?:真實)?(?:工具|統計|計算)數值', specification,
+        )
         for aligned in ranges:
             start, end = int(aligned[2]), int(aligned[3])
             if end < start or end - start > 99:
                 continue
             for row in range(start, end + 1):
-                labels = [(cell, literal, metric_labels[literal]) for cell, literal in assignments
-                          if literal in metric_labels and re.fullmatch(r'[A-Z]{1,2}' + str(row), cell)]
+                labels = [
+                    (cell, literal, metric_labels[literal]) for cell, literal in assignments
+                    if literal in metric_labels and re.fullmatch(r'[A-Z]{1,2}' + str(row), cell)
+                ]
                 if len(labels) != 1:
                     continue  # Ambiguous row labels remain a reviewer responsibility.
                 label_cell, label, metric = labels[0]
@@ -95,8 +102,10 @@ def check_explicit_cells(instruction, plan):
             quoted = len(literal) >= 2 and (literal[0], literal[-1]) in {
                 ('`', '`'), ('「', '」'), ('『', '』'), ('"', '"'), ("'", "'"),
             }
-            metric = {'合計值': 'sum', '總和值': 'sum', '筆數值': 'count',
-                      '平均值': 'mean', '最小值': 'min', '最大值': 'max'}.get(literal)
+            metric = {
+                '合計值': 'sum', '總和值': 'sum', '筆數值': 'count',
+                '平均值': 'mean', '最小值': 'min', '最大值': 'max',
+            }.get(literal)
             text = literal[1:-1] if quoted else literal if literal + '值' in assigned else None
             if metric is not None:
                 if rule.statistic is None or rule.statistic.metric != metric:

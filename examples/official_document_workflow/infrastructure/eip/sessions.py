@@ -1,6 +1,5 @@
 """Open manual EIP sessions from a saved binding; failed requests propagate."""
 from __future__ import annotations
-from examples.shared.runtime.io import run_sync
 
 import time
 from contextlib import asynccontextmanager
@@ -8,6 +7,7 @@ from contextlib import AsyncExitStack
 
 from .netask import Netask
 from examples.official_document_workflow.infrastructure.storage.state import Link
+from examples.shared.runtime.io import run_sync
 
 
 class ManualSession:
@@ -16,20 +16,20 @@ class ManualSession:
         self.link = state.links.get(owner)
 
     async def refresh(self):
-        config = await run_sync(self.store.account,self.owner)
+        config = await run_sync(self.store.account, self.owner)
         if not config:
             raise ValueError('沒有已保存的 EIP 憑證。請重新綁定；僅短期登入者過期後仍需輸入帳密。')
         adapter = self.factory()
         async with AsyncExitStack() as cleanup:
             cleanup.push_async_callback(adapter.close)
-            secret = await run_sync(self.store.account,self.owner, secrets=True)
+            secret = await run_sync(self.store.account, self.owner, secrets=True)
             if secret is not None:
                 cleanup.callback(secret.clear)
             if not secret or secret['generation'] != config['generation']:
                 raise ValueError('EIP 綁定已變更，請重新操作。')
             await adapter.login(secret['account'], secret['password'])
             secret.pop('password', None)
-            latest = await run_sync(self.store.account,self.owner)
+            latest = await run_sync(self.store.account, self.owner)
             if not latest or latest['generation'] != config['generation']:
                 raise ValueError('EIP 綁定已變更，已取消重新連線。')
             if adapter.user_id != config['identity']:
@@ -66,7 +66,7 @@ async def manual_session(owner, state, store, *, factory=Netask, force=False):
         original = session.link
         if original:
             await stack.enter_async_context(original.lock)
-        config = await run_sync(store.account,owner)
+        config = await run_sync(store.account, owner)
         changed = original and original.binding_generation is not None and (
             not config or original.binding_generation != config['generation']
         )

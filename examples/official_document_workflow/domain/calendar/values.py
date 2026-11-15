@@ -1,19 +1,20 @@
 """Pure date, evidence and CSV cell values shared by document interpreters."""
-
 from __future__ import annotations
+
 from datetime import datetime
-from decimal import ROUND_HALF_UP, Decimal
-from typing import Any, Literal
-from examples.official_document_workflow.domain.documents import (
-    CALENDAR_PROJECT_CATEGORIES,
-    CJK_INLINE_SPACE,
-    WHITESPACE,
-    Deadline,
-    DocumentDate,
-    DocumentTime,
-    OfficialDocument,
-    ProcessingText,
-)
+from decimal import Decimal
+from decimal import ROUND_HALF_UP
+from typing import Any
+from typing import Literal
+
+from examples.official_document_workflow.domain.documents import CALENDAR_PROJECT_CATEGORIES
+from examples.official_document_workflow.domain.documents import CJK_INLINE_SPACE
+from examples.official_document_workflow.domain.documents import Deadline
+from examples.official_document_workflow.domain.documents import DocumentDate
+from examples.official_document_workflow.domain.documents import DocumentTime
+from examples.official_document_workflow.domain.documents import OfficialDocument
+from examples.official_document_workflow.domain.documents import ProcessingText
+from examples.official_document_workflow.domain.documents import WHITESPACE
 
 
 class CalendarValues:
@@ -29,7 +30,7 @@ class CalendarValues:
         # accepting them during an in-flight model or browser transition, but
         # use the clearer start/end field names in new prompts.
         start_date = cls._cloud_date_from_event(
-            event.get('start_date', event.get('due_date'))
+            event.get('start_date', event.get('due_date')),
         )
         if start_date is None:
             return None
@@ -57,7 +58,7 @@ class CalendarValues:
         has_times = start_time is not None or end_time is not None
 
         responsible_party = cls._cloud_text(
-            event.get('responsible_party'), maximum_characters=120
+            event.get('responsible_party'), maximum_characters=120,
         )
         if not responsible_party or responsible_party == '未載明':
             responsible_party = '未載明'
@@ -69,21 +70,21 @@ class CalendarValues:
             sentence=normalised_evidence,
             responsible_party=responsible_party,
             category=cls._cloud_category_from_event(
-                event.get('category'), normalised_source
+                event.get('category'), normalised_source,
             ),
             end_date=end_date,
             end_time=end_time,
             all_day_event=cls._cloud_all_day_from_event(
-                event.get('all_day_event'), has_times=has_times
+                event.get('all_day_event'), has_times=has_times,
             ),
             private=cls._cloud_private_from_event(
-                event.get('private'), normalised_source
+                event.get('private'), normalised_source,
             ),
             priority=cls._cloud_priority_from_event(
-                event.get('priority'), normalised_source
+                event.get('priority'), normalised_source,
             ),
             completed=cls._cloud_completed_from_event(
-                event.get('completed'), normalised_source
+                event.get('completed'), normalised_source,
             ),
             tentative_schedule=event.get('tentative_schedule'),
         )
@@ -101,7 +102,7 @@ class CalendarValues:
         if parsed.strftime('%Y-%m-%d') != claimed:
             return None
         return cls._document_date(
-            str(parsed.year - 1911), f'{parsed.month:02d}', f'{parsed.day:02d}'
+            str(parsed.year - 1911), f'{parsed.month:02d}', f'{parsed.day:02d}',
         )
 
     @classmethod
@@ -122,7 +123,7 @@ class CalendarValues:
         if end_date_value not in (None, ''):
             end_date = cls._cloud_date_from_event(end_date_value)
             if end_date is None or cls._date_sort_key(end_date) < cls._date_sort_key(
-                start_date
+                start_date,
             ):
                 return None, None
 
@@ -132,7 +133,7 @@ class CalendarValues:
                 return None, None
             end_date = end_date or start_date
             if start_time is not None and not cls._calendar_duration_hours(
-                start_date, start_time, end_date, end_time
+                start_date, start_time, end_date, end_time,
             ):
                 # A same-day 22:00–02:00 interval is ambiguous without an
                 # explicit next-day date, so do not silently roll it forward.
@@ -153,7 +154,7 @@ class CalendarValues:
 
     @staticmethod
     def _cloud_all_day_from_event(
-        value: Any, *, has_times: bool
+        value: Any, *, has_times: bool,
     ) -> Literal['真', '假', '']:
         """Treat the model value as a consistency assertion, never authority."""
         if value not in {'真', '假'}:
@@ -190,7 +191,7 @@ class CalendarValues:
         if not isinstance(value, dict):
             return ''
         choice = cls._cloud_text(
-            value.get('value'), maximum_characters=maximum_choice_characters
+            value.get('value'), maximum_characters=maximum_choice_characters,
         )
         evidence = cls._cloud_text(value.get('evidence'), maximum_characters=700)
         if choice not in allowed or not evidence:
@@ -202,7 +203,7 @@ class CalendarValues:
 
     @classmethod
     def _cloud_private_from_event(
-        cls, value: Any, normalised_source: str
+        cls, value: Any, normalised_source: str,
     ) -> Literal['真', '假', '']:
         choice = cls._cloud_choice_with_provenance(
             value,
@@ -213,7 +214,7 @@ class CalendarValues:
 
     @classmethod
     def _cloud_priority_from_event(
-        cls, value: Any, normalised_source: str
+        cls, value: Any, normalised_source: str,
     ) -> Literal['低', '普通', '高', '']:
         choice = cls._cloud_choice_with_provenance(
             value,
@@ -307,7 +308,7 @@ class CalendarValues:
         if not 0 < minutes <= 744 * 60:
             return ''
         hours = (Decimal(minutes) / Decimal(60)).quantize(
-            Decimal('0.01'), rounding=ROUND_HALF_UP
+            Decimal('0.01'), rounding=ROUND_HALF_UP,
         )
         return format(hours, 'f').rstrip('0').rstrip('.')
 
@@ -375,12 +376,12 @@ class CalendarValues:
         validation. Local code never assembles a substitute from metadata.
         """
         return cls._csv_description(
-            document.explanation or document.generated_description
+            document.explanation or document.generated_description,
         )
 
     @classmethod
     def _calendar_subject(
-        cls, document: OfficialDocument | None, deadline: Deadline
+        cls, document: OfficialDocument | None, deadline: Deadline,
     ) -> str:
         """Use a cloud semantic title only in the CSV export.
 

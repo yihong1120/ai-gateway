@@ -4,18 +4,24 @@ from __future__ import annotations
 import hashlib
 import json
 from functools import partial
+
+import company_agent.services.eip.drafts as _drafts_imports
+import company_agent.services.eip.reading as _reading_imports
 from company_agent.config import Settings
 from company_agent.runtime.context import Context
 from company_agent.services.eip import client as eip
-from company_agent.services.files.nas import NASAccess, NASVault, file_access
+from company_agent.services.files.nas import file_access
+from company_agent.services.files.nas import NASAccess
+from company_agent.services.files.nas import NASVault
 from company_agent.services.files.operations import ToolBox
-from company_agent.services.files.schemas import Read, Search
+from company_agent.services.files.schemas import Read
+from company_agent.services.files.schemas import Search
+from company_mcp.authorization import AccessPolicy
+from company_mcp.storage import Repository
+from company_mcp.storage import ResourceError
+from company_mcp.tools import TOOLS
 from examples.identity.adapters import webui as webui_identity
 from examples.shared.runtime.io import run_sync
-
-from company_mcp.authorization import AccessPolicy
-from company_mcp.storage import Repository, ResourceError
-from company_mcp.tools import TOOLS
 
 
 class Resources:
@@ -45,10 +51,14 @@ class Resources:
         return await run_sync(self.workflow().store.account, owner)
 
     async def context(self, person, workspace, *, need_eip=False, confirmed_operation=False):
-        policy = AccessPolicy(self.configuration, self.repository, self.identity or webui_identity.verified_user,
-                              self.eip_account)
-        authorize = partial(policy.authorize, person, workspace, need_eip=need_eip,
-                            confirmed_operation=confirmed_operation)
+        policy = AccessPolicy(
+            self.configuration, self.repository, self.identity or webui_identity.verified_user,
+            self.eip_account,
+        )
+        authorize = partial(
+            policy.authorize, person, workspace, need_eip=need_eip,
+            confirmed_operation=confirmed_operation,
+        )
 
         snapshot = await authorize()
         settings = Settings(
@@ -61,15 +71,19 @@ class Resources:
     async def validate_result(self, person, name, value, output=None):
         if not hasattr(value, 'workspace'):
             return
-        ctx = await self.context(person, value.workspace, need_eip=name.startswith('eip_') or name in {
-            'calendar_plan_prepare', 'document_analysis_prepare',
-        })
+        ctx = await self.context(
+            person, value.workspace, need_eip=name.startswith('eip_') or name in {
+                'calendar_plan_prepare', 'document_analysis_prepare',
+            },
+        )
         if name.startswith('nas_'):
             revisions = ctx.settings.nas_binding_revisions
             if name == 'nas_roots' and output is not None:
-                revisions = [revision for revision in revisions if any(
-                    root['name'].startswith('nas_' + revision[:8] + '_') for root in output['roots']
-                )]
+                revisions = [
+                    revision for revision in revisions if any(
+                        root['name'].startswith('nas_' + revision[:8] + '_') for root in output['roots']
+                    )
+                ]
             if hasattr(value, 'root'):
                 revisions = [revision for revision in revisions if value.root.startswith('nas_' + revision[:8] + '_')]
                 if len(revisions) != 1:
@@ -87,16 +101,20 @@ class Resources:
             return {
                 'resource_mode': 'all_owned_bindings',
                 'nas': [{key: row[key] for key in ('binding_id', 'label', 'usable', 'read_only')} for row in bindings],
-                'eip': {'saved': bool(account), 'automatic_enabled': bool(account and account['enabled']),
-                        'transport_approved': self.configuration.eip_transport_acknowledged},
+                'eip': {
+                    'saved': bool(account), 'automatic_enabled': bool(account and account['enabled']),
+                    'transport_approved': self.configuration.eip_transport_acknowledged,
+                },
                 'connections_url': self.configuration.origin + '/connections',
             }
         if name == 'workspace_prepare':
             with self.store.db() as db:
-                revisions = [row[0] for row in db.execute(
-                    'SELECT revision FROM nas_bindings WHERE owner=%s AND usable ORDER BY binding_id',
-                    (person.owner,),
-                )]
+                revisions = [
+                    row[0] for row in db.execute(
+                        'SELECT revision FROM nas_bindings WHERE owner=%s AND usable ORDER BY binding_id',
+                        (person.owner,),
+                    )
+                ]
             account = await run_sync(self.workflow().store.account, person.owner)
             identifier = await run_sync(
                 self.repository.create_workspace, person,
@@ -105,15 +123,21 @@ class Resources:
             )
             # An idempotency hit must still be active; no implicit new snapshot.
             snapshot = await run_sync(self.repository.workspace, person, identifier)
-            return {'workspace': identifier, 'nas_accounts': len(snapshot['nas_revisions']),
-                    'eip_saved': bool(snapshot['eip_generation']), 'resource_mode': 'all_owned_bindings'}
+            return {
+                'workspace': identifier, 'nas_accounts': len(snapshot['nas_revisions']),
+                'eip_saved': bool(snapshot['eip_generation']), 'resource_mode': 'all_owned_bindings',
+            }
         if name == 'operation_status':
             operation = await run_sync(self.repository.operation, person.owner, value.operation, client=person.client)
-            await self.context(person, operation['workspace'], need_eip=True,
-                               confirmed_operation=bool(operation['web_job']))
+            await self.context(
+                person, operation['workspace'], need_eip=True,
+                confirmed_operation=bool(operation['web_job']),
+            )
             if not operation['web_job']:
-                return {'status': 'awaiting_personal_confirmation', 'operation': value.operation,
-                        'confirmation_url': self.configuration.origin + '/agents/mcp?operation=' + value.operation}
+                return {
+                    'status': 'awaiting_personal_confirmation', 'operation': value.operation,
+                    'confirmation_url': self.configuration.origin + '/agents/mcp?operation=' + value.operation,
+                }
             result = await run_sync(self.queue.public, person.owner, operation['web_job'])
             return {'operation': value.operation, 'job': result, 'workspace_url': self.configuration.origin + '/agents'}
         need_eip = name.startswith('eip_') or name in {'calendar_plan_prepare', 'document_analysis_prepare'}
@@ -134,8 +158,10 @@ class Resources:
                     failures.append({'binding_revision': revision, 'status': 'unavailable'})
             return {'roots': roots, 'failures': failures, 'complete': not failures}
         if name == 'nas_list':
-            return await run_sync(file_access(ctx.settings, self.store, person.owner).listing,
-                                  value.root, value.path, value.offset, value.limit)
+            return await run_sync(
+                file_access(ctx.settings, self.store, person.owner).listing,
+                value.root, value.path, value.offset, value.limit,
+            )
         if name in {'nas_search', 'nas_read'}:
             box = ToolBox(ctx.settings, self.store, person.owner, ctx.job)
             if name == 'nas_search':
@@ -152,11 +178,9 @@ class Resources:
         if name == 'eip_document_read':
             return await eip.view_document(self.store, person.owner, ctx.job, value.handle)
         if name == 'eip_read_attachment':
-            from company_agent.services.eip.reading import read_attachment
-            return await read_attachment(ctx, value)
+            return await _reading_imports.read_attachment(ctx, value)
         if name == 'calendar_plan_prepare':
-            from company_agent.services.eip.drafts import prepare
-            result = await prepare(ctx, value)
+            result = await _drafts_imports.prepare(ctx, value)
             result['confirmation_url'] = self.configuration.origin + '/agents/mcp?calendar=' + result['files'][0]['id']
             return result
         if name == 'document_analysis_prepare':
@@ -164,8 +188,10 @@ class Resources:
                 await run_sync(eip.source, ctx, handle, 'attachment')
             payload = value.model_dump(exclude={'workspace', 'request_id'})
             identifier = await run_sync(self.repository.prepare, person, ctx.job, value.request_id, payload)
-            return {'operation': identifier, 'status': 'awaiting_personal_confirmation', 'model_called': False,
-                    'confirmation_url': self.configuration.origin + '/agents/mcp?operation=' + identifier}
+            return {
+                'operation': identifier, 'status': 'awaiting_personal_confirmation', 'model_called': False,
+                'confirmation_url': self.configuration.origin + '/agents/mcp?operation=' + identifier,
+            }
         if name == 'artifact_get':
             # Reading is owner AND workspace-scoped, including stale-binding
             # validation at browser import time; bytes are never made public.
@@ -179,6 +205,8 @@ class Resources:
             if not row:
                 raise ResourceError('artifact_unavailable', '成果不屬於本人本次資源工作。')
             artifact = await run_sync(self.store.read_artifact, person.owner, value.artifact, row[0])
-            return {'name': artifact[0], 'sha256': artifact[1],
-                    'download_url': self.configuration.origin + '/agents/artifacts/' + value.artifact}
+            return {
+                'name': artifact[0], 'sha256': artifact[1],
+                'download_url': self.configuration.origin + '/agents/artifacts/' + value.artifact,
+            }
         raise ResourceError('unknown_tool', '公司 MCP 不提供此工具。')

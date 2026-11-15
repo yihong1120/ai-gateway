@@ -1,9 +1,12 @@
 from __future__ import annotations
+
 import os
+
 from pydantic import Field
 from pydantic_settings import BaseSettings
-from examples.deployment.registry.schemas import MAX_REGISTRY_TTL_SECONDS
+
 from .common import _env_bool
+from examples.deployment.registry.schemas import MAX_REGISTRY_TTL_SECONDS
 
 
 class DeploymentSettings(BaseSettings):

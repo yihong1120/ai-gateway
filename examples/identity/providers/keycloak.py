@@ -1,12 +1,14 @@
 """Application-owned KeycloakClient dependencies and operations."""
-
 from __future__ import annotations
-from examples.identity.settings.keycloak import KeycloakSettings
+
 from collections.abc import Mapping
 from typing import Literal
 from urllib.parse import quote
+
 import httpx
 from fastapi import HTTPException
+
+from examples.identity.settings.keycloak import KeycloakSettings
 
 NativeSocialProvider = Literal['google', 'apple']
 
@@ -23,7 +25,7 @@ class KeycloakClient:
         """Acquire a short-lived Admin API token without storing it in Redis."""
         if self.base_url is None:
             raise HTTPException(
-                status_code=503, detail='keycloak_identity_service_unavailable'
+                status_code=503, detail='keycloak_identity_service_unavailable',
             )
         settings = self.settings
         token_url = f'{self.base_url}/realms/{quote(settings.realm, safe="")}/protocol/openid-connect/token'
@@ -39,26 +41,26 @@ class KeycloakClient:
             )
         except httpx.HTTPError as exc:
             raise HTTPException(
-                status_code=503, detail='keycloak_identity_service_unavailable'
+                status_code=503, detail='keycloak_identity_service_unavailable',
             ) from exc
         if response.status_code != 200:
             raise HTTPException(
-                status_code=503, detail='keycloak_identity_service_unavailable'
+                status_code=503, detail='keycloak_identity_service_unavailable',
             )
         try:
             token = response.json().get('access_token')
         except ValueError as exc:
             raise HTTPException(
-                status_code=503, detail='keycloak_identity_service_unavailable'
+                status_code=503, detail='keycloak_identity_service_unavailable',
             ) from exc
         if not isinstance(token, str) or not token:
             raise HTTPException(
-                status_code=503, detail='keycloak_identity_service_unavailable'
+                status_code=503, detail='keycloak_identity_service_unavailable',
             )
         return token
 
     async def admin_request(
-        self, method: str, path: str, *, json_body: Mapping[str, object] | None = None
+        self, method: str, path: str, *, json_body: Mapping[str, object] | None = None,
     ) -> httpx.Response:
         """Perform one authenticated Keycloak Admin API request."""
         settings = self.settings
@@ -74,7 +76,7 @@ class KeycloakClient:
             )
         except httpx.HTTPError as exc:
             raise HTTPException(
-                status_code=503, detail='keycloak_identity_service_unavailable'
+                status_code=503, detail='keycloak_identity_service_unavailable',
             ) from exc
 
     async def link_federated_identity(
@@ -93,17 +95,17 @@ class KeycloakClient:
         existing = await self.admin_request('GET', user_path)
         if existing.status_code != 200:
             raise HTTPException(
-                status_code=503, detail='keycloak_identity_service_unavailable'
+                status_code=503, detail='keycloak_identity_service_unavailable',
             )
         try:
             identities = existing.json()
         except ValueError as exc:
             raise HTTPException(
-                status_code=503, detail='keycloak_identity_service_unavailable'
+                status_code=503, detail='keycloak_identity_service_unavailable',
             ) from exc
         if not isinstance(identities, list):
             raise HTTPException(
-                status_code=503, detail='keycloak_identity_service_unavailable'
+                status_code=503, detail='keycloak_identity_service_unavailable',
             )
         for identity in identities:
             if (
@@ -133,17 +135,15 @@ class KeycloakClient:
                 except ValueError:
                     identities = []
                 if isinstance(identities, list) and any(
-                    (
                         isinstance(identity, Mapping)
                         and identity.get('identityProvider') == provider
                         and (identity.get('userId') == provider_subject)
                         for identity in identities
-                    )
                 ):
                     return 'already_linked'
             raise HTTPException(
-                status_code=409, detail='provider_identity_already_linked'
+                status_code=409, detail='provider_identity_already_linked',
             )
         raise HTTPException(
-            status_code=503, detail='keycloak_identity_service_unavailable'
+            status_code=503, detail='keycloak_identity_service_unavailable',
         )

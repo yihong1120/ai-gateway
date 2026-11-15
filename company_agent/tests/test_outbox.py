@@ -1,10 +1,10 @@
 """Outbox races and pooled transaction isolation against disposable PostgreSQL."""
 from __future__ import annotations
 
-
 from psycopg.rows import dict_row
 
 from company_agent.api.queue import WorkQueue
+from company_agent.runtime.storage import Store
 from company_agent.tests.test_agent import Fixture
 
 
@@ -61,7 +61,6 @@ class OutboxTests(Fixture):
         self.assertEqual(restored.get('alice', self.key)['status'], 'queued')
 
     def test_newer_schema_is_refused_without_rewriting_job_data(self):
-        from company_agent.runtime.storage import Store
 
         with self.store.db() as db:
             db.execute('INSERT INTO schema_migrations(version) VALUES(999)')

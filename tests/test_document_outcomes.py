@@ -1,9 +1,8 @@
 """Analysis/export boundaries keep partial success and independent calendar rows."""
-
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
 import unittest
+from dataclasses import FrozenInstanceError
 
 from examples.official_document_workflow.application.outcomes import GroupResult
 from examples.official_document_workflow.domain.calendar.calendar_semantics import CalendarRules

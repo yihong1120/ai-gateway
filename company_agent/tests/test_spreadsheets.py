@@ -17,9 +17,9 @@ from pydantic import ValidationError
 from company_agent.config import Root
 from company_agent.config import Settings
 from company_agent.runtime.storage import Store
+from company_agent.services.files.errors import RecoverableToolError
 from company_agent.services.files.operations import ToolBox
 from company_agent.services.files.operations import worker
-from company_agent.services.files.errors import RecoverableToolError
 from company_agent.services.files.tools import FILE_TOOL_SPECS
 from company_agent.services.office.documents import analyze_spreadsheet
 from company_agent.services.office.documents import create_spreadsheet

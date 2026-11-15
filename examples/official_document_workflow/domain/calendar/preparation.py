@@ -1,7 +1,6 @@
 """Turn content-based preparation suggestions into dated CSV rows after review."""
 from __future__ import annotations
 
-
 from datetime import date
 from datetime import timedelta
 
@@ -10,8 +9,8 @@ from pydantic import TypeAdapter
 from .calendar_semantics import compact
 from .calendar_semantics import resolve_spans
 from .contracts import PreparationReminder
-from .values import CalendarValues
 from .presentation import format_ai_title
+from .values import CalendarValues
 
 
 def _anchor_key(row):
@@ -37,7 +36,7 @@ def preparation_rows(calendar,  analysis, *, today: date, seen: set):
         if not suggestions or event.get('status') != 'current' or not anchors:
             continue
         _, projected = calendar.events(
-             {'events': [event], 'primary_source_id': analysis['primary']},
+            {'events': [event], 'primary_source_id': analysis['primary']},
             analysis['sources'], document,
         )
         if not projected or (base := anchors.get(_anchor_key(projected[0]))) is None:

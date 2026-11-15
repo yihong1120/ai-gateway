@@ -5,6 +5,7 @@ import asyncio
 import json
 from pathlib import Path
 
+import company_agent.services.cad.sandbox as _sandbox_imports
 from company_agent.services.files import block_page
 from company_agent.services.files.operations import worker
 
@@ -16,12 +17,11 @@ async def inspect_artifact(ctx, args):
     suffix = Path(name).suffix.lower()
     result = {'artifact_id': args.artifact_id, 'name': name, 'sha256': sha}
     if suffix == '.dxf':
-        from company_agent.services.cad.sandbox import cad_worker
 
         if not ctx.settings.enable_cad:
             raise ValueError('此入口未啟用 CAD。')
         page = await asyncio.to_thread(
-            cad_worker,
+            _sandbox_imports.cad_worker,
             'read',
             data=data,
             suffix='.dxf',

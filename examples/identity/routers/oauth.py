@@ -8,15 +8,15 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from examples.identity.database import get_db
-from examples.identity.models import User
-from examples.identity.redis_pool import get_redis_pool
 from examples.identity.dependencies import get_current_user
-from examples.identity.schemas.oauth import MeResponse
-from examples.identity.schemas.oauth import OAuthTokenResponse
+from examples.identity.models import User
 from examples.identity.providers.protocol import authorize_native_app
 from examples.identity.providers.protocol import current_user_profile
 from examples.identity.providers.protocol import exchange_native_token
 from examples.identity.providers.protocol import revoke_native_token
+from examples.identity.redis_pool import get_redis_pool
+from examples.identity.schemas.oauth import MeResponse
+from examples.identity.schemas.oauth import OAuthTokenResponse
 
 router = APIRouter(tags=['oauth'])
 

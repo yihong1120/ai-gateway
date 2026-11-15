@@ -2,19 +2,25 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
 import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
 import secrets
+from contextlib import contextmanager
+from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
+from pathlib import Path
 
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
-from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID, ExtensionOID
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import ExtendedKeyUsageOID
+from cryptography.x509.oid import ExtensionOID
+from cryptography.x509.oid import NameOID
 
 
 ORIGIN = 'https://changdar-server.mooo.com'
@@ -92,8 +98,10 @@ class Authority:
                 raise ValueError('CA state is missing or has unsafe ownership/permissions.')
         record = json.loads((self.state / 'registry.json').read_text())
         root = x509.load_der_x509_certificate((self.state / 'root.cer').read_bytes())
-        key = serialization.load_pem_private_key((self.state / 'root-key.pem').read_bytes(),
-                                                (self.state / 'key-password').read_bytes())
+        key = serialization.load_pem_private_key(
+            (self.state / 'root-key.pem').read_bytes(),
+            (self.state / 'key-password').read_bytes(),
+        )
         if not isinstance(key, rsa.RSAPrivateKey) or key.public_key().public_numbers() != root.public_key().public_numbers():
             raise ValueError('The CA key and certificate do not match.')
         if fingerprint(root) != record['root_sha256'] or now() >= root.not_valid_after_utc:
@@ -108,21 +116,29 @@ class Authority:
                 raise ValueError('Partial CA state exists; preserve it for operator recovery.')
             key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
             subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, ROOT_NAME)])
-            root = (x509.CertificateBuilder().subject_name(subject).issuer_name(subject)
-                    .public_key(key.public_key()).serial_number(x509.random_serial_number())
-                    .not_valid_before(now() - timedelta(minutes=10)).not_valid_after(now() + timedelta(days=1825))
-                    .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
-                    .add_extension(x509.KeyUsage(False, False, False, False, False, True, True, False, False), critical=True)
-                    .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CODE_SIGNING]), critical=True)
-                    .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
-                    .sign(key, hashes.SHA256()))
+            root = (
+                x509.CertificateBuilder().subject_name(subject).issuer_name(subject)
+                .public_key(key.public_key()).serial_number(x509.random_serial_number())
+                .not_valid_before(now() - timedelta(minutes=10)).not_valid_after(now() + timedelta(days=1825))
+                .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+                .add_extension(x509.KeyUsage(False, False, False, False, False, True, True, False, False), critical=True)
+                .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CODE_SIGNING]), critical=True)
+                .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+                .sign(key, hashes.SHA256())
+            )
             password = secrets.token_bytes(48)
             atomic(self.state / 'key-password', password, 0o600)
-            atomic(self.state / 'root-key.pem', key.private_bytes(serialization.Encoding.PEM,
-                   serialization.PrivateFormat.PKCS8, serialization.BestAvailableEncryption(password)), 0o600)
+            atomic(
+                self.state / 'root-key.pem', key.private_bytes(
+                    serialization.Encoding.PEM,
+                    serialization.PrivateFormat.PKCS8, serialization.BestAvailableEncryption(password),
+                ), 0o600,
+            )
             atomic(self.state / 'root.cer', root.public_bytes(serialization.Encoding.DER), 0o600)
-            record = {'version': 1, 'root_sha256': fingerprint(root), 'crl_number': 0,
-                      'created_at': now().isoformat(), 'certificates': [], 'revoked': []}
+            record = {
+                'version': 1, 'root_sha256': fingerprint(root), 'crl_number': 0,
+                'created_at': now().isoformat(), 'certificates': [], 'revoked': [],
+            }
             self.save(record)
             return self._publish(record, root, key)
 
@@ -132,28 +148,40 @@ class Authority:
             raise ValueError('Only the CA operator may write the public PKI directory.')
         self.public.chmod(0o755)
         record['crl_number'] += 1
-        builder = (x509.CertificateRevocationListBuilder().issuer_name(root.subject)
-                   .last_update(now() - timedelta(minutes=5))
-                   .next_update(min(now() + timedelta(days=7), root.not_valid_after_utc))
-                   .add_extension(x509.CRLNumber(record['crl_number']), critical=False)
-                   .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()), critical=False))
+        builder = (
+            x509.CertificateRevocationListBuilder().issuer_name(root.subject)
+            .last_update(now() - timedelta(minutes=5))
+            .next_update(min(now() + timedelta(days=7), root.not_valid_after_utc))
+            .add_extension(x509.CRLNumber(record['crl_number']), critical=False)
+            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()), critical=False)
+        )
         for entry in record['revoked']:
-            revoked = (x509.RevokedCertificateBuilder().serial_number(int(entry['serial'], 16))
-                       .revocation_date(datetime.fromisoformat(entry['at']))
-                       .add_extension(x509.CRLReason(x509.ReasonFlags.key_compromise), critical=False).build())
+            revoked = (
+                x509.RevokedCertificateBuilder().serial_number(int(entry['serial'], 16))
+                .revocation_date(datetime.fromisoformat(entry['at']))
+                .add_extension(x509.CRLReason(x509.ReasonFlags.key_compromise), critical=False).build()
+            )
             builder = builder.add_revoked_certificate(revoked)
         crl = builder.sign(key, hashes.SHA256())
         key.public_key().verify(crl.signature, crl.tbs_certlist_bytes, padding.PKCS1v15(), hashes.SHA256())
-        summary = {'root_sha256': fingerprint(root), 'root_thumbprint': fingerprint(root, hashes.SHA1()),
-                   'root_subject': root.subject.rfc4514_string(), 'root_expires_at': root.not_valid_after_utc.isoformat(),
-                   'crl_url': CRL_URL, 'crl_number': record['crl_number'],
-                   'crl_next_update': crl.next_update_utc.isoformat(), 'signer': None}
-        active = [entry for entry in record['certificates'] if entry['serial'] not in {r['serial'] for r in record['revoked']}]
+        summary = {
+            'root_sha256': fingerprint(root), 'root_thumbprint': fingerprint(root, hashes.SHA1()),
+            'root_subject': root.subject.rfc4514_string(), 'root_expires_at': root.not_valid_after_utc.isoformat(),
+            'crl_url': CRL_URL, 'crl_number': record['crl_number'],
+            'crl_next_update': crl.next_update_utc.isoformat(), 'signer': None,
+        }
+        active = [
+            entry for entry in record['certificates'] if entry['serial']
+            not in {r['serial'] for r in record['revoked']}
+        ]
         if active:
             entry = active[-1]
             certificate = x509.load_der_x509_certificate((self.state / entry['filename']).read_bytes())
             atomic(self.public / SIGNER_FILE, certificate.public_bytes(serialization.Encoding.DER), 0o644)
-            summary['signer'] = {name: entry[name] for name in ('sha256', 'thumbprint', 'csr_sha256', 'serial', 'expires_at')}
+            summary['signer'] = {
+                name: entry[name]
+                for name in ('sha256', 'thumbprint', 'csr_sha256', 'serial', 'expires_at')
+            }
         else:
             (self.public / SIGNER_FILE).unlink(missing_ok=True)
         self.save(record)
@@ -172,8 +200,10 @@ class Authority:
         request = x509.load_pem_x509_csr(csr_bytes)
         key = request.public_key()
         expected = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, SIGNER_NAME)])
-        if (not request.is_signature_valid or request.subject != expected or not isinstance(key, rsa.RSAPublicKey)
-                or key.key_size < 3072 or request.signature_hash_algorithm.name not in ('sha256', 'sha384', 'sha512')):
+        if (
+            not request.is_signature_valid or request.subject != expected or not isinstance(key, rsa.RSAPublicKey)
+            or key.key_size < 3072 or request.signature_hash_algorithm.name not in ('sha256', 'sha384', 'sha512')
+        ):
             raise ValueError('CSR must be a valid SHA256+ RSA3072+ request for the dedicated company signer.')
         for extension in request.extensions:
             if extension.oid == ExtensionOID.BASIC_CONSTRAINTS:
@@ -197,27 +227,38 @@ class Authority:
                 if entry['csr_sha256'] == expected_sha256.lower() and entry['serial'] not in revoked:
                     return self._publish(record, root, root_key)
             if any(entry['serial'] not in revoked for entry in record['certificates']):
-                raise ValueError('A different signer is already active; explicit revocation is required before replacement.')
-            certificate = (x509.CertificateBuilder().subject_name(expected).issuer_name(root.subject)
-                           .public_key(key).serial_number(x509.random_serial_number())
-                           .not_valid_before(now() - timedelta(minutes=10))
-                           .not_valid_after(min(now() + timedelta(days=365), root.not_valid_after_utc))
-                           .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-                           .add_extension(x509.KeyUsage(True, False, False, False, False, False, False, False, False), critical=True)
-                           .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CODE_SIGNING]), critical=True)
-                           .add_extension(x509.SubjectKeyIdentifier.from_public_key(key), critical=False)
-                           .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(root_key.public_key()), critical=False)
-                           .add_extension(x509.CRLDistributionPoints([x509.DistributionPoint(
-                               full_name=[x509.UniformResourceIdentifier(CRL_URL)], relative_name=None,
-                               reasons=None, crl_issuer=None)]), critical=False)
-                           .sign(root_key, hashes.SHA256()))
+                raise ValueError(
+                    'A different signer is already active; explicit revocation is required before replacement.',
+                )
+            certificate = (
+                x509.CertificateBuilder().subject_name(expected).issuer_name(root.subject)
+                .public_key(key).serial_number(x509.random_serial_number())
+                .not_valid_before(now() - timedelta(minutes=10))
+                .not_valid_after(min(now() + timedelta(days=365), root.not_valid_after_utc))
+                .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+                .add_extension(x509.KeyUsage(True, False, False, False, False, False, False, False, False), critical=True)
+                .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CODE_SIGNING]), critical=True)
+                .add_extension(x509.SubjectKeyIdentifier.from_public_key(key), critical=False)
+                .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(root_key.public_key()), critical=False)
+                .add_extension(
+                    x509.CRLDistributionPoints([
+                        x509.DistributionPoint(
+                            full_name=[x509.UniformResourceIdentifier(CRL_URL)], relative_name=None,
+                            reasons=None, crl_issuer=None,
+                        ),
+                    ]), critical=False,
+                )
+                .sign(root_key, hashes.SHA256())
+            )
             serial = format(certificate.serial_number, 'X')
             filename = 'issued-' + serial + '.cer'
             atomic(self.state / filename, certificate.public_bytes(serialization.Encoding.DER), 0o600)
-            record['certificates'].append({'serial': serial, 'filename': filename,
+            record['certificates'].append({
+                'serial': serial, 'filename': filename,
                 'csr_sha256': expected_sha256.lower(), 'sha256': fingerprint(certificate),
                 'thumbprint': fingerprint(certificate, hashes.SHA1()), 'issued_at': now().isoformat(),
-                'expires_at': certificate.not_valid_after_utc.isoformat()})
+                'expires_at': certificate.not_valid_after_utc.isoformat(),
+            })
             self.save(record)
             return self._publish(record, root, root_key)
 
@@ -266,4 +307,6 @@ if __name__ == '__main__':
     try:
         main()
     except (ValueError, OSError):
-        raise SystemExit('CA operation failed. Check input/permissions and preserve existing CA state; no private material is printed.') from None
+        raise SystemExit(
+            'CA operation failed. Check input/permissions and preserve existing CA state; no private material is printed.',
+        ) from None

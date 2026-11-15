@@ -3,9 +3,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .outcomes import CalendarExporter, CalendarResult
+from .outcomes import CalendarExporter
+from .outcomes import CalendarResult
 from examples.official_document_workflow.domain.calendar.operations import apply_calendar_operations
-from examples.official_document_workflow.domain.calendar.scheduling import TENTATIVE_NOTICE, EIP_REVIEW_NOTICE
+from examples.official_document_workflow.domain.calendar.scheduling import EIP_REVIEW_NOTICE
+from examples.official_document_workflow.domain.calendar.scheduling import TENTATIVE_NOTICE
 from examples.official_document_workflow.domain.documents import ProcessingError
 
 
@@ -48,8 +50,10 @@ class CalendarStage:
                 notices.append(f'已加入 {report.applied} 項使用者提醒：{report.title}')
         if any(TENTATIVE_NOTICE in row.get('Description', '') for row in transformed.rows):
             notices.append('部分行程採用 AI 暫排，非公文明訂時間。' + EIP_REVIEW_NOTICE)
-        return PreparedCalendar(CalendarResult(transformed.rows, calendar.issues, calendar.reviewed),
-                                tuple(notices), tuple(pending))
+        return PreparedCalendar(
+            CalendarResult(transformed.rows, calendar.issues, calendar.reviewed),
+            tuple(notices), tuple(pending),
+        )
 
     async def save(self, prepared, name, source_id, metadata):
         if not prepared.calendar.rows or not prepared.calendar.reviewed:

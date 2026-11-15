@@ -1,12 +1,21 @@
 """Real PostgreSQL bindings and snapshots; synthetic DSM accounts, no live NAS."""
 from __future__ import annotations
 
+import json
 import unittest
 
+import httpx
+
+import company_agent.runtime.models as _models_imports
 from company_agent.api.queue import WorkQueue
+from company_agent.runtime.execution import DocumentAgent
 from company_agent.runtime.storage import Store
 from company_agent.services.files.nas import file_access
-from company_agent.tests.test_nas import NASFixture, NASAccess
+from company_agent.tests.test_nas import NASAccess
+from company_agent.tests.test_nas import NASFixture
+from examples.shared.runtime.modules import ModuleReference
+
+_fixture_test_user_billing = ModuleReference('company_agent.tests.test_user_billing')
 
 
 class MultipleNASTests(NASFixture):
@@ -94,7 +103,11 @@ class MultipleNASTests(NASFixture):
         follow = queue.submit('alice', 'oidc-alice', 'chat', 'two', 'continue', [], [first])
         self.assertEqual(queue.get('alice', follow)['payload']['nas_binding_revisions'], revisions)
         new = queue.submit('alice', 'oidc-alice', 'other-chat', 'new', 'read all', [])
-        self.assertEqual(set(queue.get('alice', new)['payload']['nas_binding_revisions']), {*revisions, three['revision']})
+        self.assertEqual(
+            set(queue.get('alice', new)['payload']['nas_binding_revisions']), {
+                *revisions, three['revision'],
+            },
+        )
         self.vault.unlink('alice', one['binding_id'])
         with self.assertRaisesRegex(ValueError, 'NAS'):
             queue.submit('alice', 'oidc-alice', 'chat', 'three', 'continue after unlink', [], [first])
@@ -167,11 +180,7 @@ class MultipleNASTests(NASFixture):
 
 class MultipleNASGraphTests(unittest.IsolatedAsyncioTestCase, NASFixture):
     async def test_one_billed_graph_reads_two_accounts_without_credentials_in_model(self):
-        import json
-        import httpx
-        from company_agent.runtime.execution import DocumentAgent
-        from company_agent.runtime.models import gateway_for_verified_user, close_model
-        from company_agent.tests.test_user_billing import verified, response
+        verified, response = _fixture_test_user_billing.attributes('verified', 'response')
         one = self.bind()
         with self.store.db() as db:
             db.execute('UPDATE nas_login_limits SET next_at=0')
@@ -188,15 +197,18 @@ class MultipleNASGraphTests(unittest.IsolatedAsyncioTestCase, NASFixture):
             ('complete_job', {'outcome': 'completed', 'summary': '已讀取兩組 NAS 文件', 'artifact_ids': []}),
         ]
         requests = []
+
         def model_api(request):
             requests.append(json.loads(request.content))
             name, args = script.pop(0)
             return response(name, args)
-        model = gateway_for_verified_user(verified(), 'https://gateway.example/v1', 'key', 'model', httpx.MockTransport(model_api))
+        model = _models_imports.gateway_for_verified_user(
+            verified(), 'https://gateway.example/v1', 'key', 'model', httpx.MockTransport(model_api),
+        )
         try:
             result = await DocumentAgent(self.config, model).run('alice', '閱讀兩組 NAS 的 home/a.txt')
         finally:
-            await close_model(model)
+            await _models_imports.close_model(model)
         self.assertEqual(result['status'], 'done', result)
         self.assertEqual({s['root'] for s in result['sources']}, set(roots))
         self.assertEqual(len(script), 0)

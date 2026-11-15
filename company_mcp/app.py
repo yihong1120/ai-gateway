@@ -1,4 +1,6 @@
 """Independent ASGI edge; WebUI, databases and source keys are not loaded."""
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
 from functools import partial
 
@@ -7,9 +9,15 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from .config import Configuration, METADATA_PATH, PATH
-from .remote import BackendClient, RemoteResources, RemoteVerifier
-from .server import Boundary, build
+import examples.shared.config as _config_imports
+from .config import Configuration
+from .config import METADATA_PATH
+from .config import PATH
+from .remote import BackendClient
+from .remote import RemoteResources
+from .remote import RemoteVerifier
+from .server import Boundary
+from .server import build
 from .settings import Settings
 from .tools import TOOLS
 
@@ -50,8 +58,7 @@ class ServiceLifespan:
 
 def create_app(configuration=None, settings=None, *, transport=None):
     if configuration is None or settings is None:
-        from examples.shared.config import load_service
-        load_service('company_mcp')
+        _config_imports.load_service('company_mcp')
         configuration = configuration or Configuration.from_environment(backend=False)
     if configuration is None:
         raise RuntimeError('Company MCP is disabled; enable the dedicated service configuration.')
@@ -59,5 +66,7 @@ def create_app(configuration=None, settings=None, *, transport=None):
     if configuration.introspection_client or configuration.introspection_secret:
         raise ValueError('The independent MCP edge must not receive backend IdP client secrets.')
 
-    return Starlette(routes=[Route('/healthz', health), Route('/readyz', ready)],
-                     lifespan=ServiceLifespan(configuration, settings, transport))
+    return Starlette(
+        routes=[Route('/healthz', health), Route('/readyz', ready)],
+        lifespan=ServiceLifespan(configuration, settings, transport),
+    )

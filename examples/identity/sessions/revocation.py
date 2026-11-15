@@ -8,6 +8,8 @@ from typing import TypedDict
 
 from redis.asyncio import Redis
 
+import examples.identity.sessions.local as _local_imports
+
 _ACCESS_REVOCATION_PREFIX = 'auth:access-revoked'
 
 
@@ -67,5 +69,4 @@ async def is_access_token_revoked(
     jti = access_token_jti(payload)
     if await redis.exists(_revocation_key(jti)):
         return True
-    from examples.identity.sessions.local import local_access_revoked
-    return await local_access_revoked(redis,jti)
+    return await _local_imports.local_access_revoked(redis, jti)

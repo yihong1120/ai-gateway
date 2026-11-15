@@ -1,10 +1,10 @@
 """Dynamic dataclass versions stay registered only while active or within idle capacity."""
 from __future__ import annotations
 
-from contextlib import ExitStack
 import sys
 import unittest
 import uuid
+from contextlib import ExitStack
 
 from examples.shared.runtime.module_registry import ModuleRegistry
 

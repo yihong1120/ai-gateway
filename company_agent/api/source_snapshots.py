@@ -1,19 +1,20 @@
 """Private source preparation and bounded, resumable orphan discovery."""
 from __future__ import annotations
 
-from contextlib import contextmanager
 import fcntl
 import hashlib
 import json
 import logging
 import math
 import os
-from pathlib import Path
 import shutil
 import stat
-from threading import Lock
 import time
 import uuid
+from contextlib import contextmanager
+from pathlib import Path
+from threading import Lock
+
 from psycopg.conninfo import conninfo_to_dict
 
 
@@ -29,7 +30,12 @@ class SourceSnapshots:
     def __init__(self, root, store):
         self.store = store
         connection = conninfo_to_dict(store.dsn)
-        identity = [store.schema, *(connection.get(k) for k in ('host','hostaddr','port','dbname','user','service'))]
+        identity = [
+            store.schema, *(
+                connection.get(k)
+                for k in ('host', 'hostaddr', 'port', 'dbname', 'user', 'service')
+            ),
+        ]
         self.namespace = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
         self.root = Path(root)
         self.pending = self.root / '.pending' / self.namespace
@@ -51,10 +57,16 @@ class SourceSnapshots:
             with open(self.marker(key), 'x+b') as lease:
                 os.chmod(lease.name, 0o600)
                 fcntl.flock(lease, fcntl.LOCK_EX)
+
                 def state(value):
                     lease.seek(0)
                     lease.truncate()
-                    lease.write(json.dumps({'version': 1, 'namespace': self.namespace, 'id': key, 'state': value}).encode())
+                    lease.write(
+                        json.dumps({
+                            'version': 1, 'namespace': self.namespace,
+                            'id': key, 'state': value,
+                        }).encode(),
+                    )
                     lease.flush()
                     os.fsync(lease.fileno())
                 state('preparing')
@@ -115,15 +127,17 @@ class SourceSnapshots:
             return None
 
     def sweep(self, *, older_than=86400, limit=100, max_seconds=.1):
-        if (not math.isfinite(older_than) or older_than < 86400 or type(limit) is not int or not 1 <= limit <= 1000
-                or not math.isfinite(max_seconds) or not 0 < max_seconds <= 10):
+        if (
+            not math.isfinite(older_than) or older_than < 86400 or type(limit) is not int or not 1 <= limit <= 1000
+            or not math.isfinite(max_seconds) or not 0 < max_seconds <= 10
+        ):
             raise ValueError('Recovery needs a one-day grace, bounded visits and a finite time budget.')
         start, cutoff = time.monotonic(), time.time() - older_than
         visited = inspected = removed = 0
         exhausted = set()
         with self._guard:
             while visited < limit and len(exhausted) < 2 and time.monotonic() - start < max_seconds:
-                kind = ('pending','legacy')[self._turn % 2]
+                kind = ('pending', 'legacy')[self._turn % 2]
                 self._turn += 1
                 if kind in exhausted:
                     continue
@@ -161,12 +175,18 @@ class SourceSnapshots:
                         state = json.loads(lease.read(512))
                     except (ValueError, UnicodeError):
                         continue
-                    if (not isinstance(state, dict) or state != {'version': 1, 'namespace': self.namespace,
-                            'id': raw, 'state': state.get('state')} or state['state'] not in {'preparing','ready'}):
+                    if (
+                        not isinstance(state, dict) or state != {
+                            'version': 1, 'namespace': self.namespace,
+                            'id': raw, 'state': state.get('state'),
+                        } or state['state'] not in {'preparing', 'ready'}
+                    ):
                         continue
                     with self.store.db() as db:
-                        if not db.execute('SELECT pg_try_advisory_xact_lock(%s)',
-                                          (self.store.lock_id('mutations'),)).fetchone()[0]:
+                        if not db.execute(
+                            'SELECT pg_try_advisory_xact_lock(%s)',
+                            (self.store.lock_id('mutations'),),
+                        ).fetchone()[0]:
                             continue
                         registered = db.execute('SELECT 1 FROM web_jobs WHERE id=%s', (raw,)).fetchone()
                     if registered:
@@ -180,5 +200,7 @@ class SourceSnapshots:
                             shutil.rmtree(directory)
                     marker.unlink(missing_ok=True)
                     removed += 1
-        return {'visited': visited, 'inspected': inspected, 'removed': removed,
-                'elapsed': time.monotonic() - start}
+        return {
+            'visited': visited, 'inspected': inspected, 'removed': removed,
+            'elapsed': time.monotonic() - start,
+        }

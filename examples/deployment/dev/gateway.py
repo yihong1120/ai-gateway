@@ -1,15 +1,16 @@
 """Run with sudo on B after local dev health checks have passed."""
 from __future__ import annotations
+
 import argparse
 import configparser
 import json
 import os
-from pathlib import Path
 import shutil
 import socket
 import subprocess
 import time
 import urllib.request
+from pathlib import Path
 
 HOST = 'ai-dev.changdar-server.mooo.com'
 ORIGIN = 'https://' + HOST
@@ -97,11 +98,13 @@ def wait_gateway(timeout=45):
     deadline = time.monotonic() + timeout
     last_error = 'No healthy dev response.'
     while True:
-        result = subprocess.run([
-            '/usr/bin/curl', '--noproxy', '*', '--fail', '--silent', '--show-error',
-            '--connect-timeout', '3', '--max-time', '5', '--dump-header', '-',
-            '--resolve', HOST + ':443:127.0.0.1', ORIGIN + '/health',
-        ], capture_output=True, text=True)
+        result = subprocess.run(
+            [
+                '/usr/bin/curl', '--noproxy', '*', '--fail', '--silent', '--show-error',
+                '--connect-timeout', '3', '--max-time', '5', '--dump-header', '-',
+                '--resolve', HOST + ':443:127.0.0.1', ORIGIN + '/health',
+            ], capture_output=True, text=True,
+        )
         if result.returncode == 0:
             headers, _, body = result.stdout.partition('\n\n')
             try:
@@ -122,13 +125,17 @@ def wait_gateway(timeout=45):
 def verify():
     wait_gateway()
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    for url in (ORIGIN + '/health', 'https://ai.changdar-server.mooo.com/health',
-                'https://changdar-server.mooo.com/', 'https://wiki.changdar-server.mooo.com/'):
+    for url in (
+        ORIGIN + '/health', 'https://ai.changdar-server.mooo.com/health',
+        'https://changdar-server.mooo.com/', 'https://wiki.changdar-server.mooo.com/',
+    ):
         with opener.open(url, timeout=30) as response:
             if response.status != 200:
                 raise RuntimeError('Public URL check failed.')
-            if url == ORIGIN + '/health' and (response.headers.get('X-AI-Gateway') != 'dev-b'
-                    or response.headers.get('X-AI-Environment') != 'dev'):
+            if url == ORIGIN + '/health' and (
+                response.headers.get('X-AI-Gateway') != 'dev-b'
+                or response.headers.get('X-AI-Environment') != 'dev'
+            ):
                 raise RuntimeError('Public dev URL reaches another gateway or application.')
     run('/usr/bin/systemctl', 'is-enabled', 'nginx')
     run('/usr/bin/systemctl', 'is-active', 'certbot.timer')
@@ -154,13 +161,18 @@ def main():
     (Path('/var/www/html/.well-known/acme-challenge')).mkdir(parents=True, exist_ok=True)
     install(configuration(CERT.joinpath('fullchain.pem').exists()))
     renewal = configparser.ConfigParser()
-    renewal.read_string('[certificate]\n' + Path('/etc/letsencrypt/renewal/ai.changdar-server.mooo.com.conf').read_text())
+    renewal.read_string(
+        '[certificate]\n' +
+        Path('/etc/letsencrypt/renewal/ai.changdar-server.mooo.com.conf').read_text(),
+    )
     account = renewal.get('renewalparams', 'account')
     server = renewal.get('renewalparams', 'server')
     print('A dev health verified. Obtaining a separate HTTPS certificate for ai-dev.', flush=True)
-    run('/usr/bin/certbot', 'certonly', '--webroot', '-w', '/var/www/html', '-d', HOST,
+    run(
+        '/usr/bin/certbot', 'certonly', '--webroot', '-w', '/var/www/html', '-d', HOST,
         '--cert-name', HOST, '--non-interactive', '--agree-tos', '--keep-until-expiring',
-        '--account', account, '--server', server)
+        '--account', account, '--server', server,
+    )
     install(configuration(True))
     hook = Path('/etc/letsencrypt/renewal-hooks/deploy/ai-gateway-dev-nginx')
     hook.parent.mkdir(parents=True, exist_ok=True)

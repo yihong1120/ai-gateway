@@ -6,6 +6,10 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+
+from examples.official_document_workflow.services import version
 
 
 class ImportOrderTests(unittest.TestCase):
@@ -71,9 +75,13 @@ class ImportOrderTests(unittest.TestCase):
             tree = ast.parse(path.read_text())
             imports = [node.module or '' for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
             for name in imports:
-                self.assertFalse(name.startswith(('examples.official_document_workflow.application',
-                                                 'examples.official_document_workflow.services',
-                                                 'company_agent', 'open_webui')), str(path))
+                self.assertFalse(
+                    name.startswith((
+                        'examples.official_document_workflow.application',
+                        'examples.official_document_workflow.services',
+                        'company_agent', 'open_webui',
+                    )), str(path),
+                )
 
     def test_workflow_does_not_import_company_agent(self):
         root = Path(__file__).resolve().parents[1] / 'examples/official_document_workflow'
@@ -89,8 +97,12 @@ class ImportOrderTests(unittest.TestCase):
         for path in root.glob('*.py'):
             for node in ast.walk(ast.parse(path.read_text())):
                 if isinstance(node, ast.ImportFrom):
-                    self.assertFalse((node.module or '').startswith(('company_agent', 'examples.official_document_workflow',
-                                                                     'examples.company_ai_access')), str(path))
+                    self.assertFalse(
+                        (node.module or '').startswith((
+                            'company_agent', 'examples.official_document_workflow',
+                            'examples.company_ai_access',
+                        )), str(path),
+                    )
 
     def test_core_does_not_load_the_webui_adapter_source(self):
         root = Path(__file__).resolve().parents[1] / 'examples/official_document_workflow/services'
@@ -117,9 +129,6 @@ class ImportOrderTests(unittest.TestCase):
 
 class WorkflowRevisionTests(unittest.TestCase):
     def test_shared_runtime_changes_invalidate_revision(self):
-        from tempfile import TemporaryDirectory
-        from unittest.mock import patch
-        from examples.official_document_workflow.services import version
 
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -133,7 +142,7 @@ class WorkflowRevisionTests(unittest.TestCase):
             source = runtime / 'database.py'
             source.write_text('# first')
             with patch.object(version, '__file__', str(implementation)), patch.object(
-                version.runtime, '__file__', str(runtime / '__init__.py')
+                version.runtime, '__file__', str(runtime / '__init__.py'),
             ):
                 first = version.implementation_revision.__wrapped__()
                 source.write_text('# changed')

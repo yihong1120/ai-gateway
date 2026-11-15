@@ -1,16 +1,13 @@
 """Just-in-time leased verification; only transient failures remain automatic."""
-
 from __future__ import annotations
 
 import asyncio
 import logging
 
-from examples.shared.runtime.io import run_sync
-from examples.official_document_workflow.application.output_receipts import (
-    WRITE_PENDING,
-    DELETE_PENDING,
-)
+from examples.official_document_workflow.application.output_receipts import DELETE_PENDING
+from examples.official_document_workflow.application.output_receipts import WRITE_PENDING
 from examples.official_document_workflow.application.output_verification import FileVerification
+from examples.shared.runtime.io import run_sync
 
 
 class OutputRepair:
@@ -36,7 +33,7 @@ class OutputRepair:
             return count
 
         results = await asyncio.gather(
-            *(worker() for _ in range(self.concurrency)), return_exceptions=True
+            *(worker() for _ in range(self.concurrency)), return_exceptions=True,
         )
         for result in results:
             if isinstance(result, BaseException):
@@ -84,11 +81,11 @@ class OutputRepair:
             result = await self._verification(record)
             state = (
                 ('stored' if record.state in WRITE_PENDING else 'deleted')
-                if result.outcome in {'verified','deleted'}
+                if result.outcome in {'verified', 'deleted'}
                 else ('unknown' if record.state in WRITE_PENDING else 'delete_unknown')
             )
             claim = await run_sync(
-                self.receipts.resolve_review, claim, state, verification=result
+                self.receipts.resolve_review, claim, state, verification=result,
             )
             if claim is None:
                 return
@@ -108,6 +105,6 @@ class OutputRepair:
                     published = True
             except Exception as error:
                 logging.getLogger(__name__).warning(
-                    'Output notification deferred (%s)', type(error).__name__
+                    'Output notification deferred (%s)', type(error).__name__,
                 )
         await run_sync(self.receipts.finish_review, claim, published=published)

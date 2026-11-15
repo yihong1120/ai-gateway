@@ -1,13 +1,14 @@
 """Central configuration remains explicit in tools and restricted in containers."""
+from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from examples.shared.config import read_service_snapshot
@@ -36,11 +37,13 @@ class DeploymentConfigurationTests(unittest.TestCase):
                 'LITELLM_DATABASE_URL="postgresql://unused/test"\n'
                 'VERTEX_CREDENTIALS="/tmp/synthetic-vertex-credentials.json"\n'
                 'UNRELATED_LITELLM_SETTING="must-not-reach-container"\n'
-                '[webui]\nWEBUI_SECRET_KEY="must-not-reach-container"\n'
+                '[webui]\nWEBUI_SECRET_KEY="must-not-reach-container"\n',
             )
             result = subprocess.run(
-                [sys.executable, '-m', 'examples.deployment.cli', '--config', str(config),
-                 'compose', 'litellm', 'config', '--format', 'json'],
+                [
+                    sys.executable, '-m', 'examples.deployment.cli', '--config', str(config),
+                    'compose', 'litellm', 'config', '--format', 'json',
+                ],
                 cwd=ROOT, env={'PATH': os.environ['PATH'], 'CALLER_SECRET': 'must-not-reach-container'},
                 capture_output=True, text=True, check=True, timeout=30,
             )

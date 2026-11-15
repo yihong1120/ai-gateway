@@ -1,21 +1,24 @@
 """Real backend HTTP plus an independently launched, credential-minimal edge."""
+from __future__ import annotations
+
 import asyncio
 import contextvars
-from functools import partial
-from dataclasses import dataclass, field
 import os
-from pathlib import Path
 import socket
 import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass
+from dataclasses import field
+from functools import partial
+from pathlib import Path
 from unittest.mock import Mock
 
 import httpx
+import uvicorn
 from starlette.applications import Starlette
 from starlette.routing import Route
-import uvicorn
 
 from company_mcp.adapters.backend import endpoint
 from company_mcp.config import BACKEND_PATH
@@ -41,8 +44,10 @@ class Runtime:
     def start(self):
         self.output = self.log.open('a')
         executable = os.getenv('COMPANY_MCP_TEST_EDGE_PYTHON', sys.executable)
-        self.process = subprocess.Popen([executable, '-m', 'company_mcp.serve'], cwd=ROOT, env=self.env,
-            stdin=subprocess.DEVNULL, stdout=self.output, stderr=subprocess.STDOUT)
+        self.process = subprocess.Popen(
+            [executable, '-m', 'company_mcp.serve'], cwd=ROOT, env=self.env,
+            stdin=subprocess.DEVNULL, stdout=self.output, stderr=subprocess.STDOUT,
+        )
         deadline = time.monotonic() + 15
         with httpx.Client(trust_env=False) as client:
             while time.monotonic() < deadline:
@@ -78,7 +83,15 @@ class Runtime:
 
 def start(case, resources, verifier):
     config = resources.configuration
-    app = Starlette(routes=[Route(BACKEND_PATH, endpoint(config, verifier, Mock(return_value=resources)), methods=['POST'])])
+    app = Starlette(
+        routes=[
+            Route(
+                BACKEND_PATH, endpoint(
+                    config, verifier, Mock(return_value=resources),
+                ), methods=['POST'],
+            ),
+        ],
+    )
     sock = socket.socket()
     sock.bind(('127.0.0.1', 0))
     backend_port = sock.getsockname()[1]
@@ -94,11 +107,13 @@ def start(case, resources, verifier):
         probe.bind(('127.0.0.1', 0))
         port = probe.getsockname()[1]
     env = {key: os.environ[key] for key in ('PATH', 'LANG', 'LC_ALL', 'TMPDIR') if key in os.environ}
-    env.update(PYTHONPATH=str(ROOT), PYTHON_DOTENV_DISABLED='1',
+    env.update(
+        PYTHONPATH=str(ROOT), PYTHON_DOTENV_DISABLED='1',
         COMPANY_MCP_ENABLED='true', COMPANY_MCP_ORIGIN=config.origin, COMPANY_MCP_ISSUER=config.issuer,
         COMPANY_MCP_CLIENTS=','.join(config.clients), COMPANY_MCP_ALLOWED_CIDRS='127.0.0.0/8',
         COMPANY_MCP_BACKEND_KEY=config.backend_key, COMPANY_MCP_PORT=str(port),
-        COMPANY_MCP_BACKEND_URL=f'http://127.0.0.1:{backend_port}' + BACKEND_PATH)
+        COMPANY_MCP_BACKEND_URL=f'http://127.0.0.1:{backend_port}' + BACKEND_PATH,
+    )
     runtime = Runtime(server, thread, sock, port, case.base / 'independent-edge.log', env)
     case.addCleanup(runtime.stop_backend)
     case.addCleanup(runtime.stop)

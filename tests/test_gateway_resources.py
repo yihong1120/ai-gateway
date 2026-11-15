@@ -1,5 +1,4 @@
 """Owned HTTP resources and import-time ORM initialization boundaries."""
-
 from __future__ import annotations
 
 import importlib.util
@@ -8,11 +7,15 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from types import ModuleType
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from unittest.mock import Mock
+from unittest.mock import patch
 
-from examples.shared.runtime.http_clients import HttpClientPool
+import examples.identity.lifespan as _lifespan_imports
 from examples.identity.database import Database
+from examples.shared.runtime.http_clients import HttpClientPool
 
 
 class ResourceTests(unittest.IsolatedAsyncioTestCase):
@@ -42,12 +45,11 @@ class ResourceTests(unittest.IsolatedAsyncioTestCase):
         healthy.aclose.assert_awaited_once()
 
     async def test_failed_database_start_also_closes_the_pool(self):
-        from examples.identity.lifespan import global_lifespan
         database = Mock(start=Mock(side_effect=RuntimeError('database failed')), close=AsyncMock())
         pool = HttpClientPool()
         resources = SimpleNamespace(database=database, http_clients=pool)
         with self.assertRaisesRegex(RuntimeError, 'database failed'):
-            async with global_lifespan(SimpleNamespace(state=SimpleNamespace(identity=resources))):
+            async with _lifespan_imports.global_lifespan(SimpleNamespace(state=SimpleNamespace(identity=resources))):
                 self.fail('unexpected successful startup')
         database.close.assert_awaited_once()
         with self.assertRaises(RuntimeError):
@@ -95,7 +97,7 @@ assert not any(name == 'src' or name.startswith('src.') for name in sys.modules)
             'examples.identity.sessions.scheduler': {'start_jwt_scheduler': Mock(return_value=scheduler)},
             'examples.identity.redis_pool': {'RedisClient': Mock(return_value=redis)},
             'examples.db_management.services.site_media_cleanup': {
-                'drain_site_media_cleanup_jobs': AsyncMock()
+                'drain_site_media_cleanup_jobs': AsyncMock(),
             },
         }.items():
             module = ModuleType(name)
@@ -108,9 +110,15 @@ assert not any(name == 'src' or name.startswith('src.') for name in sys.modules)
             spec.loader.exec_module(module)
         database = Mock(start=Mock(), close=AsyncMock())
         with self.assertRaisesRegex(RuntimeError, 'redis unavailable'):
-            async with module.global_lifespan(SimpleNamespace(state=SimpleNamespace(identity=SimpleNamespace(
-                    database=database, http_clients=HttpClientPool(), redis_url='redis://localhost', auto_create_schema=False
-                )))):
+            async with module.global_lifespan(
+                SimpleNamespace(
+                    state=SimpleNamespace(
+                        identity=SimpleNamespace(
+                            database=database, http_clients=HttpClientPool(), redis_url='redis://localhost', auto_create_schema=False,
+                        ),
+                    ),
+                ),
+            ):
                 self.fail('startup should fail before accepting requests')
         database.close.assert_awaited_once()
         redis.close.assert_awaited_once()

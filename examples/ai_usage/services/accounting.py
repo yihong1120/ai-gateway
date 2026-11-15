@@ -6,7 +6,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from examples.ai_usage.config import UsageQuerySettings
-from examples.ai_usage.schemas.usage import UnattributedCategory, UsageSource
+from examples.ai_usage.schemas.usage import UnattributedCategory
+from examples.ai_usage.schemas.usage import UsageSource
 
 
 def log_metadata(row: Mapping[str, Any]) -> dict[str, Any]:

@@ -1,31 +1,37 @@
 """The WebUI view consumes exact personal API totals and actual model costs."""
+from __future__ import annotations
 
 import unittest
-from datetime import UTC, datetime
+from datetime import datetime
+from datetime import UTC
 from decimal import Decimal
 
 import httpx
 
 from examples.ai_usage.config import UsageQuerySettings
 from examples.ai_usage.presentation import render_daily_usage
-from examples.ai_usage.services.litellm_usage import (
-    LiteLLMUsageClient,
-    build_daily_usage_response,
-)
+from examples.ai_usage.services.litellm_usage import build_daily_usage_response
+from examples.ai_usage.services.litellm_usage import LiteLLMUsageClient
 
 
 class UsagePresentationTests(unittest.IsolatedAsyncioTestCase):
     async def test_complete_totals_survive_omitted_details_and_local_costs_remain_visible(self):
-        settings = UsageQuerySettings(litellm_base_url='http://unused', litellm_reader_key='secret-reader',
-                                      local_model_names=frozenset({'local'}))
+        settings = UsageQuerySettings(
+            litellm_base_url='http://unused', litellm_reader_key='secret-reader',
+            local_model_names=frozenset({'local'}),
+        )
         async with httpx.AsyncClient() as http:
             window = LiteLLMUsageClient(settings, http).current_window(datetime(2026, 11, 11, tzinfo=UTC))
-        usage = build_daily_usage_response(settings=settings, window=window, record_limit=0, rows=[
-            {'model': 'cloud', 'spend': '0.1', 'total_tokens': 10, 'end_user': 'private-subject'},
-            {'model': 'cloud', 'spend': '0.2', 'total_tokens': 20, 'end_user': 'private-subject'},
-            {'model': 'local', 'spend': '0.3', 'total_tokens': 40, 'end_user': 'private-subject',
-             'messages': 'must-not-display', 'api_key': 'secret-reader'},
-        ])
+        usage = build_daily_usage_response(
+            settings=settings, window=window, record_limit=0, rows=[
+                {'model': 'cloud', 'spend': '0.1', 'total_tokens': 10, 'end_user': 'private-subject'},
+                {'model': 'cloud', 'spend': '0.2', 'total_tokens': 20, 'end_user': 'private-subject'},
+                {
+                    'model': 'local', 'spend': '0.3', 'total_tokens': 40, 'end_user': 'private-subject',
+                    'messages': 'must-not-display', 'api_key': 'secret-reader',
+                },
+            ],
+        )
         self.assertTrue(usage.records_truncated)
         page = render_daily_usage(usage)
         self.assertTrue(page.startswith('## 我的今日 AI 額度'))
@@ -40,8 +46,10 @@ class UsagePresentationTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(private, page)
 
     async def test_empty_day_still_shows_budget_and_reset(self):
-        settings = UsageQuerySettings(litellm_base_url='http://unused', litellm_reader_key='reader',
-                                      daily_budget_usd=Decimal(1))
+        settings = UsageQuerySettings(
+            litellm_base_url='http://unused', litellm_reader_key='reader',
+            daily_budget_usd=Decimal(1),
+        )
         async with httpx.AsyncClient() as http:
             window = LiteLLMUsageClient(settings, http).current_window(datetime(2026, 11, 11, tzinfo=UTC))
         usage = build_daily_usage_response(settings=settings, window=window, record_limit=0, rows=[])

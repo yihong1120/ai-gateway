@@ -7,8 +7,6 @@ routes.  Flutter clients never receive its service-account credentials.
 """
 from __future__ import annotations
 
-from examples.identity.runtime import get_settings
-
 from collections.abc import Mapping
 from urllib.parse import quote
 from urllib.parse import urlsplit
@@ -16,7 +14,7 @@ from urllib.parse import urlsplit
 import httpx
 from fastapi import HTTPException
 
-
+from examples.identity.runtime import get_settings
 
 
 def _identity_service_unavailable() -> HTTPException:

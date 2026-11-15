@@ -1,5 +1,4 @@
 """Task-local usage attribution; document service traffic keeps its own budget."""
-
 from __future__ import annotations
 
 from contextvars import ContextVar

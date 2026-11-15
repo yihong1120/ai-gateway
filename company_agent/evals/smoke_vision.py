@@ -12,14 +12,26 @@ import os
 import tempfile
 import time
 from pathlib import Path
+from unittest.mock import patch
 
+import company_agent.evals.sandbox as _sandbox_imports
+import company_agent.runtime.models as _models_imports
+import examples.identity.adapters.webui as _webui_imports
+from company_agent.api.service import ServiceConfiguration
 from company_agent.config import Root
 from company_agent.config import Settings
+from company_agent.evals.runner import evaluation
+from company_agent.evals.runner import own_model
+from company_agent.evals.runner import own_sandbox
 from company_agent.runtime.context import Context
-from company_agent.evals.runner import evaluation, own_model, own_sandbox
 from company_agent.runtime.storage import Store
 from company_agent.services.office.schemas import UnderstandImage
 from company_agent.services.office.vision import understand
+from examples.shared.runtime.modules import ModuleReference
+# Synthetic-only diagnostic: report response envelope on failure,
+# never enable this capture in the production tools.
+
+_pymupdf = ModuleReference('pymupdf')
 
 
 def synthetic_pass(words):
@@ -46,18 +58,15 @@ class AnalysisCapture:
 
 @evaluation
 async def main(owner):
-    from company_agent.api.service import ServiceConfiguration
-    from examples.identity.adapters.webui import verified_user
-    from company_agent.evals.sandbox import make_state_directory
-    import pymupdf
+    pymupdf = _pymupdf.load()
 
-    user = await verified_user(owner)
+    user = await _webui_imports.verified_user(owner)
     model = own_model(ServiceConfiguration.model(user))
     own_sandbox(os.environ['COMPANY_AGENT_DATABASE_URL'])
     with tempfile.TemporaryDirectory(prefix='company-vision-smoke-') as temporary:
         root = Path(temporary)
         state = root / 'state'
-        make_state_directory(state)
+        _sandbox_imports.make_state_directory(state)
         inputs = root / 'inputs'
         inputs.mkdir(mode=0o700)
         doc = pymupdf.open()
@@ -77,12 +86,8 @@ async def main(owner):
         job = store.job(owner)
         ctx = Context(owner, job, settings, store, model)
         started = time.monotonic()
-        # Synthetic-only diagnostic: report response envelope on failure,
-        # never enable this capture in the production tools.
-        from unittest.mock import patch
-        from company_agent.runtime.models import billed_analysis
 
-        capture = AnalysisCapture(billed_analysis)
+        capture = AnalysisCapture(_models_imports.billed_analysis)
         captured = capture.responses
 
         try:

@@ -2,23 +2,32 @@
 from __future__ import annotations
 
 import asyncio
+import unittest
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-import unittest
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import AsyncMock
+from unittest.mock import Mock
 
-from fastapi import FastAPI
 import httpx
+from fastapi import FastAPI
 
 from company_agent.api.lifespan import ServiceLifespan
-from examples.shared.runtime.jobs import application_jobs, JobServiceMiddleware, service
+from company_agent.api.service import Service
+from examples.official_document_workflow.application.output_receipts import (
+    MemoryOutputReceipts,
+)
+from examples.shared.runtime.jobs import application_jobs
+from examples.shared.runtime.jobs import JobServiceMiddleware
+from examples.shared.runtime.jobs import service
 
 
 class JobResourceTests(unittest.IsolatedAsyncioTestCase):
     async def test_two_apps_bind_distinct_services_to_host_tasks_requests_and_workers(self):
         observed, cancelled = [], []
+
         def resource(name):
             value = SimpleNamespace(name=name, task=None)
+
             async def work():
                 observed.append(('worker', service().name))
                 try:
@@ -28,13 +37,16 @@ class JobResourceTests(unittest.IsolatedAsyncioTestCase):
             value.loop = work
             return value
         first, second = resource('one'), resource('two')
+
         @asynccontextmanager
         async def host(app):
             observed.append(('host', service().name))
             yield
+
         def app_for(current):
             app = FastAPI(lifespan=ServiceLifespan(host, lambda: current).run)
             app.add_middleware(JobServiceMiddleware, owner=app)
+
             @app.get('/current')
             async def current_service():
                 await asyncio.sleep(0)
@@ -50,14 +62,15 @@ class JobResourceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIs(service(), second)
             self.assertIs(service(), first)
             self.assertTrue(second.task.cancelled())
-        self.assertCountEqual(observed, [('host','one'),('host','two'),('worker','one'),('worker','two')])
-        self.assertCountEqual(cancelled, ['one','two'])
+        self.assertCountEqual(observed, [('host', 'one'), ('host', 'two'), ('worker', 'one'), ('worker', 'two')])
+        self.assertCountEqual(cancelled, ['one', 'two'])
         self.assertFalse(hasattr(one.state, 'job_service'))
         with self.assertRaises(RuntimeError):
             service()
 
     async def test_failed_host_startup_unbinds_service_without_starting_worker(self):
         current = SimpleNamespace(loop=Mock(), task=None)
+
         @asynccontextmanager
         async def host(app):
             self.assertIs(service(), current)
@@ -80,15 +93,14 @@ class JobResourceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(service(), 'parent')
 
     async def test_catalog_is_bound_to_the_app_repository_at_startup(self):
-        from examples.official_document_workflow.application.output_receipts import MemoryOutputReceipts
-        from company_agent.api.service import Service
         repository = MemoryOutputReceipts()
-        current = Service(None,None,None,None)
+        current = Service(None, None, None, None)
         current.loop = AsyncMock()
+
         @asynccontextmanager
         async def host(app):
             app.state.workflow = SimpleNamespace(outputs=repository)
             yield
         app = FastAPI()
-        async with ServiceLifespan(host,lambda:current).run(app):
-            self.assertIs(current.document_outputs.__self__.repository,repository)
+        async with ServiceLifespan(host, lambda: current).run(app):
+            self.assertIs(current.document_outputs.__self__.repository, repository)

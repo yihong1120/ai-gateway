@@ -17,7 +17,11 @@ from company_agent.runtime.completion import review_evidence
 from company_agent.services.cad.sandbox import NOTICE as CAD_NOTICE
 from company_agent.services.cad.sandbox import read_results as cad_read_results
 from company_agent.services.eip.reading import read_results as eip_read_results
-from company_agent.services.external_tools.evidence import read_results as external_read_results
+from company_agent.services.external_tools.evidence import (
+    read_results as external_read_results,
+)
+from company_agent.services.office.ocr import NOTICE
+from company_agent.services.office.vision import VISION_NOTICE
 from company_agent.services.research.web import merge_web_sources
 from company_agent.state import GRAPH_VERSION
 from company_agent.state import merge_sources
@@ -46,10 +50,8 @@ def execution_summary(state):
     if names & {'read_cad', 'create_cad', 'edit_cad_text'}:
         notices.append(CAD_NOTICE)
     if 'read_ocr' in names:
-        from company_agent.services.office.ocr import NOTICE
         notices.append(NOTICE)
     if 'understand_image' in names:
-        from company_agent.services.office.vision import VISION_NOTICE
         notices.append(VISION_NOTICE)
     if any(message.status == 'success' and message.name in ROLE_TOOLS['eip'] for message in tools):
         notices.append('EIP 查詢／下載可能更新已讀；沒有簽核。行事曆需至公司助理工作台預覽並由本人確認，模型不會自動匯入。')

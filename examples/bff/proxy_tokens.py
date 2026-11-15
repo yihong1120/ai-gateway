@@ -1,45 +1,28 @@
 """BFF tokens operations."""
-
 from __future__ import annotations
 
 import asyncio
-
 import time
-
 from collections.abc import Mapping
-
 from typing import Any
 
 from fastapi import HTTPException
-
 from redis.asyncio import Redis
-
 from redis.exceptions import RedisError
 
-from examples.identity.deployment_context import DeploymentBinding
-
-from examples.identity.sessions.store import acquire_refresh_lock
-
-from examples.identity.sessions.store import auth_tokens
-
-from examples.identity.sessions.store import delete_auth_session
-
-from examples.identity.sessions.store import get_auth_session
-
-from examples.identity.sessions.store import OIDC_ONLINE_SSO_SESSION_MODE
-
-from examples.identity.sessions.store import release_refresh_lock
-
-from examples.identity.sessions.store import save_auth_tokens
-
 from examples.bff.oidc_services import refresh_oidc_tokens
-
-from examples.identity.schemas.auth import RefreshRequest
-
-from examples.identity.sessions.authentication import refresh_tokens
-
-from examples.identity.settings.bff import get_bff_options
 from examples.bff.proxy_config import logger
+from examples.identity.deployment_context import DeploymentBinding
+from examples.identity.schemas.auth import RefreshRequest
+from examples.identity.sessions.authentication import refresh_tokens
+from examples.identity.sessions.store import acquire_refresh_lock
+from examples.identity.sessions.store import auth_tokens
+from examples.identity.sessions.store import delete_auth_session
+from examples.identity.sessions.store import get_auth_session
+from examples.identity.sessions.store import OIDC_ONLINE_SSO_SESSION_MODE
+from examples.identity.sessions.store import release_refresh_lock
+from examples.identity.sessions.store import save_auth_tokens
+from examples.identity.settings.bff import get_bff_options
 
 
 def _is_terminal_refresh_error(exc: HTTPException) -> bool:

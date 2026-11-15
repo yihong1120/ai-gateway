@@ -1,5 +1,4 @@
 """DocumentOCR responsibilities for the shared document processor."""
-
 from __future__ import annotations
 
 import asyncio
@@ -12,26 +11,29 @@ import subprocess
 import tempfile
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
+from typing import Literal
 from urllib.parse import urlsplit
 
 import httpx
 
-from examples.shared.runtime.concurrency import run_ocr
-from examples.official_document_workflow.domain.documents import (
-    CloudSemanticSource,
-    OcrLayoutBlock,
-    OcrLayoutPage,
-    ProcessingError,
-)
+from examples.official_document_workflow.domain.documents import CloudSemanticSource
+from examples.official_document_workflow.domain.documents import OcrLayoutBlock
+from examples.official_document_workflow.domain.documents import OcrLayoutPage
+from examples.official_document_workflow.domain.documents import ProcessingError
 from examples.official_document_workflow.infrastructure.storage.processing_cache import (
     active_requests,
 )
+from examples.shared.runtime.concurrency import run_ocr
+from examples.shared.runtime.modules import ModuleReference
+
+_workflow_components = ModuleReference('examples.official_document_workflow.services.components')
+_pymupdf = ModuleReference('pymupdf')
 
 logger = logging.getLogger(__name__)
 
 
-from .components import ConfiguredService
+ConfiguredService = _workflow_components.attribute('ConfiguredService')
 
 
 OCR_CONTENT_REVISION = 'paddle-layout-and-spotting-v2'
@@ -132,7 +134,7 @@ class DocumentOCR(ConfiguredService):
                 use_layout_detection=use_layout_detection,
                 prompt_label=prompt_label,
             )
-        import pymupdf
+        pymupdf = _pymupdf.load()
 
         merged, metadata = [], []
         with (
@@ -221,7 +223,7 @@ class DocumentOCR(ConfiguredService):
         return response
 
     def _paddleocr_vl_single_request(
-        self, source_path: Path, *, use_layout_detection: bool, prompt_label: str | None = None
+        self, source_path: Path, *, use_layout_detection: bool, prompt_label: str | None = None,
     ) -> dict[str, Any]:
         """One local request. No retry, fallback, semantic truncation or parallel GPU load."""
         endpoint = self._paddleocr_vl_endpoint()
@@ -484,7 +486,7 @@ class DocumentOCR(ConfiguredService):
         when their words are extractable, without content or area heuristics.
         """
         try:
-            import pymupdf
+            pymupdf = _pymupdf.load()
         except ImportError as exc:
             raise ProcessingError('伺服器缺少讀取 PDF 所需的 PyMuPDF 套件') from exc
 

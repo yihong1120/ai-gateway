@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 import os
 from urllib.parse import urlsplit
+
 from pydantic import Field
 from pydantic_settings import BaseSettings
 

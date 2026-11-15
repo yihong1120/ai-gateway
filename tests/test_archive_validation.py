@@ -1,19 +1,18 @@
 """A clean checkout validates metadata; explicit archive audits remain strict."""
-
 from __future__ import annotations
 
-from contextlib import ExitStack
 import hashlib
 import json
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import ExitStack
+from pathlib import Path
 from unittest.mock import patch
 
-from examples.deployment.tools import verify_archive as archive
 from examples.deployment.tools import validate as validation
+from examples.deployment.tools import verify_archive as archive
 
 
 class ArchiveTests(unittest.TestCase):
@@ -25,7 +24,7 @@ class ArchiveTests(unittest.TestCase):
         self.name = 'examples/deployment/archive/releases/sample.zip'
         self.payload = b'original release bytes'
         self.index.write_text(
-            json.dumps({self.name: hashlib.sha256(self.payload).hexdigest()})
+            json.dumps({self.name: hashlib.sha256(self.payload).hexdigest()}),
         )
         self.enterContext(patch.object(archive, 'INDEX', self.index))
         self.location = self.root / 'external-archive'
@@ -115,12 +114,12 @@ class ValidationArchiveSelectionTests(unittest.TestCase):
             output = Path(temporary) / 'validation'
             stack.enter_context(
                 patch.object(
-                    sys, 'argv', ['validate', '--output', str(output), *options]
-                )
+                    sys, 'argv', ['validate', '--output', str(output), *options],
+                ),
             )
             execute = stack.enter_context(patch.object(validation, 'execute'))
             stack.enter_context(
-                patch.object(validation, 'postgres', side_effect=ChecksFinished)
+                patch.object(validation, 'postgres', side_effect=ChecksFinished),
             )
             with self.assertRaises(ChecksFinished):
                 validation.main()
@@ -149,5 +148,5 @@ class ValidationArchiveSelectionTests(unittest.TestCase):
     def test_external_location_implies_strict_audit(self):
         commands, _ = self.check('--archive-dir', '/private/releases-backup')
         self.assertEqual(
-            commands[1][-2:], ['--archive-dir', '/private/releases-backup']
+            commands[1][-2:], ['--archive-dir', '/private/releases-backup'],
         )

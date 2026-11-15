@@ -3,10 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import threading
 import unittest
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
+
+from langchain_core.messages import AIMessage
 
 from company_agent.runtime.execution import DocumentAgent
 from company_agent.runtime.middleware import visible_sources
@@ -35,8 +39,10 @@ class SourceDiscoveryTests(NASFixture):
         calls = self.dsm.calls[before:]
         self.assertEqual(sum(c['method'] == 'login' for c in calls), 1)
         self.assertEqual(sum(c['method'] == 'list_share' for c in calls), 1)
-        self.assertEqual([r for r in found if r.get('source') == 'NAS'],
-                         [{**r, 'label': 'alice / ' + r['label'], 'connection': 'alice'} for r in roots])
+        self.assertEqual(
+            [r for r in found if r.get('source') == 'NAS'],
+            [{**r, 'label': 'alice / ' + r['label'], 'connection': 'alice'} for r in roots],
+        )
         self.assertFalse(self.dsm.sessions)
 
     def test_next_discovery_rechecks_share_revocation(self):
@@ -99,8 +105,6 @@ class ArtifactValidationTests(Fixture):
         itersizes = []
         original = self.store.db
 
-        from contextlib import contextmanager
-
         @contextmanager
         def spy():
             with original() as db:
@@ -126,8 +130,6 @@ class ArtifactValidationTests(Fixture):
 
 class ModelPreparationTests(unittest.IsolatedAsyncioTestCase, Fixture):
     async def test_parallel_child_calls_get_distinct_remaining_counts(self):
-        import re
-        from langchain_core.messages import AIMessage
 
         self.config.structured_completion = True
         self.config.max_steps = 4

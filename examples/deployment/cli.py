@@ -4,14 +4,18 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import re
 import sys
+from pathlib import Path
 
-from examples.shared.config import (
-    ConfigurationError, DEFAULT_NAME, ENVIRONMENT_KEY,
-    config_path, execution_environment, read_configuration,
-)
+from dotenv import dotenv_values
+
+from examples.shared.config import config_path
+from examples.shared.config import ConfigurationError
+from examples.shared.config import DEFAULT_NAME
+from examples.shared.config import ENVIRONMENT_KEY
+from examples.shared.config import execution_environment
+from examples.shared.config import read_configuration
 
 ARGUMENT_KEY = re.compile(r'\{([A-Z][A-Z0-9_]*)\}')
 
@@ -45,7 +49,6 @@ def _write_private(path, sections):
 
 def migrate(root, destination=None):
     """One-time import; existing private env files and deployed services stay intact."""
-    from dotenv import dotenv_values
 
     root = Path(root).resolve()
     destination = Path(destination) if destination else root / DEFAULT_NAME
@@ -96,22 +99,29 @@ def compose_command(profile, command, *, project=None, path=None):
     if not source.is_file():
         raise ConfigurationError('Run Compose from the repository root containing docker-compose.yml.')
     if not command or command[0].startswith('-'):
-        raise ConfigurationError('Place the Docker Compose command immediately after the profile, such as up -d or build.')
+        raise ConfigurationError(
+            'Place the Docker Compose command immediately after the profile, such as up -d or build.',
+        )
     env = execution_environment(section, path) if section else {**os.environ, 'PYTHON_DOTENV_DISABLED': '1'}
     if command[0] in {'up', 'run', 'create', 'start', 'restart'}:
         missing = [name for name in required if not env.get(name, '').strip()]
         if missing:
             raise ConfigurationError('Missing selected Compose settings: ' + ', '.join(missing))
     return (
-        ['docker', 'compose', '--env-file', '/dev/null', '-f', str(source),
-         '-p', project or default_project, '--profile', profile, *command],
+        [
+            'docker', 'compose', '--env-file', '/dev/null', '-f', str(source),
+            '-p', project or default_project, '--profile', profile, *command,
+        ],
         env,
     )
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', type=Path, help='Private TOML file; defaults to AI_GATEWAY_CONFIG or config.local.toml.')
+    parser.add_argument(
+        '--config', type=Path,
+        help='Private TOML file; defaults to AI_GATEWAY_CONFIG or config.local.toml.',
+    )
     actions = parser.add_subparsers(dest='action', required=True)
     actions.add_parser('check', help='Validate structure without displaying values.')
     migration = actions.add_parser('migrate', help='Import legacy env files without changing the originals.')
@@ -154,5 +164,5 @@ def main(argv=None):
         raise SystemExit(2) from None
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

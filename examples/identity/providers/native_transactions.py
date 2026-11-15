@@ -1,16 +1,21 @@
 """Application-owned NativeTransactions dependencies and operations."""
-
 from __future__ import annotations
-from examples.identity.settings.native import NativeSettings
+
 import hashlib
 import json
 import re
 import secrets
 from collections.abc import Mapping
 from typing import Literal
+
 from fastapi import HTTPException
 from fastapi import Request
 from redis.asyncio import Redis
+
+from examples.identity.settings.native import NativeSettings
+from examples.shared.runtime.modules import ModuleReference
+
+_identity_redis_counters = ModuleReference('examples.identity.redis_counters')
 
 NativeSocialProvider = Literal['google', 'apple']
 _TRANSACTION_RE = re.compile('^[A-Za-z0-9_-]{43,128}$')
@@ -18,7 +23,7 @@ _BEGIN_RATE_LIMIT_MAX = 20
 _BEGIN_RATE_LIMIT_WINDOW_SECONDS = 300
 
 
-from examples.identity.redis_counters import increment_window
+increment_window = _identity_redis_counters.attribute('increment_window')
 
 
 class NativeTransactions:
@@ -54,8 +59,8 @@ class NativeTransactions:
                     'Retry-After': str(
                         max(1, retry_after)
                         if isinstance(retry_after, int)
-                        else _BEGIN_RATE_LIMIT_WINDOW_SECONDS
-                    )
+                        else _BEGIN_RATE_LIMIT_WINDOW_SECONDS,
+                    ),
                 },
             )
 
@@ -69,17 +74,17 @@ class NativeTransactions:
         """Decode a Redis transaction record without exposing malformed state."""
         if raw is None:
             raise HTTPException(
-                status_code=401, detail='native_social_exchange_expired'
+                status_code=401, detail='native_social_exchange_expired',
             )
         try:
             value = json.loads(raw)
         except (TypeError, ValueError) as exc:
             raise HTTPException(
-                status_code=401, detail='native_social_exchange_expired'
+                status_code=401, detail='native_social_exchange_expired',
             ) from exc
         if not isinstance(value, dict):
             raise HTTPException(
-                status_code=401, detail='native_social_exchange_expired'
+                status_code=401, detail='native_social_exchange_expired',
             )
         return value
 
@@ -87,10 +92,10 @@ class NativeTransactions:
         """Atomically consume a one-use transaction before validation work."""
         if not _TRANSACTION_RE.fullmatch(transaction_id):
             raise HTTPException(
-                status_code=401, detail='native_social_exchange_expired'
+                status_code=401, detail='native_social_exchange_expired',
             )
         return self._decode_record(
-            await redis.getdel(self._transaction_key(transaction_id))
+            await redis.getdel(self._transaction_key(transaction_id)),
         )
 
     async def store(
@@ -112,7 +117,7 @@ class NativeTransactions:
         value = record.get(name)
         if not isinstance(value, str) or not value:
             raise HTTPException(
-                status_code=401, detail='native_social_exchange_expired'
+                status_code=401, detail='native_social_exchange_expired',
             )
         return value
 
@@ -121,6 +126,6 @@ class NativeTransactions:
         provider = record.get('provider')
         if provider not in {'google', 'apple'}:
             raise HTTPException(
-                status_code=401, detail='native_social_exchange_expired'
+                status_code=401, detail='native_social_exchange_expired',
             )
         return provider

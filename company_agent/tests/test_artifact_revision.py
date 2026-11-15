@@ -181,27 +181,27 @@ class RevisionGraphTests(unittest.IsolatedAsyncioTestCase, Fixture):
             return finish('complete_assignment', ids=ids)
         self.config.max_steps = 20
         result, _ = await self.run_model(
-                coordinator=[
-                    call('delegate_document', {'task': '建立草稿'}, 'd1'), call('delegate_reviewer', {'task': '讀原草稿'}, 'r'),
-                    call('delegate_document', {'task': '讀取再修訂草稿'}, 'd2'), lambda _:finish(ids=ids),
-                    lambda _:finish(outcome='blocked', summary='新版仍待審核', ids=ids),
-                ],
-                document=[
-                    call(
-                        'create_word', {
-                            'name': 'draft.docx', 'title': '工程', 'paragraphs': [
+            coordinator=[
+                call('delegate_document', {'task': '建立草稿'}, 'd1'), call('delegate_reviewer', {'task': '讀原草稿'}, 'r'),
+                call('delegate_document', {'task': '讀取再修訂草稿'}, 'd2'), lambda _:finish(ids=ids),
+                lambda _:finish(outcome='blocked', summary='新版仍待審核', ids=ids),
+            ],
+            document=[
+                call(
+                    'create_word', {
+                        'name': 'draft.docx', 'title': '工程', 'paragraphs': [
                                 {'text': '待確認', 'heading': False},
-                            ],
-                        }, 'create',
-                    ), original,
-                    lambda _:call('inspect_artifact', {'artifact_id': ids[0]}, 'read'), change, revised,
-                ],
-                reviewer=[
-                    lambda _:call(
-                        'inspect_artifact', {'artifact_id': ids[0]},
-                        'read-old',
-                    ), lambda _:finish('complete_assignment', ids=ids),
-                ],
+                        ],
+                    }, 'create',
+                ), original,
+                lambda _:call('inspect_artifact', {'artifact_id': ids[0]}, 'read'), change, revised,
+            ],
+            reviewer=[
+                lambda _:call(
+                    'inspect_artifact', {'artifact_id': ids[0]},
+                    'read-old',
+                ), lambda _:finish('complete_assignment', ids=ids),
+            ],
         )
         self.assertEqual(result['status'], 'blocked', result)
         self.assertIn('未經獨立審核', str(result['tool_feedback']))

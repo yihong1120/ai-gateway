@@ -1,8 +1,6 @@
 """Replay must survive rewrites, concurrency, legacy receipts and user isolation."""
 from __future__ import annotations
 
-from tests.eip_calendar_fixture import new_calendar_matches
-
 import asyncio
 import tempfile
 from types import SimpleNamespace
@@ -18,6 +16,7 @@ from examples.official_document_workflow.infrastructure.eip.calendar_identity im
 from examples.official_document_workflow.infrastructure.eip.calendar_sync import verified_events
 from examples.official_document_workflow.infrastructure.eip.calendar_sync import write_events
 from examples.official_document_workflow.infrastructure.storage.state import Journal
+from tests.eip_calendar_fixture import new_calendar_matches
 from tests.eip_postgres import EIPPostgresTestCase
 
 
@@ -27,7 +26,13 @@ class SourceReplayTests(EIPPostgresTestCase, IsolatedAsyncioTestCase):
         self.root = tempfile.TemporaryDirectory()
         self.addCleanup(self.root.cleanup)
         self.journal = Journal()
-        self.adapter = SimpleNamespace(commit=AsyncMock(return_value={'event_id': '123', 'detail_verified': True}), calendar_import_matches=AsyncMock(side_effect=new_calendar_matches))
+        self.adapter = SimpleNamespace(
+            commit=AsyncMock(
+                return_value={
+                    'event_id': '123', 'detail_verified': True,
+                },
+            ), calendar_import_matches=AsyncMock(side_effect=new_calendar_matches),
+        )
 
     def events(self, title='原名稱', user='17', day='2026/09/10', prior=()):
         r = {

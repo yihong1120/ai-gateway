@@ -1,4 +1,5 @@
 """Actual process restart, persisted workspace and independent liveness."""
+from __future__ import annotations
 
 from unittest.mock import Mock
 
@@ -20,10 +21,14 @@ class ProcessTests(NASFixture):
         resources = Resources(fixture.configuration(), self.store, Mock(return_value=workflow))
         service = runtime.start(self, resources, auth.verifier)
         original_pid = service.process.pid
-        headers = {'Host': 'company.example', 'Authorization': 'Bearer ' + auth.token(),
-                   'accept': 'application/json, text/event-stream'}
-        payload = {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
-                   'params': {'name': 'workspace_prepare', 'arguments': {'request_id': 'persist-across-process'}}}
+        headers = {
+            'Host': 'company.example', 'Authorization': 'Bearer ' + auth.token(),
+            'accept': 'application/json, text/event-stream',
+        }
+        payload = {
+            'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+            'params': {'name': 'workspace_prepare', 'arguments': {'request_id': 'persist-across-process'}},
+        }
         with httpx.Client(base_url=f'http://127.0.0.1:{service.port}', trust_env=False) as client:
             first = client.post('/company-mcp', headers=headers, json=payload)
             workspace = first.json()['result']['structuredContent']['workspace']
@@ -37,8 +42,10 @@ class ProcessTests(NASFixture):
             service.stop_backend()
             self.assertEqual(client.get('/healthz').status_code, 200)
             self.assertEqual(client.get('/readyz').status_code, 503)
-            failed = client.post('/company-mcp', headers=headers,
-                json={'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list', 'params': {}})
+            failed = client.post(
+                '/company-mcp', headers=headers,
+                json={'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list', 'params': {}},
+            )
             self.assertEqual(failed.status_code, 503)
             self.assertIsNone(service.process.poll())
             self.assertEqual(service.process.pid, current_pid)

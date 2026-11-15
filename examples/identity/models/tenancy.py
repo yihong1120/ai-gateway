@@ -1,8 +1,9 @@
 """Tenancy ORM contracts."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
+from examples.shared.runtime.modules import ModuleReference
 
 if TYPE_CHECKING:
     from .accounts import User
@@ -30,6 +31,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from examples.identity.database import Base
 
 from .common import DEPLOYMENT_STATUS_ACTIVE, TENANT_STATUS_ACTIVE, utc_now
+
+_identity_deployment_context = ModuleReference('examples.identity.deployment_context')
 
 
 class Tenant(Base):
@@ -254,7 +257,7 @@ def _canonicalise_new_deployment(
     target: Deployment,
 ) -> None:
     """Reject non-canonical deployment origins before they reach storage."""
-    from examples.identity.deployment_context import canonical_api_base_url
+    canonical_api_base_url = _identity_deployment_context.attribute('canonical_api_base_url')
 
     target.api_base_url = canonical_api_base_url(target.api_base_url)
     if target.config_revision < 1:
@@ -268,7 +271,7 @@ def _revision_on_deployment_change(
     target: Deployment,
 ) -> None:
     """Invalidate tokens whenever the deployment security contract changes."""
-    from examples.identity.deployment_context import canonical_api_base_url
+    canonical_api_base_url = _identity_deployment_context.attribute('canonical_api_base_url')
 
     target.api_base_url = canonical_api_base_url(target.api_base_url)
     state = inspect(target)

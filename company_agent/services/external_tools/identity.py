@@ -4,6 +4,9 @@ from __future__ import annotations
 import jwt
 
 from examples.identity.adapters import webui
+from examples.shared.runtime.modules import ModuleReference
+
+_webui_oauth_sessions = ModuleReference('open_webui.models.oauth_sessions')
 
 AUTHORIZATION_REQUIRED = '外部工具需要本人有效的 OIDC 登入，請重新登入後再試。'
 
@@ -36,7 +39,7 @@ class WebUIUserTokens:
 
             # Loading this optional host module may initialize its database;
             # never import it while loading gateway libraries or CLI tools.
-            from open_webui.models.oauth_sessions import OAuthSessions
+            OAuthSessions = _webui_oauth_sessions.attribute('OAuthSessions')
 
             sessions = await OAuthSessions.get_sessions_by_user_id(owner)
             candidates = [

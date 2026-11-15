@@ -1,18 +1,22 @@
 """Failed requests release disposable clients while pooled clients stay app-owned."""
+from __future__ import annotations
 
-from contextlib import asynccontextmanager
 import os
-from types import SimpleNamespace
 import unittest
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import anyio
 import httpx
-from fastapi import HTTPException, Request
+from fastapi import HTTPException
+from fastapi import Request
 
-from examples.bff import proxy_http, proxy_streams
+from examples.bff import proxy_http
+from examples.bff import proxy_streams
 from examples.identity.config import Settings
-from examples.identity.runtime import IdentityResources, identity_scope
+from examples.identity.runtime import identity_scope
+from examples.identity.runtime import IdentityResources
 from examples.shared.runtime.http_clients import HttpClientPool
 
 
@@ -54,13 +58,15 @@ class BffTransportTests(unittest.IsolatedAsyncioTestCase):
         transport = ClosingTransport(handler)
         client = httpx.AsyncClient(transport=transport)
         pool = HttpClientPool() if pooled else None
-        request = Request({
-            'type': 'http', 'method': 'GET', 'path': '/bff/chat/events',
-            'scheme': 'https', 'server': ('site.test', 443), 'query_string': b'',
-            'client': ('192.0.2.1', 123),
-            'headers': [(b'cookie', b'browser=secret'), (b'authorization', b'Bearer browser')],
-            'app': SimpleNamespace(state=SimpleNamespace(http_clients=pool)),
-        }, receive=self.empty_body)
+        request = Request(
+            {
+                'type': 'http', 'method': 'GET', 'path': '/bff/chat/events',
+                'scheme': 'https', 'server': ('site.test', 443), 'query_string': b'',
+                'client': ('192.0.2.1', 123),
+                'headers': [(b'cookie', b'browser=secret'), (b'authorization', b'Bearer browser')],
+                'app': SimpleNamespace(state=SimpleNamespace(http_clients=pool)),
+            }, receive=self.empty_body,
+        )
         with patch.object(httpx, 'AsyncClient', return_value=client):
             try:
                 yield request, client, transport

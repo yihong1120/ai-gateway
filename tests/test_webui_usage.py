@@ -6,7 +6,8 @@ import importlib.util
 import os
 import unittest
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import datetime
+from datetime import UTC
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,10 +15,8 @@ import httpx
 from fastapi import FastAPI
 from starlette.requests import Request
 
-from examples.ai_usage.adapters.webui import (
-    install_webui_usage,
-    settings_from_environment,
-)
+from examples.ai_usage.adapters.webui import install_webui_usage
+from examples.ai_usage.adapters.webui import settings_from_environment
 
 
 class WebUIUsageTests(unittest.IsolatedAsyncioTestCase):
@@ -39,11 +38,13 @@ class WebUIUsageTests(unittest.IsolatedAsyncioTestCase):
         return patch('examples.ai_usage.adapters.webui.httpx.AsyncClient', side_effect=create)
 
     def application(self, *, key='reader-only', base='http://usage.test', budget='4.00'):
-        with patch.dict(os.environ, {
-            'LITELLM_USAGE_READER_KEY': key,
-            'LITELLM_USAGE_BASE_URL': base,
-            'LITELLM_DAILY_BUDGET_USD': budget,
-        }):
+        with patch.dict(
+            os.environ, {
+                'LITELLM_USAGE_READER_KEY': key,
+                'LITELLM_USAGE_BASE_URL': base,
+                'LITELLM_DAILY_BUDGET_USD': budget,
+            },
+        ):
             app = FastAPI()
             install_webui_usage(app)
         return app
@@ -60,14 +61,22 @@ class WebUIUsageTests(unittest.IsolatedAsyncioTestCase):
 
         def handler(request):
             observed.append(request)
-            return httpx.Response(200, json={'total_pages': 1, 'data': [
-                {'end_user': 'verified-subject', 'model_group': 'cloud-model',
-                 'total_tokens': 20, 'spend': '0.5', 'startTime': datetime.now(UTC).isoformat()},
-                {'end_user': 'verified-subject', 'model_group': 'local-model',
-                 'api_base': 'http://private-model.test', 'total_tokens': 10, 'spend': '0.25',
-                 'startTime': datetime.now(UTC).isoformat()},
-                {'end_user': 'another-subject', 'model_group': 'private-other-model', 'spend': '999'},
-            ]})
+            return httpx.Response(
+                200, json={
+                    'total_pages': 1, 'data': [
+                        {
+                            'end_user': 'verified-subject', 'model_group': 'cloud-model',
+                            'total_tokens': 20, 'spend': '0.5', 'startTime': datetime.now(UTC).isoformat(),
+                        },
+                        {
+                            'end_user': 'verified-subject', 'model_group': 'local-model',
+                            'api_base': 'http://private-model.test', 'total_tokens': 10, 'spend': '0.25',
+                            'startTime': datetime.now(UTC).isoformat(),
+                        },
+                        {'end_user': 'another-subject', 'model_group': 'private-other-model', 'spend': '999'},
+                    ],
+                },
+            )
 
         with patch.dict(os.environ, {'AI_USAGE_LOCAL_MODEL_NAMES': 'local-model'}):
             app = self.application()
@@ -106,7 +115,12 @@ class WebUIUsageTests(unittest.IsolatedAsyncioTestCase):
                 one, two = await asyncio.gather(self.query(first), self.query(second))
         self.assertIn('/ US$1.00', one)
         self.assertIn('/ US$4.00', two)
-        self.assertCountEqual(observed, [('first.test', 'Bearer first-reader'), ('second.test', 'Bearer second-reader')])
+        self.assertCountEqual(
+            observed, [
+                ('first.test', 'Bearer first-reader'),
+                ('second.test', 'Bearer second-reader'),
+            ],
+        )
         self.assertEqual(len(self.clients), 2)
         self.assertTrue(all(client.is_closed for client in self.clients))
 

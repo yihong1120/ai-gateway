@@ -1,14 +1,17 @@
 """Release boundary: reproducible bytes, exact files, no runtime credentials."""
+from __future__ import annotations
+
 import hashlib
 import json
-from pathlib import Path
-import shutil
 import secrets
+import shutil
 import zipfile
+from pathlib import Path
 
 import pytest
 
-from examples.company_ai_access.cli.release import build, EXTRA_FILES
+from examples.company_ai_access.cli.release import build
+from examples.company_ai_access.cli.release import EXTRA_FILES
 
 
 def test_release_omits_runtime_secrets_and_has_verifiable_manifest(tmp_path):
@@ -44,12 +47,19 @@ def test_release_omits_runtime_secrets_and_has_verifiable_manifest(tmp_path):
         assert 'uv sync --frozen --no-dev --extra company-ai-access' in release_readme
         assert 'not the complete monorepo' in release_readme
         assert 'Sign all three Windows scripts' in release_readme
-        assert {'pyproject.toml', 'uv.lock', 'README.md', 'CONTRIBUTING.md', 'LICENSE', 'config.example.toml',
-                'examples/shared/config.py', 'examples/deployment/cli.py'} <= set(archive.namelist())
+        assert {
+            'pyproject.toml', 'uv.lock', 'README.md', 'CONTRIBUTING.md', 'LICENSE', 'config.example.toml',
+            'examples/shared/config.py', 'examples/deployment/cli.py',
+        } <= set(archive.namelist())
         assert 'examples/configuration.py' not in archive.namelist()
         assert not any(name.startswith('examples/deployment/tools/') for name in archive.namelist())
-        assert not any(name.endswith(('requirements.txt', 'requirements.lock.txt', '.env.example')) for name in archive.namelist())
-        assert b"[string]$Portal = 'https://changdar-server.mooo.com'" in archive.read('examples/company_ai_access/windows/Setup-CompanyAI.ps1')
+        assert not any(
+            name.endswith(('requirements.txt', 'requirements.lock.txt', '.env.example'))
+            for name in archive.namelist()
+        )
+        assert b"[string]$Portal = 'https://changdar-server.mooo.com'" in archive.read(
+            'examples/company_ai_access/windows/Setup-CompanyAI.ps1',
+        )
         assert all(secret not in archive.read(name) for name in archive.namelist())
         assert 'examples/company_ai_access/windows/Start-CompanyCodex.ps1' in archive.namelist()
         assert 'examples/company_ai_access/cli/export_handoff.py' not in archive.namelist()

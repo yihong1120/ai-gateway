@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import os
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack
 from decimal import Decimal
+from typing import TypedDict
 
 import httpx
 
@@ -12,13 +14,17 @@ from examples.ai_usage.services.litellm_usage import LiteLLMUsageClient
 from examples.shared.runtime.installation import install_once
 
 
+class _UsageOverrides(TypedDict, total=False):
+    local_model_names: frozenset[str]
+
+
 def settings_from_environment() -> UsageQuerySettings | None:
     """Keep the WebUI's reader credential and deployment settings isolated."""
     reader_key = os.getenv('LITELLM_USAGE_READER_KEY', '')
     if not reader_key:
         return None
     local_models = os.getenv('AI_USAGE_LOCAL_MODEL_NAMES')
-    options = {'local_model_names': frozenset(name.strip() for name in local_models.split(',') if name.strip())} \
+    options: _UsageOverrides = {'local_model_names': frozenset(name.strip() for name in local_models.split(',') if name.strip())} \
         if local_models is not None else {}
     return UsageQuerySettings(
         litellm_base_url=os.getenv('LITELLM_USAGE_BASE_URL', 'http://127.0.0.1:4000').rstrip('/'),
@@ -42,12 +48,14 @@ def install_webui_usage(app) -> None:
         async def lifespan(current):
             async with AsyncExitStack() as cleanup:
                 if settings is not None:
-                    transport = await cleanup.enter_async_context(httpx.AsyncClient(
-                        base_url=settings.litellm_base_url,
-                        timeout=httpx.Timeout(settings.request_timeout_seconds, connect=5.0),
-                        follow_redirects=False,
-                        trust_env=False,
-                    ))
+                    transport = await cleanup.enter_async_context(
+                        httpx.AsyncClient(
+                            base_url=settings.litellm_base_url,
+                            timeout=httpx.Timeout(settings.request_timeout_seconds, connect=5.0),
+                            follow_redirects=False,
+                            trust_env=False,
+                        ),
+                    )
                     current.state.daily_usage = LiteLLMUsageClient(settings, transport)
                 try:
                     await cleanup.enter_async_context(original(current))

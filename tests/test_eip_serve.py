@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import builtins
 import importlib.util
 import os
 import unittest
@@ -11,6 +12,8 @@ from types import ModuleType
 from types import SimpleNamespace
 from unittest.mock import Mock
 from unittest.mock import patch
+
+from fastapi import FastAPI
 
 ROOT = Path(__file__).resolve().parents[1]
 API = ROOT / 'examples/openwebui'
@@ -26,9 +29,11 @@ class ServeTests(unittest.TestCase):
             'eip_test_serve', API / 'serve.py',
         )
         self.launcher = importlib.util.module_from_spec(spec)
-        self.enterContext(patch.dict(
-            'sys.modules', {'open_webui': self.webui, 'uvicorn': self.uvicorn},
-        ))
+        self.enterContext(
+            patch.dict(
+                'sys.modules', {'open_webui': self.webui, 'uvicorn': self.uvicorn},
+            ),
+        )
         spec.loader.exec_module(self.launcher)
         self.enterContext(patch.object(self.launcher, 'load_service'))
 
@@ -73,7 +78,6 @@ class ServeTests(unittest.TestCase):
         self.uvicorn.run.assert_not_called()
 
     def test_service_configuration_loads_before_first_host_import(self):
-        import builtins
 
         events = []
         original_import = builtins.__import__
@@ -99,7 +103,6 @@ class ServeTests(unittest.TestCase):
 
     def test_factory_installs_both_routers_on_returned_application(self):
         original_lifespan = object()
-        from fastapi import FastAPI
         host_app = FastAPI()
         host_app.router.lifespan_context = original_lifespan
         host_app.router.routes[:] = ['spa']

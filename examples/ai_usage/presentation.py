@@ -1,4 +1,5 @@
 """Render a complete personal usage response without exposing raw ledger rows."""
+from __future__ import annotations
 
 from decimal import Decimal
 from zoneinfo import ZoneInfo

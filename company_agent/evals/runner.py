@@ -5,20 +5,22 @@ identity, schema and budget checks before any provider operation.
 """
 from __future__ import annotations
 
-from contextlib import AsyncExitStack
-from contextvars import ContextVar
-from datetime import datetime, timezone
-from functools import wraps
 import json
 import logging
 import math
 import os
-from pathlib import Path
 import tempfile
+from contextlib import AsyncExitStack
+from contextvars import ContextVar
+from datetime import datetime
+from datetime import timezone
+from functools import wraps
+from pathlib import Path
 from threading import RLock
 
-from examples.shared.runtime.database import application_database_pools
+import company_agent.evals.sandbox as _sandbox_imports
 from company_agent.runtime.models import close_model
+from examples.shared.runtime.database import application_database_pools
 
 logger = logging.getLogger(__name__)
 _current = ContextVar('evaluation_run', default=None)
@@ -74,8 +76,10 @@ def write_json(path, value):
     data = json.dumps(value, ensure_ascii=False, indent=2) + '\n'
     temporary = None
     try:
-        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
-                                         prefix='.' + path.name + '.', delete=False) as stream:
+        with tempfile.NamedTemporaryFile(
+            mode='w', encoding='utf-8', dir=path.parent,
+            prefix='.' + path.name + '.', delete=False,
+        ) as stream:
             temporary = Path(stream.name)
             stream.write(data)
             stream.flush()
@@ -159,9 +163,8 @@ def track_report(path, report):
 
 
 def own_sandbox(dsn):
-    from company_agent.evals.sandbox import isolated_schemas
 
     run = _current.get()
     if run is None:
         raise RuntimeError('Evaluation sandboxes require the evaluation runner.')
-    return run.stack.enter_context(isolated_schemas(dsn))
+    return run.stack.enter_context(_sandbox_imports.isolated_schemas(dsn))

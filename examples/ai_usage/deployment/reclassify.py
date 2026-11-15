@@ -12,7 +12,9 @@ import json
 import os
 import socket
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,13 +23,16 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from examples.ai_usage.config import AiUsageSettings
-from examples.ai_usage.services.accounting import (
-    accounting_owner,
-    is_document_key,
-    log_metadata,
-    unattributed_category,
-)
-from examples.shared.config import config_path, read_services
+from examples.ai_usage.services.accounting import accounting_owner
+from examples.ai_usage.services.accounting import is_document_key
+from examples.ai_usage.services.accounting import log_metadata
+from examples.ai_usage.services.accounting import unattributed_category
+from examples.shared.config import config_path
+from examples.shared.config import read_services
+from examples.shared.runtime.modules import ModuleReference
+
+_encrypted_serde = ModuleReference('langgraph.checkpoint.serde.encrypted')
+_json_serde = ModuleReference('langgraph.checkpoint.serde.jsonplus')
 
 FINANCIAL_FIELDS = (
     'request_id', 'api_key', 'end_user', 'spend', 'prompt_tokens', 'completion_tokens',
@@ -86,8 +91,8 @@ def proposed_metadata(
 
 def company_response_evidence(web: dict[str, Any]) -> dict[str, list[tuple[str, str]]]:
     """Match server-owned jobs, checkpoint billing identity and response IDs."""
-    from langgraph.checkpoint.serde.encrypted import EncryptedSerializer
-    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+    EncryptedSerializer = _encrypted_serde.attribute('EncryptedSerializer')
+    JsonPlusSerializer = _json_serde.attribute('JsonPlusSerializer')
 
     config = json.loads(Path(web['COMPANY_AGENT_CONFIG']).read_text())
     state = Path(config.get('settings', config)['state_dir'])
@@ -110,9 +115,11 @@ def company_response_evidence(web: dict[str, Any]) -> dict[str, list[tuple[str, 
         for job, kind, blob in cursor.fetchall():
             identity = serde.loads_typed((kind, bytes(blob)))
             if isinstance(identity, dict) and identity.get('owner') == jobs.get(job):
-                pair = (identity.get('owner'), identity.get('subject'))
-                if pair[1] and (job not in owned or owned[job] == {pair}):
-                    billing[job] = pair
+                subject = identity.get('subject')
+                if subject:
+                    pair = (identity.get('owner'), subject)
+                    if job not in owned or owned[job] == {pair}:
+                        billing[job] = pair
         for table in ('checkpoint_blobs', 'checkpoint_writes'):
             cursor.execute(f"SELECT thread_id,type,blob FROM company_agent.{table} WHERE channel='messages'")
             for job, kind, blob in cursor.fetchall():
@@ -144,9 +151,12 @@ def context(root: Path):
     source = config_path(os.getenv('AI_GATEWAY_CONFIG', root / 'config.local.toml'))
     sections = read_services('webui', 'litellm', path=source)
     web, llm = sections['webui'], sections['litellm']
-    linked, foreign = set(), set()
-    with psycopg.connect(settings.admin_database_url.replace('postgresql+asyncpg://', 'postgresql://'),
-                         options='-c default_transaction_read_only=on') as db, db.cursor() as cursor:
+    linked: set[str] = set()
+    foreign: set[str] = set()
+    with psycopg.connect(
+        settings.admin_database_url.replace('postgresql+asyncpg://', 'postgresql://'),
+        options='-c default_transaction_read_only=on',
+    ) as db, db.cursor() as cursor:
         cursor.execute(
             'SELECT i.provider_user_id,u.tenant_id FROM user_identities i JOIN users u ON u.id=i.user_id WHERE i.provider=%s',
             (settings.oidc_identity_provider,),

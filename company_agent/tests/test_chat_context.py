@@ -15,7 +15,6 @@ from langchain_core.messages import AIMessage
 from langchain_core.messages import messages_to_dict
 from langchain_core.messages import ToolMessage
 
-from company_agent.tests.webui_fixture import modules as host_modules
 from company_agent.api.pipe import conversation
 from company_agent.api.pipe import run_pipe
 from company_agent.api.service import Service
@@ -28,6 +27,13 @@ from company_agent.services.files.access import FolderAccess
 from company_agent.tests.test_agent import call
 from company_agent.tests.test_agent import Fixture
 from company_agent.tests.test_multi_agent import RawRoleModel
+from company_agent.tests.webui_fixture import modules as host_modules
+from examples.shared.runtime.modules import ModuleReference
+
+_fixture_postgres_fixture = ModuleReference('company_agent.tests.postgres_fixture')
+_webui_chats = ModuleReference('open_webui.models.chats')
+_webui_files = ModuleReference('open_webui.models.files')
+_webui_provider = ModuleReference('open_webui.storage.provider')
 
 
 def saved_chat():
@@ -126,7 +132,10 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase, Fixture):
         model.subject = 'sub'
         model.http_async_client = types.SimpleNamespace(aclose=AsyncMock())
         model.http_client = types.SimpleNamespace(close=Mock())
-        svc = Service(self.queue, AsyncMock(return_value={'id': 'alice'}), lambda _, model_name=None: model, self.settings)
+        svc = Service(
+            self.queue, AsyncMock(return_value={'id': 'alice'}),
+            lambda _, model_name=None: model, self.settings,
+        )
         await svc.execute(self.queue.claim())
 
     def prior(self, request='a1', owner='alice', chat='chat'):
@@ -137,7 +146,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase, Fixture):
         return key, output
 
     async def test_pipe_uses_owned_branch_even_with_new_attachments(self):
-        from open_webui.models.chats import Chats
+        Chats = _webui_chats.attribute('Chats')
 
         first, _ = self.prior('original-a1')
         self.queue.update(first, status='running')
@@ -169,7 +178,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertTrue(emitter.await_args_list[-1].args[0]['data']['done'])
 
     async def test_pipe_waits_for_execution_and_returns_the_answer_and_downloads(self):
-        from open_webui.models.chats import Chats
+        Chats = _webui_chats.attribute('Chats')
         svc = Service(self.queue, None, lambda _: types.SimpleNamespace(subject='sub'), None)
         with (
             patch('company_agent.api.pipe.verified_user', AsyncMock(return_value={'id': 'alice'})),
@@ -212,7 +221,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertTrue(emitter.await_args.args[0]['data']['done'])
 
     async def test_disconnect_after_acceptance_keeps_job_and_explicit_cancel_stops_it(self):
-        from open_webui.models.chats import Chats
+        Chats = _webui_chats.attribute('Chats')
         svc = Service(self.queue, None, lambda _: types.SimpleNamespace(subject='sub'), None)
         accepted = asyncio.Event()
 
@@ -337,8 +346,8 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase, Fixture):
             self.queue.submit('alice', 'sub', 'chat', 'a2', '繼續', [], [], [{'role': 'user', 'content': 'two'}])
 
     async def test_mixed_uploads_keep_owner_check_dedup_and_central_format_validation(self):
-        from open_webui.models.files import Files
-        from open_webui.storage.provider import Storage
+        Files = _webui_files.attribute('Files')
+        Storage = _webui_provider.attribute('Storage')
 
         key = str(uuid.uuid4())
         path = self.file('upload.txt', b'TEXT')
@@ -367,7 +376,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase, Fixture):
         row = self.queue.get('alice', key)
         self.assertEqual(row['status'], 'done')
         self.assertNotIn('conversation', row['payload'])
-        from company_agent.tests.postgres_fixture import checkpointer
+        checkpointer = _fixture_postgres_fixture.attribute('checkpointer')
         async with checkpointer(self.store) as saver:
             checkpoint = await saver.aget_tuple({'configurable': {'thread_id': row['engine_job']}})
         messages = checkpoint.checkpoint['channel_values']['messages']

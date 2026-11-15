@@ -73,10 +73,14 @@ def content_issue(error, *, metadata=False, group_index=None, repair_attempted=F
     elif message == '行程陣列格式或數量不符。':
         code = 'event_capacity_exceeded'
     elif field and ('所引原文不符' in message or '缺少逐字來源' in message):
-        code = ('event_date_evidence_mismatch' if field[1].endswith('_date') else
-                'event_time_evidence_mismatch' if field[1].endswith('_time') else 'event_fields_unverified')
-    elif message.startswith(('行程欄位缺少有效的來源行號', '行程引用未授權或不存在的附件來源',
-                             '行程來源行號越界', '行程來源只有空白或系統標記', '行程原文包含來源未確認的版面標記')):
+        code = (
+            'event_date_evidence_mismatch' if field[1].endswith('_date') else
+            'event_time_evidence_mismatch' if field[1].endswith('_time') else 'event_fields_unverified'
+        )
+    elif message.startswith((
+        '行程欄位缺少有效的來源行號', '行程引用未授權或不存在的附件來源',
+        '行程來源行號越界', '行程來源只有空白或系統標記', '行程原文包含來源未確認的版面標記',
+    )):
         code = 'event_source_reference_invalid'
     elif event and any(text in message for text in ('缺少欄位來源', '缺少逐字來源', '工地名稱缺少逐字來源')):
         code = 'event_source_reference_invalid'
@@ -88,8 +92,10 @@ def content_issue(error, *, metadata=False, group_index=None, repair_attempted=F
         code = 'event_interval_invalid'
     elif message.startswith(('行事曆語意核對回應格式無效', '行事曆合併對應無效', '非合併行程不得指定合併對象', '合併行程的工程或起訖不一致', '追蹤提醒與原文明定行程不可合併')):
         code = 'calendar_review_invalid'
-    elif message.startswith(('相對期限推估欄位格式不完整', '相對期限的天數', '相對期限推估不能取代',
-                             'AI 追蹤提醒的天數或理由格式無效', 'AI 追蹤提醒缺少可確認的工作原文')):
+    elif message.startswith((
+        '相對期限推估欄位格式不完整', '相對期限的天數', '相對期限推估不能取代',
+        'AI 追蹤提醒的天數或理由格式無效', 'AI 追蹤提醒缺少可確認的工作原文',
+    )):
         code = 'event_fields_unverified'
     if code is None:
         return None

@@ -26,10 +26,14 @@ class Repository:
             (person.owner, person.client),
         ).fetchone()
         if row is None:
-            db.execute('INSERT INTO mcp_grants VALUES(%s,%s,TRUE,%s,%s) ON CONFLICT DO NOTHING',
-                       (person.owner, person.client, uuid.uuid4().hex, time.time()))
-            row = db.execute('SELECT enabled,revision,updated FROM mcp_grants WHERE owner=%s AND client=%s',
-                             (person.owner, person.client)).fetchone()
+            db.execute(
+                'INSERT INTO mcp_grants VALUES(%s,%s,TRUE,%s,%s) ON CONFLICT DO NOTHING',
+                (person.owner, person.client, uuid.uuid4().hex, time.time()),
+            )
+            row = db.execute(
+                'SELECT enabled,revision,updated FROM mcp_grants WHERE owner=%s AND client=%s',
+                (person.owner, person.client),
+            ).fetchone()
         if not row[0]:
             raise ResourceError('grant_revoked', '公司 MCP 存取已撤回，請在帳號與連線重新授權。')
         if row[2] + 30 * 86400 <= time.time():
@@ -48,8 +52,10 @@ class Repository:
 
     def grants(self, owner, clients):
         with self.store.db() as db:
-            rows = {client: (enabled and updated + 30 * 86400 > time.time()) for client, enabled, updated in
-                    db.execute('SELECT client,enabled,updated FROM mcp_grants WHERE owner=%s', (owner,))}
+            rows = {
+                client: (enabled and updated + 30 * 86400 > time.time()) for client, enabled, updated in
+                db.execute('SELECT client,enabled,updated FROM mcp_grants WHERE owner=%s', (owner,))
+            }
         return [{'client_id': client, 'enabled': rows.get(client, True)} for client in clients]
 
     def rate_limit(self, owner):
@@ -70,9 +76,11 @@ class Repository:
             now = time.time()
             # One request ID gives the same workspace, including after the
             # caller loses the HTTP response; never silently rebind it.
-            identifier = hashlib.sha256(json.dumps(
-                [person.owner, person.client, request_id], separators=(',', ':'),
-            ).encode()).hexdigest()
+            identifier = hashlib.sha256(
+                json.dumps(
+                    [person.owner, person.client, request_id], separators=(',', ':'),
+                ).encode(),
+            ).hexdigest()
             old = db.execute('SELECT id FROM mcp_workspaces WHERE id=%s', (identifier,)).fetchone()
             if old:
                 return identifier
@@ -81,11 +89,17 @@ class Repository:
             ).fetchone()[0]
             if count >= 20:
                 raise ResourceError('workspace_limit', '本人的資源工作空間過多，請稍後建立。')
-            db.execute('INSERT INTO jobs(id,owner,status,result,created) VALUES(%s,%s,%s,%s,%s)',
-                       (identifier, person.owner, 'running', '{}', now))
-            db.execute('INSERT INTO mcp_workspaces VALUES(%s,%s,%s,%s,%s,%s,%s)',
-                       (identifier, person.owner, person.subject, person.client, revision,
-                        json.dumps(snapshot), now + duration))
+            db.execute(
+                'INSERT INTO jobs(id,owner,status,result,created) VALUES(%s,%s,%s,%s,%s)',
+                (identifier, person.owner, 'running', '{}', now),
+            )
+            db.execute(
+                'INSERT INTO mcp_workspaces VALUES(%s,%s,%s,%s,%s,%s,%s)',
+                (
+                    identifier, person.owner, person.subject, person.client, revision,
+                    json.dumps(snapshot), now + duration,
+                ),
+            )
         return identifier
 
     def workspace(self, person, identifier, *, allow_expired=False):
@@ -123,9 +137,13 @@ class Repository:
             if count >= 20:
                 raise ResourceError('operation_limit', '待確認操作過多，請先處理既有操作。')
             identifier = uuid.uuid4().hex
-            db.execute('INSERT INTO mcp_operations VALUES(%s,%s,%s,%s,%s,%s,%s,NULL,%s)',
-                       (identifier, person.owner, person.client, workspace, request_id, digest,
-                        json.dumps(payload, ensure_ascii=False), time.time()))
+            db.execute(
+                'INSERT INTO mcp_operations VALUES(%s,%s,%s,%s,%s,%s,%s,NULL,%s)',
+                (
+                    identifier, person.owner, person.client, workspace, request_id, digest,
+                    json.dumps(payload, ensure_ascii=False), time.time(),
+                ),
+            )
         return identifier
 
     def operation(self, owner, identifier, *, client=None):
@@ -140,8 +158,10 @@ class Repository:
 
     def submitted(self, owner, identifier, web_job):
         with self.store.db() as db:
-            db.execute('UPDATE mcp_operations SET web_job=%s WHERE owner=%s AND id=%s',
-                       (web_job, owner, identifier))
+            db.execute(
+                'UPDATE mcp_operations SET web_job=%s WHERE owner=%s AND id=%s',
+                (web_job, owner, identifier),
+            )
 
     def submit_analysis(self, person, identifier, queue):
         operation = self.operation(person.owner, identifier)
@@ -151,8 +171,10 @@ class Repository:
         with self.store.db() as db:
             self.store.lock(db)
             self.grant(person, db=db)
-            old = db.execute('SELECT web_job FROM mcp_operations WHERE owner=%s AND id=%s FOR UPDATE',
-                             (person.owner, identifier)).fetchone()
+            old = db.execute(
+                'SELECT web_job FROM mcp_operations WHERE owner=%s AND id=%s FOR UPDATE',
+                (person.owner, identifier),
+            ).fetchone()
             if old[0]:
                 return old[0]  # Includes failed/interrupted jobs: never auto-replay.
             queue.check_capacity(db, person.owner)
@@ -167,9 +189,13 @@ class Repository:
             db.execute(
                 'INSERT INTO web_jobs(id,owner,subject,chat,request_id,request_hash,status,payload,progress,created,kind) '
                 "VALUES(%s,%s,%s,%s,%s,%s,'queued',%s,'本人已確認，等待公文分析',%s,'mcp_analysis')",
-                (web_job, person.owner, person.subject, 'mcp:' + person.client, identifier, digest,
-                 json.dumps(payload, ensure_ascii=False), time.time()),
+                (
+                    web_job, person.owner, person.subject, 'mcp:' + person.client, identifier, digest,
+                    json.dumps(payload, ensure_ascii=False), time.time(),
+                ),
             )
-            db.execute('UPDATE mcp_operations SET web_job=%s WHERE owner=%s AND id=%s',
-                       (web_job, person.owner, identifier))
+            db.execute(
+                'UPDATE mcp_operations SET web_job=%s WHERE owner=%s AND id=%s',
+                (web_job, person.owner, identifier),
+            )
         return web_job

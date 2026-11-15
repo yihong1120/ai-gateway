@@ -1,8 +1,9 @@
 """Slow reads renew leases; no receipt waits for a processing slot after claim."""
+from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from examples.official_document_workflow.application import output_receipts
@@ -96,7 +97,7 @@ class RepairLeaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(repo.renewals, 12)
         self.assertLessEqual(repo.max_leased, 4)
         self.assertTrue(
-            all(repo.get(str(i), 'owner').state == 'stored' for i in range(12))
+            all(repo.get(str(i), 'owner').state == 'stored' for i in range(12)),
         )
 
     async def test_deadline_records_unavailable_and_leaves_a_retry(self):

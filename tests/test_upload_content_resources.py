@@ -1,13 +1,14 @@
 """WebUI invocations receive the current app's reusable content services."""
 from __future__ import annotations
 
+import unittest
 from pathlib import Path
 from types import SimpleNamespace
-import unittest
 from unittest.mock import patch
 
 from .test_official_document_processor_pipe import PIPE_MODULE as M
-from examples.official_document_workflow.runtime import WorkflowResources, WorkflowSettings
+from examples.official_document_workflow.runtime import WorkflowResources
+from examples.official_document_workflow.runtime import WorkflowSettings
 from examples.official_document_workflow.services.processor import DocumentProcessor
 
 
@@ -21,15 +22,19 @@ class UploadContentResourcesTests(unittest.IsolatedAsyncioTestCase):
 
         request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(workflow=resources)))
         with patch.object(DocumentProcessor, 'process', process):
-            result = await pipe.pipe({'messages': []}, __user__={'id': 'alice'},
-                                     __request__=request, __task__=task)
+            result = await pipe.pipe(
+                {'messages': []}, __user__={'id': 'alice'},
+                __request__=request, __task__=task,
+            )
         self.assertEqual(result, 'completed')
         return captured[0]
 
     async def test_each_upload_uses_current_app_cache_without_mutating_cached_pipe(self):
         pipe = M.Pipe()
-        applications = [WorkflowResources(WorkflowSettings('postgresql://unused', schema, Path('/unused-key')))
-                        for schema in ('first_app', 'second_app')]
+        applications = [
+            WorkflowResources(WorkflowSettings('postgresql://unused', schema, Path('/unused-key')))
+            for schema in ('first_app', 'second_app')
+        ]
         invocations = [await self.invoke(resources, pipe) for resources in applications]
         for resources, invocation in zip(applications, invocations, strict=True):
             self.assertIs(invocation.content_cache, resources.shared_content)

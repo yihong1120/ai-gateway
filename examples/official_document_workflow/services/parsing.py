@@ -1,19 +1,15 @@
 """DocumentParsing responsibilities for the shared document processor."""
-
 from __future__ import annotations
 
 from typing import Any
 
-from examples.official_document_workflow.domain.documents import (
-    CloudDocumentExtraction,
-    CloudExtractionError,
-    CloudSemanticSource,
-    Deadline,
-    ProcessingText,
-)
-
 from .components import ConfiguredService
 from examples.official_document_workflow.domain.calendar.rows import CalendarRows
+from examples.official_document_workflow.domain.documents import CloudDocumentExtraction
+from examples.official_document_workflow.domain.documents import CloudExtractionError
+from examples.official_document_workflow.domain.documents import CloudSemanticSource
+from examples.official_document_workflow.domain.documents import Deadline
+from examples.official_document_workflow.domain.documents import ProcessingText
 
 
 class DocumentParsing(ConfiguredService):

@@ -2,19 +2,25 @@
 from __future__ import annotations
 
 import asyncio
-from examples.official_document_workflow.services.version import workflow_revision
 import json
-from examples.shared.runtime.module_registry import ModuleRegistry
-from .output_receipts import DELETION_REVIEW_NOTICE
-from examples.official_document_workflow.services.output_delivery import output_job
 
+from .output_receipts import DELETION_REVIEW_NOTICE
+from examples.identity.adapters.webui import verified_user
+from examples.official_document_workflow.infrastructure.storage.processing_cache import (
+    upload_outcome,
+)
+from examples.official_document_workflow.runtime import current_resources
+from examples.official_document_workflow.services.output_delivery import output_job
+from examples.official_document_workflow.services.version import workflow_revision
 from examples.shared.runtime.chat import current_turn
 from examples.shared.runtime.chat import wait_for_result
-from examples.shared.runtime.jobs import service as configured_service
 from examples.shared.runtime.io import run_sync
-from examples.identity.adapters.webui import verified_user
-from examples.official_document_workflow.runtime import current_resources
-from examples.official_document_workflow.infrastructure.storage.processing_cache import upload_outcome
+from examples.shared.runtime.jobs import service as configured_service
+from examples.shared.runtime.module_registry import ModuleRegistry
+from examples.shared.runtime.modules import ModuleReference
+
+_webui_chats = ModuleReference('open_webui.models.chats')
+_webui_functions = ModuleReference('open_webui.models.functions')
 
 
 class DocumentInputError(ValueError):
@@ -29,8 +35,8 @@ def source_identity(file):
 
 
 async def submit(pipe, user, metadata, emitter=None):
-    from open_webui.models.chats import Chats
-    from open_webui.models.functions import Functions
+    Chats = _webui_chats.attribute('Chats')
+    Functions = _webui_functions.attribute('Functions')
 
     owner = (await verified_user((user or {}).get('id')))['id']
     chat_id, message_id = metadata.get('chat_id'), metadata.get('message_id')
@@ -76,7 +82,7 @@ pipe_module = _modules.acquire
 
 
 async def execute(svc, row):
-    from open_webui.models.functions import Functions
+    Functions = _webui_functions.attribute('Functions')
 
     owner, key, payload = row['owner'], row['id'], row['payload']
     user = await svc.identity(owner)
@@ -124,10 +130,10 @@ async def execute(svc, row):
 
         async def delete(item):
             deletion = await original_delete(item)
-            if getattr(deletion,'state',None) == 'deleted':
+            if getattr(deletion, 'state', None) == 'deleted':
                 result['files'] = [file for file in result['files'] if file['id'] != item.id]
             else:
-                result.setdefault('notices',[]).append(DELETION_REVIEW_NOTICE)
+                result.setdefault('notices', []).append(DELETION_REVIEW_NOTICE)
             await persist()
             return deletion
 

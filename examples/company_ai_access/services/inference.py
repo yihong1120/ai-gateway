@@ -1,13 +1,11 @@
 """Bounded inference forwarding with sanitized errors and stream cleanup."""
-
 from __future__ import annotations
 
 import json
 
-from anyio import CancelScope
-
-from fastapi.responses import StreamingResponse
 import httpx
+from anyio import CancelScope
+from fastapi.responses import StreamingResponse
 
 from examples.company_ai_access.errors import error
 

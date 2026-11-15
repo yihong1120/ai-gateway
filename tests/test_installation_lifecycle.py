@@ -1,21 +1,26 @@
 """Host installation is atomic and idempotent before and after startup."""
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 import unittest
-from fastapi import FastAPI, APIRouter
+from contextlib import asynccontextmanager
+
+from fastapi import APIRouter
+from fastapi import FastAPI
 from starlette.middleware.base import BaseHTTPMiddleware
+
 from examples.shared.runtime.installation import install_once
 
 
 class InstallationTests(unittest.IsolatedAsyncioTestCase):
     async def test_repeat_install_starts_one_listener_and_leaves_other_apps_independent(self):
         starts, stops = [], []
+
         def install(app):
             with install_once(app, 'feature_installed') as active:
                 if not active:
                     return
                 original = app.router.lifespan_context
+
                 @asynccontextmanager
                 async def lifespan(current):
                     async with original(current):
@@ -40,8 +45,8 @@ class InstallationTests(unittest.IsolatedAsyncioTestCase):
             install(one)
         async with two.router.lifespan_context(two):
             pass
-        self.assertEqual(starts, [one,two])
-        self.assertEqual(stops, [one,two])
+        self.assertEqual(starts, [one, two])
+        self.assertEqual(stops, [one, two])
 
     async def test_partial_install_rolls_back_nested_flags_routes_and_middleware(self):
         app = FastAPI()

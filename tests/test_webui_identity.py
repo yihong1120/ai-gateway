@@ -6,7 +6,9 @@ import sys
 import unittest
 from pathlib import Path
 from types import ModuleType
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock
+from unittest.mock import Mock
+from unittest.mock import patch
 
 from fastapi import HTTPException
 
@@ -48,4 +50,7 @@ assert callable(verified_user)
 assert not any(name == 'open_webui' or name.startswith('open_webui.') for name in sys.modules)
 assert not any(name.startswith(('examples.openwebui', 'examples.identity.database')) for name in sys.modules)
 """
-        subprocess.run([sys.executable, '-I', '-c', code, str(root)], check=True, capture_output=True, text=True, timeout=30)
+        subprocess.run(
+            [sys.executable, '-I', '-c', code, str(root)],
+            check=True, capture_output=True, text=True, timeout=30,
+        )

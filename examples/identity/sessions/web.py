@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from examples.identity.runtime import get_settings
-
 import os
 from typing import cast
 from typing import Literal
@@ -12,6 +10,7 @@ from fastapi import Request
 from fastapi import Response
 from fastapi.responses import RedirectResponse
 
+from examples.identity.runtime import get_settings
 from examples.identity.schemas.auth import TokenPair
 from examples.identity.schemas.auth import TokenPairData
 

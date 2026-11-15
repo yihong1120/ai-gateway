@@ -1,5 +1,4 @@
 """DocumentExports responsibilities for the shared document processor."""
-
 from __future__ import annotations
 
 import asyncio
@@ -8,36 +7,51 @@ import io
 import logging
 import re
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime
+from datetime import timezone
 from functools import lru_cache
-from importlib.metadata import PackageNotFoundError, version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
-from open_webui.models.files import FileForm, FileModel, Files
+from open_webui.models.files import FileForm
+from open_webui.models.files import FileModel
+from open_webui.models.files import Files
 from open_webui.storage.provider import Storage
 
-from examples.official_document_workflow.domain.documents import (
-    DOCX_EMU_PER_POINT,
-    DOCX_UNIFIED_FONT,
-    RASTER_LAYOUT_DOCX_DPI,
-    OcrLayoutPage,
-    OfficialDocument,
-    PreparedDocument,
-    ProcessingError,
-    OutputNotWritten,
-    OutputUncertain,
-)
+from examples.official_document_workflow.domain.documents import DOCX_EMU_PER_POINT
+from examples.official_document_workflow.domain.documents import DOCX_UNIFIED_FONT
+from examples.official_document_workflow.domain.documents import OcrLayoutPage
+from examples.official_document_workflow.domain.documents import OfficialDocument
+from examples.official_document_workflow.domain.documents import OutputNotWritten
+from examples.official_document_workflow.domain.documents import OutputUncertain
+from examples.official_document_workflow.domain.documents import PreparedDocument
+from examples.official_document_workflow.domain.documents import ProcessingError
+from examples.official_document_workflow.domain.documents import RASTER_LAYOUT_DOCX_DPI
+from examples.shared.runtime.modules import ModuleReference
+
+_PIL = ModuleReference('PIL')
+_docx = ModuleReference('docx')
+_docx_enum_section = ModuleReference('docx.enum.section')
+_docx_shared = ModuleReference('docx.shared')
+_workflow_components = ModuleReference('examples.official_document_workflow.services.components')
+_workflow_file_access = ModuleReference('examples.official_document_workflow.services.file_access')
+_workflow_output_deletion = ModuleReference('examples.official_document_workflow.services.output_deletion')
+_workflow_output_delivery = ModuleReference('examples.official_document_workflow.services.output_delivery')
+_shared_concurrency = ModuleReference('examples.shared.runtime.concurrency')
+_shared_io = ModuleReference('examples.shared.runtime.io')
+_pymupdf = ModuleReference('pymupdf')
 
 logger = logging.getLogger(__name__)
 
 
-from .components import ConfiguredService
-from .output_delivery import FileOutput, OutputDelivery
-from .file_access import FileAccess
-from .output_deletion import OutputDeletion
-from examples.shared.runtime.io import run_sync
-from examples.shared.runtime.concurrency import run_ocr
+ConfiguredService = _workflow_components.attribute('ConfiguredService')
+FileOutput, OutputDelivery = _workflow_output_delivery.attributes('FileOutput', 'OutputDelivery')
+FileAccess = _workflow_file_access.attribute('FileAccess')
+OutputDeletion = _workflow_output_deletion.attribute('OutputDeletion')
+run_sync = _shared_io.attribute('run_sync')
+run_ocr = _shared_concurrency.attribute('run_ocr')
 
 
 WORD_RENDER_REVISION = 'positioned-editable-docx-v1'
@@ -129,11 +143,11 @@ class DocumentExports(ConfiguredService):
         """
         self.ocr._validate_pdf_page_count(source_path)
         try:
-            import pymupdf
-            from docx import Document as WordDocument
-            from docx.enum.section import WD_SECTION_START
-            from docx.shared import Emu, Pt
-            from PIL import Image
+            pymupdf = _pymupdf.load()
+            WordDocument = _docx.attribute('Document')
+            WD_SECTION_START = _docx_enum_section.attribute('WD_SECTION_START')
+            Emu, Pt = _docx_shared.attributes('Emu', 'Pt')
+            Image = _PIL.attribute('Image')
         except ImportError as exc:
             raise ProcessingError('伺服器缺少建立可編輯版面 DOCX 所需的套件') from exc
 
@@ -317,8 +331,10 @@ class DocumentExports(ConfiguredService):
             key, job = FileOutput.identity(user_id, source_file_id, kind, display_name, output_id)
         except Exception as error:
             raise OutputNotWritten('輸出內容尚未寫入。') from error
-        output = FileOutput(key, user_id, display_name, digest, size, source_file_id, kind, content_type,
-                            stream, extra_metadata or {}, job)
+        output = FileOutput(
+            key, user_id, display_name, digest, size, source_file_id, kind, content_type,
+            stream, extra_metadata or {}, job,
+        )
         return await self.delivery.store(output)
 
     async def _write_file(self, output):
@@ -330,11 +346,17 @@ class DocumentExports(ConfiguredService):
                 **output.metadata,
                 'name': output.name, 'content_type': output.content_type, 'size': output.size,
                 'file_hash': output.sha256,
-                'data': {'generated_by': 'official_document_processor_pipe', 'kind': output.kind,
-                         'source_file_id': output.source, 'output_job_id': output.job},
+                'data': {
+                    'generated_by': 'official_document_processor_pipe', 'kind': output.kind,
+                    'source_file_id': output.source, 'output_job_id': output.job,
+                },
             }
-            item = await Files.insert_new_file(output.owner, FileForm(id=output.id, filename=output.name,
-                path=storage_path, data={}, meta=metadata))
+            item = await Files.insert_new_file(
+                output.owner, FileForm(
+                    id=output.id, filename=output.name,
+                    path=storage_path, data={}, meta=metadata,
+                ),
+            )
             if item is None:
                 raise OutputUncertain('下載紀錄寫入結果需要核對。')
             return item
@@ -347,8 +369,8 @@ class DocumentExports(ConfiguredService):
         return await self.files.find(record)
 
     async def delete_output(self, file: FileModel):
-        owner = getattr(file,'user_id',None) or self._usage_owner
-        return await self.deletion.delete(file.id,owner)
+        owner = getattr(file, 'user_id', None) or self._usage_owner
+        return await self.deletion.delete(file.id, owner)
 
     @staticmethod
     def download_link(request: Any, file_id: str, display_name: str) -> str:

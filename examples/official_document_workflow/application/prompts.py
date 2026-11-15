@@ -221,8 +221,10 @@ historical/cancelled/out_of_scope 至少提供 relevance 證據，其餘不適�
 
 
 def preparation_prompt(today):
-    clock = (f'今天是台北日期 {today.isoformat()}。' if today is not None else
-             '只依原文提出相對提前天數與準備內容；個人處理日、收文日與提醒日期由程式另行核對，不提供個人日期。')
+    clock = (
+        f'今天是台北日期 {today.isoformat()}。' if today is not None else
+        '只依原文提出相對提前天數與準備內容；個人處理日、收文日與提醒日期由程式另行核對，不提供個人日期。'
+    )
     return f"""
 本次另需依公文與附件內容規劃事前準備。{clock}
 在每個 events 項目的 preparation_reminders 只輸出必要且不同的具體準備步驟，沒有需要時輸出空陣列。

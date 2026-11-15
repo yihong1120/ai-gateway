@@ -10,15 +10,14 @@ from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+from unittest.mock import patch
 
 from examples.ai_usage.config import AiUsageSettings
-from examples.ai_usage.deployment.reclassify import (
-    apply_or_restore,
-    context,
-    fingerprint,
-    proposed_metadata,
-)
+from examples.ai_usage.deployment.reclassify import apply_or_restore
+from examples.ai_usage.deployment.reclassify import context
+from examples.ai_usage.deployment.reclassify import fingerprint
+from examples.ai_usage.deployment.reclassify import proposed_metadata
 from tests.test_ai_usage_service import _settings
 
 
@@ -83,8 +82,10 @@ class ReclassificationTests(TestCase):
     def test_context_uses_the_configured_read_only_directory_and_one_source_snapshot(self):
         module = 'examples.ai_usage.deployment.reclassify'
         tenant = '11111111-1111-4111-8111-111111111111'
-        settings = replace(self.settings, gateway_tenant_id=tenant,
-                           admin_database_url='postgresql+asyncpg://directory.test/accounts')
+        settings = replace(
+            self.settings, gateway_tenant_id=tenant,
+            admin_database_url='postgresql+asyncpg://directory.test/accounts',
+        )
         with TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / 'config.local.toml'
@@ -101,8 +102,10 @@ class ReclassificationTests(TestCase):
         self.assertEqual(web, {'DATABASE_URL': 'web-db'})
         self.assertEqual(ledger, {'LITELLM_DATABASE_URL': 'ledger-db'})
         self.assertEqual((linked, foreign), ({'linked'}, {'foreign'}))
-        connect.assert_called_once_with('postgresql://directory.test/accounts',
-                                        options='-c default_transaction_read_only=on')
+        connect.assert_called_once_with(
+            'postgresql://directory.test/accounts',
+            options='-c default_transaction_read_only=on',
+        )
         self.assertEqual(cursor.execute.call_args.args[1], ('keycloak',))
 
     def test_context_rejects_a_missing_explicit_directory_before_database_access(self):

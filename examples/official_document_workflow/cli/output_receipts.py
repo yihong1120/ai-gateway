@@ -3,22 +3,24 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import asdict
 import json
 import os
-from pathlib import Path
 import stat
+from dataclasses import asdict
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
-from examples.shared.runtime.database import application_database_pools
-from examples.official_document_workflow.application.output_review import WebUIOutputVerifier
 import psycopg
 from psycopg import sql
-from examples.official_document_workflow.infrastructure.storage.automation_store import AutomationStore, key_file
+
+from examples.official_document_workflow.application.output_review import WebUIOutputVerifier
+from examples.official_document_workflow.infrastructure.storage.automation_store import AutomationStore
+from examples.official_document_workflow.infrastructure.storage.automation_store import key_file
 from examples.official_document_workflow.infrastructure.storage.database import configuration
 from examples.official_document_workflow.infrastructure.storage.migrations import VERSION
 from examples.official_document_workflow.infrastructure.storage.output_receipts import PostgresOutputReceipts
+from examples.shared.runtime.database import application_database_pools
 
 
 def _token(path):
@@ -49,7 +51,11 @@ def existing_store():
         exists = db.execute('SELECT to_regclass(%s)', (schema + '.schema_migrations',)).fetchone()[0]
         if not exists:
             raise ValueError('Initialize the document service before using receipt tools.')
-        version = db.execute(sql.SQL('SELECT max(version) FROM {}.schema_migrations').format(sql.Identifier(schema))).fetchone()[0]
+        version = db.execute(
+            sql.SQL('SELECT max(version) FROM {}.schema_migrations').format(
+                sql.Identifier(schema),
+            ),
+        ).fetchone()[0]
         if version != VERSION:
             raise ValueError('Upgrade the document service before using receipt tools.')
     return AutomationStore(key)
@@ -65,20 +71,28 @@ async def execute(args):
         if record is None:
             raise ValueError('No receipt exists for this owner and output ID.')
         if args.command == 'inspect':
-            return {'receipt': asdict(record),
-                    'verification': await asyncio.to_thread(repository.review_status, record), 'reviews': await asyncio.to_thread(repository.reviews, record.id, record.owner)}
+            return {
+                'receipt': asdict(record),
+                'verification': await asyncio.to_thread(repository.review_status, record), 'reviews': await asyncio.to_thread(repository.reviews, record.id, record.owner),
+            }
         if args.command == 'annotate':
-            review = await asyncio.to_thread(repository.record_review, record, actor=args.actor, method='manual',
-                                             outcome=args.outcome, note=args.note)
+            review = await asyncio.to_thread(
+                repository.record_review, record, actor=args.actor, method='manual',
+                outcome=args.outcome, note=args.note,
+            )
             return {'output_id': record.id, 'review_id': review, 'state': record.state, 'write_replayed': False}
         origin, token = _origin(args.webui_url), _token(args.token_file)
-        async with httpx.AsyncClient(base_url=origin, headers={'Authorization': 'Bearer ' + token},
-                                    trust_env=False, follow_redirects=False, timeout=10) as client:
+        async with httpx.AsyncClient(
+            base_url=origin, headers={'Authorization': 'Bearer ' + token},
+            trust_env=False, follow_redirects=False, timeout=10,
+        ) as client:
             verification = await WebUIOutputVerifier(client).verify(record)
         result = {'output_id': record.id, **asdict(verification), 'applied': False, 'write_replayed': False}
         if args.command == 'reconcile':
-            result['review_id'] = await asyncio.to_thread(repository.record_review, record,
-                actor=verification.actor, method='webui_sha256', outcome=verification.outcome, proof=verification.proof)
+            result['review_id'] = await asyncio.to_thread(
+                repository.record_review, record,
+                actor=verification.actor, method='webui_sha256', outcome=verification.outcome, proof=verification.proof,
+            )
             result['applied'] = verification.outcome == 'verified'
         return result
 
@@ -86,20 +100,30 @@ async def execute(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
-    for command in ('list','inspect','verify','reconcile','annotate'):
+    for command in ('list', 'inspect', 'verify', 'reconcile', 'annotate'):
         item = commands.add_parser(command)
         item.add_argument('--owner', required=True)
         if command == 'list':
-            item.add_argument('--state', choices=('writing','unknown','not_written','stored','deleting','delete_unknown','deleted'))
-            item.add_argument('--limit', type=int, default=50, choices=range(1,101))
+            item.add_argument(
+                '--state', choices=(
+                    'writing', 'unknown', 'not_written',
+                    'stored', 'deleting', 'delete_unknown', 'deleted',
+                ),
+            )
+            item.add_argument('--limit', type=int, default=50, choices=range(1, 101))
         else:
             item.add_argument('--output-id', required=True)
-        if command in {'verify','reconcile'}:
+        if command in {'verify', 'reconcile'}:
             item.add_argument('--webui-url', required=True)
             item.add_argument('--token-file', type=Path, required=True)
         if command == 'annotate':
             item.add_argument('--actor', required=True)
-            item.add_argument('--outcome', choices=('needs_review','reported_missing','investigating'), default='needs_review')
+            item.add_argument(
+                '--outcome', choices=(
+                    'needs_review', 'reported_missing',
+                    'investigating',
+                ), default='needs_review',
+            )
             item.add_argument('--note', required=True)
     args = parser.parse_args()
     try:

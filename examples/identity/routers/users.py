@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from examples.identity.runtime import get_settings
-
 from typing import Annotated
 from typing import cast
 
@@ -15,18 +13,46 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from examples.identity.database import get_db
-from examples.identity.providers.mode import require_local_password_management
-from examples.identity.models import User
-from examples.identity.models import USER_STATUS_PENDING_ADMIN_APPROVAL
-from examples.identity.models import USER_STATUS_REJECTED
-from examples.identity.redis_pool import get_redis_pool
+import examples.identity.runtime as _runtime_imports
 from examples.identity.accounts.access import invalidate_effective_site_cache
+from examples.identity.accounts.management import approve_signup_user
+from examples.identity.accounts.management import ensure_user_management_scope
+from examples.identity.accounts.management import get_group_or_404
+from examples.identity.accounts.management import list_all_users_for_operator
+from examples.identity.accounts.management import list_users_for_operator
+from examples.identity.accounts.management import load_user_read
+from examples.identity.accounts.management import pending_user_review_read
+from examples.identity.accounts.management import register_signup_user
+from examples.identity.accounts.management import resolve_target_group_id
+from examples.identity.accounts.password_policy import validate_password_minimum
+from examples.identity.accounts.users import create_oidc_managed_user
+from examples.identity.accounts.users import create_or_update_profile
+from examples.identity.accounts.users import create_user
+from examples.identity.accounts.users import delete_user
+from examples.identity.accounts.users import ensure_keycloak_subject_for_user
+from examples.identity.accounts.users import get_user_by_id
+from examples.identity.accounts.users import set_user_status
+from examples.identity.accounts.users import update_password
+from examples.identity.accounts.users import update_username
+from examples.identity.authorization.sites import list_site_ids_for_group
+from examples.identity.authorization.sites import seed_site_notification_preferences
+from examples.identity.database import get_db
 from examples.identity.dependencies import _NamedRoleUser
 from examples.identity.dependencies import ensure_not_super
 from examples.identity.dependencies import get_current_user
 from examples.identity.dependencies import is_super_admin
 from examples.identity.dependencies import require_admin
+from examples.identity.models import User
+from examples.identity.models import USER_STATUS_PENDING_ADMIN_APPROVAL
+from examples.identity.models import USER_STATUS_REJECTED
+from examples.identity.providers.keycloak_users import delete_keycloak_user
+from examples.identity.providers.keycloak_users import provision_keycloak_user
+from examples.identity.providers.keycloak_users import reset_keycloak_password
+from examples.identity.providers.keycloak_users import set_keycloak_user_enabled
+from examples.identity.providers.keycloak_users import update_keycloak_user
+from examples.identity.providers.mode import require_local_password_management
+from examples.identity.redis_pool import get_redis_pool
+from examples.identity.runtime import get_settings
 from examples.identity.schemas.user import AdminUserApproval
 from examples.identity.schemas.user import ApproveUserSignup
 from examples.identity.schemas.user import PendingUserReviewPage
@@ -45,36 +71,7 @@ from examples.identity.schemas.user import UserPage
 from examples.identity.schemas.user import UserProfileUpdate
 from examples.identity.schemas.user import UserRead
 from examples.identity.schemas.user import UserSignup
-from examples.identity.providers.keycloak_users import delete_keycloak_user
-from examples.identity.providers.keycloak_users import provision_keycloak_user
-from examples.identity.providers.keycloak_users import reset_keycloak_password
-from examples.identity.providers.keycloak_users import set_keycloak_user_enabled
-from examples.identity.providers.keycloak_users import update_keycloak_user
-from examples.identity.accounts.password_policy import validate_password_minimum
-from examples.identity.authorization.sites import (
-    list_site_ids_for_group,
-)
-from examples.identity.authorization.sites import (
-    seed_site_notification_preferences,
-)
-from examples.identity.accounts.management import approve_signup_user
-from examples.identity.accounts.management import ensure_user_management_scope
-from examples.identity.accounts.management import get_group_or_404
-from examples.identity.accounts.management import list_all_users_for_operator
-from examples.identity.accounts.management import list_users_for_operator
-from examples.identity.accounts.management import load_user_read
-from examples.identity.accounts.management import pending_user_review_read
-from examples.identity.accounts.management import register_signup_user
-from examples.identity.accounts.management import resolve_target_group_id
-from examples.identity.accounts.users import create_oidc_managed_user
-from examples.identity.accounts.users import create_or_update_profile
-from examples.identity.accounts.users import create_user
-from examples.identity.accounts.users import delete_user
-from examples.identity.accounts.users import ensure_keycloak_subject_for_user
-from examples.identity.accounts.users import get_user_by_id
-from examples.identity.accounts.users import set_user_status
-from examples.identity.accounts.users import update_password
-from examples.identity.accounts.users import update_username
+# Token revocation is independent of the profile snapshot.
 
 router = APIRouter(tags=['user-mgmt'])
 
@@ -512,10 +509,7 @@ async def update_my_pwd(
         raise HTTPException(401, 'Old password incorrect.')
 
     await update_password(me, payload.new_password, db)
-
-    # Token revocation is independent of the profile snapshot.
-    from examples.identity.runtime import get_identity
-    await get_identity().local_sessions.revoke_all(redis_pool,me.username)
+    await _runtime_imports.get_identity().local_sessions.revoke_all(redis_pool, me.username)
 
     return {'message': 'Password changed successfully, please log in again.'}
 

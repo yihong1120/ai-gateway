@@ -6,17 +6,16 @@ Per-request context budgets are not total file/text acceptance limits.
 """
 from __future__ import annotations
 
-from examples.official_document_workflow.domain import documents as module
-
 import json
 import re
 from functools import partial
 
 from .prompts import SCAN_PROMPT
-from examples.official_document_workflow.services.analysis_reuse import analyze_content
+from examples.official_document_workflow.domain import documents as module
 from examples.official_document_workflow.domain.calendar.contracts import EVIDENCE_SCAN_SCHEMA
 from examples.official_document_workflow.domain.calendar.contracts import require_tentative_schedule_decision
 from examples.official_document_workflow.domain.validation import ContentValidationError
+from examples.official_document_workflow.services.analysis_reuse import analyze_content
 
 
 def evidence_selection(answer, ids):

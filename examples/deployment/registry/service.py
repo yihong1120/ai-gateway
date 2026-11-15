@@ -12,16 +12,16 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .schemas import MAX_REGISTRY_TTL_SECONDS
+from .schemas import REGISTRY_SCHEMA_VERSION
+from examples.deployment.registry.enrollments import enforce_enrollment_exchange_rate_limit
+from examples.deployment.registry.enrollments import enrollment_code_verifier_hash
+from examples.deployment.registry.enrollments import redeem_enrollment_code
 from examples.identity.deployment_context import canonical_api_base_url
-from examples.identity.models import DEPLOYMENT_STATUS_ACTIVE, TENANT_STATUS_ACTIVE, Deployment
+from examples.identity.models import Deployment
+from examples.identity.models import DEPLOYMENT_STATUS_ACTIVE
+from examples.identity.models import TENANT_STATUS_ACTIVE
 from examples.identity.runtime import get_settings
-from examples.deployment.registry.enrollments import (
-    enforce_enrollment_exchange_rate_limit,
-    enrollment_code_verifier_hash,
-    redeem_enrollment_code,
-)
-
-from .schemas import MAX_REGISTRY_TTL_SECONDS, REGISTRY_SCHEMA_VERSION
 
 
 async def exchange_enrollment_code(
@@ -49,21 +49,21 @@ async def exchange_enrollment_code(
         # The client can wait for the Redis fixed window rather than retrying.
         raise HTTPException(
             status_code=429,
-            detail={"code": "enrollment_rate_limited"},
-            headers={"Retry-After": str(retry_after)},
+            detail={'code': 'enrollment_rate_limited'},
+            headers={'Retry-After': str(retry_after)},
         )
 
     # Redemption holds the database lock and consumes a valid code once.
     result = await redeem_enrollment_code(db, verifier_hash=verifier_hash)
-    if result.status == "invalid":
+    if result.status == 'invalid':
         raise HTTPException(
             status_code=403,
-            detail={"code": "invalid_enrollment_code"},
+            detail={'code': 'invalid_enrollment_code'},
         )
-    if result.status != "redeemed" or result.deployment_id is None:
+    if result.status != 'redeemed' or result.deployment_id is None:
         raise HTTPException(
             status_code=410,
-            detail={"code": "enrollment_unavailable_or_expired"},
+            detail={'code': 'enrollment_unavailable_or_expired'},
         )
     return result.deployment_id
 
@@ -81,7 +81,7 @@ async def get_deployment_registry_document(
     if deployment is None:
         raise HTTPException(
             status_code=404,
-            detail={"code": "deployment_not_found"},
+            detail={'code': 'deployment_not_found'},
         )
     if (
         deployment.status != DEPLOYMENT_STATUS_ACTIVE
@@ -89,7 +89,7 @@ async def get_deployment_registry_document(
     ):
         raise HTTPException(
             status_code=410,
-            detail={"code": "deployment_revoked"},
+            detail={'code': 'deployment_revoked'},
         )
     # Signing happens only after deployment and tenant status are confirmed.
     document = build_registry_document(
@@ -112,59 +112,59 @@ def build_registry_document(
     # Restrict document lifetime to the public Registry contract.
     if not 0 < ttl_seconds <= MAX_REGISTRY_TTL_SECONDS:
         raise ValueError(
-            "deployment registry signing configuration is invalid",
+            'deployment registry signing configuration is invalid',
         )
     now: int = int(time.time()) if issued_at is None else issued_at
     if now < 0:
         raise ValueError(
-            "deployment registry signing configuration is invalid",
+            'deployment registry signing configuration is invalid',
         )
     # Sign only the canonical base URL that clients will subsequently use.
     api_base_url: str = canonical_api_base_url(deployment.api_base_url)
     if api_base_url != deployment.api_base_url or deployment.config_revision < 1:
         raise ValueError(
-            "deployment registry configuration is invalid",
+            'deployment registry configuration is invalid',
         )
     # Assemble all public fields before separating the signable payload.
     document: dict[str, object] = {
-        "schema_version": REGISTRY_SCHEMA_VERSION,
-        "deployment_id": str(deployment.id),
-        "tenant_id": str(deployment.tenant_id),
-        "api_base_url": api_base_url,
-        "config_revision": deployment.config_revision,
-        "issued_at": now,
-        "expires_at": now + ttl_seconds,
-        "key_id": key_id,
+        'schema_version': REGISTRY_SCHEMA_VERSION,
+        'deployment_id': str(deployment.id),
+        'tenant_id': str(deployment.tenant_id),
+        'api_base_url': api_base_url,
+        'config_revision': deployment.config_revision,
+        'issued_at': now,
+        'expires_at': now + ttl_seconds,
+        'key_id': key_id,
     }
     if not private_key_pem.strip():
         raise ValueError(
-            "deployment registry signing key is not configured",
+            'deployment registry signing key is not configured',
         )
     # Deployment secrets may preserve newlines as literal escape sequences.
     private_key = load_pem_private_key(
-        private_key_pem.strip().replace("\\n", "\n").encode("utf-8"),
+        private_key_pem.strip().replace('\\n', '\n').encode('utf-8'),
         password=None,
     )
     if not isinstance(private_key, Ed25519PrivateKey):
-        raise ValueError("deployment registry signing key must be Ed25519")  # noqa: TRY004 — invalid key configuration
+        raise ValueError('deployment registry signing key must be Ed25519')  # noqa: TRY004 — invalid key configuration
     # Key selection and the signature itself are deliberately not self-signed.
     signed_document: dict[str, object] = document.copy()
-    del signed_document["key_id"]
+    del signed_document['key_id']
     # Canonical JSON ensures every client signs and verifies identical bytes.
     signature = private_key.sign(
         json.dumps(
             signed_document,
             ensure_ascii=False,
-            separators=(",", ":"),
+            separators=(',', ':'),
             sort_keys=True,
-        ).encode("utf-8"),
+        ).encode('utf-8'),
     )
     # Base64url carries binary signature bytes safely in the JSON document.
-    document["signature"] = (
+    document['signature'] = (
         base64.urlsafe_b64encode(signature)
         .decode(
-            "ascii",
+            'ascii',
         )
-        .rstrip("=")
+        .rstrip('=')
     )
     return document

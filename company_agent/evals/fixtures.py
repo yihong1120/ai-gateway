@@ -1,8 +1,11 @@
 """Synthetic workbook shared by evaluation scenarios and office regressions."""
+from __future__ import annotations
+
 import io
 
 from openpyxl import Workbook
-from openpyxl.chart import BarChart, Reference
+from openpyxl.chart import BarChart
+from openpyxl.chart import Reference
 
 
 def workbook():
@@ -27,4 +30,3 @@ def workbook():
     out = io.BytesIO()
     b.save(out)
     return out.getvalue()
-

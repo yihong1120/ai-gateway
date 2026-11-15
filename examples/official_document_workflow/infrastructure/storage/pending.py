@@ -4,19 +4,22 @@ Claimed rows remain unavailable after a worker crash: an ambiguous CSV write
 must never be silently replayed. A fresh upload replaces the generation, while
 an ordinary reconnect can resume any unclaimed continuation until its expiry.
 """
-
 from __future__ import annotations
 
 import time
 
 from pydantic import TypeAdapter
 
-from examples.official_document_workflow.application.pending import (
-    FINGERPRINT,
-    TTL,
-    PendingClarification,
-)
+from .output_receipts import PostgresOutputReceipts
+from examples.official_document_workflow.application.pending import FINGERPRINT
+from examples.official_document_workflow.application.pending import PendingClarification
+from examples.official_document_workflow.application.pending import TTL
 from examples.official_document_workflow.domain.documents import PendingCalendarReminder
+from examples.shared.runtime.modules import ModuleReference
+
+_workflow_automation_store = ModuleReference(
+    'examples.official_document_workflow.infrastructure.storage.automation_store',
+)
 
 PAYLOAD = TypeAdapter(PendingCalendarReminder)
 
@@ -24,7 +27,6 @@ PAYLOAD = TypeAdapter(PendingCalendarReminder)
 class PostgresClarifications:
     def __init__(self, backend=None):
         self._backend = backend
-        from .output_receipts import PostgresOutputReceipts
 
         self.outputs = PostgresOutputReceipts(lambda: self.backend)
 
@@ -32,7 +34,7 @@ class PostgresClarifications:
     def backend(self):
         if self._backend is not None:
             return self._backend
-        from .automation_store import store
+        store = _workflow_automation_store.attribute('store')
         return store()
 
     def _record(self, scope, row):

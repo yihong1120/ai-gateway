@@ -1,13 +1,17 @@
 """One configured local token issuer; Redis performs rotation and revocation atomically."""
-
 from __future__ import annotations
+
 import datetime
 from uuid import uuid4
+
 import jwt
 from fastapi import HTTPException
-from examples.identity.sessions.jwt import access_token_subject_from_payload, refresh_token_subject_from_payload
+
+from examples.identity.sessions.issuer import issue_access_token
+from examples.identity.sessions.issuer import issue_refresh_token
+from examples.identity.sessions.jwt import access_token_subject_from_payload
+from examples.identity.sessions.jwt import refresh_token_subject_from_payload
 from examples.identity.sessions.revocation import revoke_access_token
-from examples.identity.sessions.issuer import issue_access_token, issue_refresh_token
 
 ACCESS_TTL = datetime.timedelta(minutes=15)
 REFRESH_TTL = datetime.timedelta(days=30)
@@ -32,7 +36,7 @@ class LocalTokens:
             subject = refresh_token_subject_from_payload(data)
         except jwt.PyJWTError as error:
             raise HTTPException(
-                status_code=401, detail='Invalid refresh token'
+                status_code=401, detail='Invalid refresh token',
             ) from error
         if deployment is not None and (
             subject.get('tenant_id') != str(deployment.tenant_id)
@@ -52,7 +56,7 @@ class LocalTokens:
         data = self.decoded_refresh(token, deployment)
         subject = data['subject']
         await self.sessions.validate(
-            redis, token, subject['username'], subject['family_id']
+            redis, token, subject['username'], subject['family_id'],
         )
         return data
 
@@ -128,7 +132,7 @@ class LocalTokens:
         }
         await self.cache.set_user_data(redis, user.username, snapshot)
         result = await self.pair(
-            redis, snapshot['db_user'], features, epochs, deployment
+            redis, snapshot['db_user'], features, epochs, deployment,
         )
         return {
             **result,
@@ -148,7 +152,7 @@ class LocalTokens:
         if not snapshot or snapshot['db_user']['status'] != 'active':
             raise HTTPException(status_code=401, detail='Refresh token not recognised')
         if deployment is not None and snapshot['db_user'].get('tenant_id') != str(
-            deployment.tenant_id
+            deployment.tenant_id,
         ):
             raise HTTPException(
                 status_code=409,
@@ -174,7 +178,7 @@ class LocalTokens:
             if scheme.lower() == 'bearer':
                 try:
                     data = self.access.decode_token_for_lifecycle(
-                        token, verify_exp=False
+                        token, verify_exp=False,
                     )
                     subject = access_token_subject_from_payload(data)
                     access_payload = {'jti': subject['jti'], 'exp': data['exp']}
@@ -185,7 +189,7 @@ class LocalTokens:
         if refresh:
             try:
                 payload = self.refresh.decode_token_for_lifecycle(
-                    refresh, verify_exp=False
+                    refresh, verify_exp=False,
                 )
                 owner = refresh_token_subject_from_payload(payload)
             except jwt.PyJWTError:

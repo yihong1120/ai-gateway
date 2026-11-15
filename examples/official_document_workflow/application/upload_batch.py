@@ -1,8 +1,5 @@
 """Group chat uploads, reuse joint document analysis, and export verified events."""
-
 from __future__ import annotations
-
-from examples.official_document_workflow.domain import documents as module
 
 import asyncio
 import hashlib
@@ -10,15 +7,25 @@ import json
 import re
 import tempfile
 from collections import Counter
-from dataclasses import replace, dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
+from dataclasses import replace
 from datetime import date
 from functools import partial
-from typing import Any, TYPE_CHECKING
+from itertools import groupby
+from typing import Any
+from typing import TYPE_CHECKING
 
 from .calendar_stage import CalendarStage
-from examples.official_document_workflow.services.analysis_reuse import analyze_content, source_revisions
+from .outcomes import CalendarResult
+from .outcomes import DocumentExportResult
+from .outcomes import DocumentResult
+from .outcomes import GroupResult
+from examples.official_document_workflow.domain import documents as module
+from examples.official_document_workflow.services.analysis_reuse import analyze_content
+from examples.official_document_workflow.services.analysis_reuse import source_revisions
 from examples.official_document_workflow.services.source_readings import read_source
-from .outcomes import GroupResult, DocumentResult, CalendarResult, DocumentExportResult
+from examples.shared.runtime.modules import ModuleReference
 
 if TYPE_CHECKING:
     from examples.official_document_workflow.services.processor import DocumentProcessor
@@ -26,24 +33,26 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel
-from pydantic import ConfigDict
-from pydantic import Field
-from pydantic import model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from examples.official_document_workflow.domain.calendar.contracts import GroupAnalysis
+from examples.official_document_workflow.domain.calendar.preparation import (
+    preparation_rows,
+)
+from examples.official_document_workflow.domain.workflow import JobPlan
+from examples.official_document_workflow.infrastructure.storage.processing_cache import (
+    active_requests,
+    cached_upload,
+    upload_outcome,
+)
+from examples.shared.runtime.concurrency import run_ocr
 
 from .group_processing import metadata_text
 from .long_source import group_text
-from .multi_agent import DocumentAgent
-from .multi_agent import GroupExporter
-from .prompts import group_prompt
-from .prompts import preparation_prompt
-from examples.official_document_workflow.domain.calendar.contracts import GroupAnalysis
-from examples.official_document_workflow.domain.calendar.preparation import preparation_rows
-from examples.official_document_workflow.domain.workflow import JobPlan
-from examples.shared.runtime.concurrency import run_ocr
-from examples.official_document_workflow.infrastructure.storage.processing_cache import active_requests
-from examples.official_document_workflow.infrastructure.storage.processing_cache import cached_upload
-from examples.official_document_workflow.infrastructure.storage.processing_cache import upload_outcome
+from .multi_agent import DocumentAgent, GroupExporter
+from .prompts import group_prompt, preparation_prompt
+
+_pymupdf = ModuleReference('pymupdf')
 
 
 GROUPING_PROMPT = """依本次 PDF 內文的「本件發文字號」識別每一份獨立函文，並建立它與檔案、附件及轉函的關聯。
@@ -80,7 +89,7 @@ class AttachmentLink(BaseModel):
     page_ids: list[str] = Field(description='無本件文號附件的全部頁面；有本件文號的附件函填空陣列。')
     reference_number: str = Field(default='', description='有本件文號的附件函所對應的公文組；無文號附件留空。')
     original_label: str = Field(
-        default='', max_length=40, description='逐字保留母函的附件標記，不重新編號；未知時留空。'
+        default='', max_length=40, description='逐字保留母函的附件標記，不重新編號；未知時留空。',
     )
     evidence_page_id: str
     evidence_text: str = Field(min_length=1)
@@ -100,7 +109,7 @@ class DocumentGroup(BaseModel):
     reference_number: str
     main_pages: list[str] = Field(min_length=1)
     attachments: list[AttachmentLink] = Field(
-        description='依母函清單順序保留附件，包括獨立文號的函件連結。共用附件仍須有本函直接引用證據。'
+        description='依母函清單順序保留附件，包括獨立文號的函件連結。共用附件仍須有本函直接引用證據。',
     )
     related_reference_numbers: list[str]
     unread_source_ids: list[str]
@@ -116,7 +125,7 @@ class DocumentGroup(BaseModel):
                 [
                     *self.related_reference_numbers,
                     *(link.reference_number for link in self.attachments if link.reference_number),
-                ]
+                ],
             ),
         )
 
@@ -341,7 +350,7 @@ def unique_uploads(prepared, directory):
     Repeated pages within a file keep their occurrence count. Interactive or
     annotated pages are not deduplicated: equal pixels need not mean equal data.
     """
-    import pymupdf
+    pymupdf = _pymupdf.load()
 
     unique, origins, seen = [], {}, {}
     for item in prepared:
@@ -377,8 +386,7 @@ def unique_uploads(prepared, directory):
 
 def group_pdf(members, page_ids, destination):
     """Compose original pages, main letter first; preserve a whole single PDF."""
-    import pymupdf
-    from itertools import groupby
+    pymupdf = _pymupdf.load()
 
     sid = page_ids[0].split(':')[0]
     if all(pid.split(':')[0] == sid for pid in page_ids):
@@ -400,7 +408,7 @@ async def process_uploads(pipe, owner, prepared, emitter=None, request=None):
         unique, origins = await asyncio.to_thread(unique_uploads, prepared, directory)
         total = sum(len(copies) for copies in origins.values())
         await pipe.emit_status(
-            emitter, f'附件共 {total} 頁；合併 {total - len(origins)} 頁相同副本，判讀 {len(origins)} 頁。'
+            emitter, f'附件共 {total} 頁；合併 {total - len(origins)} 頁相同副本，判讀 {len(origins)} 頁。',
         )
         async with cached_upload(pipe, owner, prepared, emitter):
             return await UploadBatch(pipe, owner, unique, origins, directory, emitter, request).run()
@@ -589,7 +597,11 @@ class UploadBatch:
                     self.failed_groups.append(index)
             else:
                 if not context_unread:
-                    self.rows.extend(CalendarStage.approved_rows(CalendarResult.from_analysis(analysis).with_reminders(reminders)))
+                    self.rows.extend(
+                        CalendarStage.approved_rows(
+                            CalendarResult.from_analysis(analysis).with_reminders(reminders),
+                        ),
+                    )
                 notes.extend(analysis.get('metadata_notices', []))
                 notes.extend(analysis.get('csv_errors', []))
                 if analysis.get('csv_errors') and not context_unread:
@@ -631,7 +643,10 @@ class UploadBatch:
                 if sid not in source_digests:
                     with self.members[sid].pdf_path.open('rb') as stream:
                         source_digests[sid] = hashlib.file_digest(stream, 'sha256').hexdigest()
-                selected.append((source_digests[sid], int(number), 'spotting' if self.spotting_required[sid] else 'native'))
+                selected.append((
+                    source_digests[sid], int(number),
+                    'spotting' if self.spotting_required[sid] else 'native',
+                ))
             return ('selected-layout', selected)
 
         async def render_word_document(path, page_ids):
@@ -718,14 +733,16 @@ class UploadBatch:
             for part_index, (selected_pages, link) in enumerate(parts):
                 if link is not None and link.reference_number:
                     continue  # Link to that letter's own export after every group has finished.
-                label = self.processor.rendering.safe_filename_part(link.original_label or '附件', 60) if link is not None else ''
+                label = self.processor.rendering.safe_filename_part(
+                    link.original_label or '附件', 60,
+                ) if link is not None else ''
                 title = (self.attachment_title(link) or '名稱待確認') if link is not None else ''
                 suffix = f'_檔案{part_index:02d}' if link is not None and label_counts[label] > 1 else ''
                 selected_pages = sorted(selected_pages, key=lambda p: tuple(int(n) for n in p[1:].split(':P')))
                 page_key = tuple(selected_pages)
                 output_stem = (
                     self.processor.rendering.pdf_filename(
-                        document, attachment_label=label, attachment_title=title, suffix=suffix
+                        document, attachment_label=label, attachment_title=title, suffix=suffix,
                     )[:-4]
                     if document is not None
                     else self.processor.rendering.safe_filename_subject_part(
@@ -792,7 +809,7 @@ class UploadBatch:
             self.sections.append(f'### 公文組 {index}：{group.reference_number}')
             for parent, link in self.parents[group.reference_number]:
                 self.sections.append(
-                    f'本函為「{parent.reference_number}」的{self.attachment_label(link)}，保留本函文號。'
+                    f'本函為「{parent.reference_number}」的{self.attachment_label(link)}，保留本函文號。',
                 )
             for part_index, link in enumerate([None, *group.attachments]):
                 if link is not None and link.reference_number:
@@ -818,7 +835,7 @@ class UploadBatch:
             for file in self.unread_downloads[group.reference_number]:
                 label = 'PDF' if file['kind'] == 'document_pdf' else 'Word'
                 self.sections.append(
-                    f'- {label}：{self.processor.exports.download_link(self.request, file["id"], file["name"])}'
+                    f'- {label}：{self.processor.exports.download_link(self.request, file["id"], file["name"])}',
                 )
             notes = self.results[index - 1].notes
             self.sections.extend(f'- {note}' for note in notes)
@@ -839,7 +856,7 @@ class UploadBatch:
                 for file in exports.files:
                     label = 'PDF' if file['kind'] == 'document_pdf' else 'Word'
                     self.sections.append(
-                        f'- {label}：{self.processor.exports.download_link(self.request, file["id"], file["name"])}'
+                        f'- {label}：{self.processor.exports.download_link(self.request, file["id"], file["name"])}',
                     )
             self.sections.append('')
 
@@ -851,12 +868,18 @@ class UploadBatch:
             self.sections.extend(prepared.notices)
             self.sections.extend(prepared.pending)
             name = f'公文批次_{len(self.groups)}組_行事曆.csv'
-            result = await stage.save(prepared, name, self.prepared[0].source_file.id,
-                {'eip_group_source_ids': list(dict.fromkeys(
-                    origin['source_file_id'] for copies in self.origins.values() for origin in copies
-                )), 'official_document_batch': {
-                    'groups': [g.model_dump() for g in self.groups], 'pending_groups': self.pending_groups,
-                }})
+            result = await stage.save(
+                prepared, name, self.prepared[0].source_file.id,
+                {
+                    'eip_group_source_ids': list(
+                        dict.fromkeys(
+                            origin['source_file_id'] for copies in self.origins.values() for origin in copies
+                        ),
+                    ), 'official_document_batch': {
+                        'groups': [g.model_dump() for g in self.groups], 'pending_groups': self.pending_groups,
+                    },
+                },
+            )
             if result.error:
                 self.csv_failed = True
                 self.sections.append(f'CSV 未完成：{result.error}；已產生的 PDF／Word 保留。')
@@ -867,11 +890,11 @@ class UploadBatch:
                 if import_notice:
                     self.sections.append(import_notice)
                 self.sections.append(
-                    'CSV 包含已驗證的原定行程；缺少起訖時刻時另採 AI 暫排，請依各列說明在匯入後至 EIP 核對修改。無法確認日期或事件關係的項目未納入。'
+                    'CSV 包含已驗證的原定行程；缺少起訖時刻時另採 AI 暫排，請依各列說明在匯入後至 EIP 核對修改。無法確認日期或事件關係的項目未納入。',
                 )
                 if self.preparation_count:
                     self.sections.append(
-                        f'另加入 {self.preparation_count} 筆 AI 建議準備提醒，各列說明準備事項、建議日期與安排理由；不是公文明訂期限。'
+                        f'另加入 {self.preparation_count} 筆 AI 建議準備提醒，各列說明準備事項、建議日期與安排理由；不是公文明訂期限。',
                     )
         else:
             self.sections.append('本批沒有已確認的行程，未產生 CSV。')

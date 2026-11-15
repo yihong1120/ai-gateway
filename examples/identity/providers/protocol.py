@@ -21,11 +21,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from examples.identity.authorization.features import feature_names_for_group
 from examples.identity.deployment_context import DeploymentBinding
 from examples.identity.deployment_context import resolve_request_deployment
 from examples.identity.models import User
-from examples.identity.sessions.store import get_auth_session
-from examples.identity.sessions.store import revoke_media_for_parent
 from examples.identity.schemas.auth import DeploymentInfo
 from examples.identity.schemas.auth import RefreshRequest
 from examples.identity.schemas.auth import TokenPairData
@@ -39,12 +38,12 @@ from examples.identity.schemas.oauth import OAuthRequestParameters
 from examples.identity.schemas.oauth import OAuthRevocationRequest
 from examples.identity.schemas.oauth import OAuthTokenRequest
 from examples.identity.schemas.oauth import OAuthTokenResponse
-from examples.identity.authorization.features import feature_names_for_group
 from examples.identity.sessions.authentication import ACCESS_TTL
 from examples.identity.sessions.authentication import issue_token_pair_for_user
 from examples.identity.sessions.authentication import logout_user
 from examples.identity.sessions.authentication import refresh_tokens
-
+from examples.identity.sessions.store import get_auth_session
+from examples.identity.sessions.store import revoke_media_for_parent
 from examples.identity.settings.bff import get_bff_options
 AUTH_CODE_TTL_SECONDS = int(os.getenv('OAUTH_CODE_TTL_SECONDS', '120'))
 PKCE_VERIFIER_RE = re.compile(r'^[A-Za-z0-9._~-]{43,128}$')

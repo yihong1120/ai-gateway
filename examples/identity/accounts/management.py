@@ -9,30 +9,30 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from examples.identity.deployment_context import DeploymentBinding
-from examples.identity.deployment_context import resolve_request_deployment
-from examples.identity.models import Group
-from examples.identity.models import User
-from examples.identity.models import USER_STATUS_ACTIVE
-from examples.identity.models import USER_STATUS_EMAIL_UNVERIFIED
 from examples.identity.accounts.access import invalidate_effective_site_cache
-from examples.identity.dependencies import ensure_admin_with_group
-from examples.identity.dependencies import is_super_admin
-from examples.identity.schemas.user import PendingUserReviewRead
-from examples.identity.schemas.user import UserPage
-from examples.identity.schemas.user import UserRead
-from examples.identity.schemas.user import UserSignup
-from examples.identity.accounts.verification import send_signup_verification_email
 from examples.identity.accounts.legal import record_user_consent
 from examples.identity.accounts.legal import validate_signup_consents
+from examples.identity.accounts.users import create_user
+from examples.identity.accounts.users import list_users
+from examples.identity.accounts.verification import send_signup_verification_email
 from examples.identity.authorization.sites import (
     list_site_ids_for_group,
 )
 from examples.identity.authorization.sites import (
     seed_site_notification_preferences,
 )
-from examples.identity.accounts.users import create_user
-from examples.identity.accounts.users import list_users
+from examples.identity.dependencies import ensure_admin_with_group
+from examples.identity.dependencies import is_super_admin
+from examples.identity.deployment_context import DeploymentBinding
+from examples.identity.deployment_context import resolve_request_deployment
+from examples.identity.models import Group
+from examples.identity.models import User
+from examples.identity.models import USER_STATUS_ACTIVE
+from examples.identity.models import USER_STATUS_EMAIL_UNVERIFIED
+from examples.identity.schemas.user import PendingUserReviewRead
+from examples.identity.schemas.user import UserPage
+from examples.identity.schemas.user import UserRead
+from examples.identity.schemas.user import UserSignup
 
 
 async def list_users_for_operator(

@@ -9,10 +9,10 @@ from unittest.mock import patch
 from urllib.parse import unquote_plus
 
 from .test_eip_group_processing import payload
-from .test_official_document_processor_pipe import DEADLINE_EVIDENCE
 from .test_official_document_processor_pipe import _deadline
 from .test_official_document_processor_pipe import _document
 from .test_official_document_processor_pipe import _valid_payload
+from .test_official_document_processor_pipe import DEADLINE_EVIDENCE
 from .test_official_document_processor_pipe import PIPE_MODULE as M
 from .test_official_document_processor_pipe import SOURCE
 from examples.official_document_workflow.application.group_processing import parse_group

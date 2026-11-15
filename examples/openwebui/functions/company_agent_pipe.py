@@ -7,6 +7,8 @@ description: LangGraph 公司工作助理；文件、圖片語意、來源 Excel
 """
 from __future__ import annotations
 
+import company_agent.api.pipe as _pipe_imports
+
 
 class Pipe:
     def __init__(self):
@@ -16,5 +18,4 @@ class Pipe:
         self, body: dict, __user__: dict = None, __metadata__: dict = None,
         __event_emitter__=None, __task__=None,
     ):
-        from company_agent.api.pipe import run_pipe
-        return await run_pipe(body, __user__, __metadata__, __event_emitter__, __task__)
+        return await _pipe_imports.run_pipe(body, __user__, __metadata__, __event_emitter__, __task__)

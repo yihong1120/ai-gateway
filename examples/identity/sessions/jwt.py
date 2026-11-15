@@ -24,11 +24,14 @@ from examples.identity.deployment_context import DeploymentBinding
 from examples.identity.deployment_context import resolve_request_deployment
 from examples.identity.providers.oidc import OidcTokenVerifier
 from examples.identity.providers.oidc_identity import subject_from_oidc_identity
-from examples.identity.sessions.revocation import is_access_token_revoked
 from examples.identity.schemas.auth import AccessTokenSubject
 from examples.identity.schemas.auth import AccessTokenSubjectModel
 from examples.identity.schemas.auth import RefreshTokenSubject
 from examples.identity.schemas.auth import RefreshTokenSubjectModel
+from examples.identity.sessions.revocation import is_access_token_revoked
+from examples.shared.runtime.modules import ModuleReference
+
+_identity_runtime = ModuleReference('examples.identity.runtime')
 
 
 def access_token_subject_from_payload(
@@ -369,13 +372,13 @@ class PyJWTBearer:
 
 
 def get_jwt_access():
-    from examples.identity.runtime import get_identity
+    get_identity = _identity_runtime.attribute('get_identity')
 
     return get_identity().jwt_access
 
 
 def get_jwt_refresh():
-    from examples.identity.runtime import get_identity
+    get_identity = _identity_runtime.attribute('get_identity')
 
     return get_identity().jwt_refresh
 

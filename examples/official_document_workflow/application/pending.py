@@ -3,21 +3,21 @@
 Production uses the encrypted PostgreSQL repository. Clock arithmetic belongs
 to each repository; callers use ``remaining`` rather than assuming a clock.
 """
-
 from __future__ import annotations
 
 import hmac
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from dataclasses import replace
 from heapq import nsmallest
 from operator import attrgetter
 from operator import itemgetter
 from threading import RLock
 from typing import Annotated
 from typing import Generic
-from typing import TypeVar
 from typing import Protocol
+from typing import TypeVar
 
 from pydantic import ConfigDict
 from pydantic import Field
@@ -25,6 +25,7 @@ from pydantic import StringConstraints
 from pydantic import TypeAdapter
 from pydantic.dataclasses import dataclass as validated_dataclass
 
+from .output_receipts import MemoryOutputReceipts
 from .output_receipts import OutputReceipts
 
 PayloadT = TypeVar('PayloadT')
@@ -65,7 +66,7 @@ class PendingRepository(Protocol[PayloadT]):
     outputs: OutputReceipts
 
     def review(
-        self, scope: PendingClarificationScope
+        self, scope: PendingClarificationScope,
     ) -> PendingClarification[PayloadT] | None: ...
 
     def put(
@@ -76,9 +77,11 @@ class PendingRepository(Protocol[PayloadT]):
         payload: PayloadT,
         ttl_seconds: float,
     ) -> PendingClarification[PayloadT]: ...
+
     def get(
-        self, scope: PendingClarificationScope
+        self, scope: PendingClarificationScope,
     ) -> PendingClarification[PayloadT] | None: ...
+
     def claim(
         self,
         scope: PendingClarificationScope,
@@ -87,10 +90,12 @@ class PendingRepository(Protocol[PayloadT]):
         expected_generation: int | None = None,
     ) -> PendingClarification[PayloadT] | None: ...
     def restore(self, record: PendingClarification[PayloadT]) -> bool: ...
+
     def advance(
-        self, record: PendingClarification[PayloadT], payload: PayloadT
+        self, record: PendingClarification[PayloadT], payload: PayloadT,
     ) -> bool: ...
     def finalize(self, record: PendingClarification[PayloadT]) -> bool: ...
+
     def discard(
         self,
         scope: PendingClarificationScope,
@@ -120,12 +125,11 @@ class PendingClarificationStore(Generic[PayloadT]):
         self._max_entries = max_entries
         self._clock = clock
         self._lock = RLock()
-        from .output_receipts import MemoryOutputReceipts
 
         self.outputs = MemoryOutputReceipts()
         self._claimed = {}
         self._records: dict[
-            PendingClarificationScope, PendingClarification[PayloadT]
+            PendingClarificationScope, PendingClarification[PayloadT],
         ] = {}
         # A generation survives an in-flight ``claim`` until the record's
         # original expiry.  It prevents a later ``restore`` from reviving
@@ -300,7 +304,7 @@ class PendingClarificationStore(Generic[PayloadT]):
             return True
 
     def discard(
-        self, scope: PendingClarificationScope, *, expected_generation=None
+        self, scope: PendingClarificationScope, *, expected_generation=None,
     ) -> bool:
         """Discard a scope, such as when a new attachment batch supersedes it."""
 
@@ -340,6 +344,5 @@ class PendingClarificationStore(Generic[PayloadT]):
         return record.expires_at - self._clock()
 
     def advance(self, record, payload):
-        from dataclasses import replace
 
         return self.restore(replace(record, payload=payload))

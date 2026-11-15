@@ -9,25 +9,37 @@ import html
 import json
 import re
 import tempfile
-from contextlib import AsyncExitStack, ExitStack
+from contextlib import AsyncExitStack
+from contextlib import ExitStack
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, NotRequired, TypedDict
-from urllib.parse import quote, urljoin, urlsplit
+from typing import Literal
+from typing import NotRequired
+from typing import TypedDict
+from urllib.parse import quote
+from urllib.parse import urljoin
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 import httpx
 
+import examples.official_document_workflow.domain.calendar.presentation as _presentation_imports
+import examples.shared.runtime.io as _io_imports
+from . import calendar_attachments
+from . import calendar_read
+from . import calendar_reconciliation
+from . import calendar_verification
 from examples.official_document_workflow.domain.calendar.csv_schema import (
     protect_eip_csv,
 )
 from examples.official_document_workflow.infrastructure.office import office_input
+from examples.shared.runtime.modules import ModuleReference
 
-from . import (
-    calendar_attachments,
-    calendar_read,
-    calendar_reconciliation,
-    calendar_verification,
+_workflow_calendar_supersession = ModuleReference(
+    'examples.official_document_workflow.infrastructure.eip.calendar_supersession',
+)
+_workflow_calendar_managed = ModuleReference(
+    'examples.official_document_workflow.infrastructure.storage.calendar_managed',
 )
 
 ORIGIN = 'http://eip.jiedar.com.tw'
@@ -221,42 +233,29 @@ def import_line(row: list, user_id: str) -> str:
 
 class Netask:
     async def begin_calendar_creation(self, line, key):
-        from examples.shared.runtime.io import run_sync
-        from examples.official_document_workflow.domain.calendar.presentation import split_ai_title
-        from examples.official_document_workflow.infrastructure.storage.calendar_managed import managed_calendar
+        managed_calendar = _workflow_calendar_managed.attribute('managed_calendar')
         fields = calendar_verification.validate_wire(line, self.user_id)
-        if split_ai_title(calendar_read.unescape(fields[0])) is not None:
-            await run_sync(managed_calendar().begin, self.user_id, key)
+        if _presentation_imports.split_ai_title(calendar_read.unescape(fields[0])) is not None:
+            await _io_imports.run_sync(managed_calendar().begin, self.user_id, key)
 
     async def record_calendar_creation(self, line, key, receipt, *, aliases=()):
-        from examples.official_document_workflow.domain.calendar.presentation import (
-            split_ai_title,
-        )
-        from examples.official_document_workflow.infrastructure.storage.calendar_managed import (
-            managed_calendar,
-        )
-        from examples.shared.runtime.io import run_sync
+        managed_calendar = _workflow_calendar_managed.attribute('managed_calendar')
         fields = calendar_verification.validate_wire(line, self.user_id)
-        if split_ai_title(calendar_read.unescape(fields[0])) is None:
+        if _presentation_imports.split_ai_title(calendar_read.unescape(fields[0])) is None:
             return
         event_id = receipt['event_id']
         detail = await self.calendar_detail(event_id)
         calendar_verification.verify_detail(detail, fields, self.user_id, event_id)
-        await run_sync(managed_calendar().register, self.user_id, event_id, key, line, detail, aliases)
+        await _io_imports.run_sync(managed_calendar().register, self.user_id, event_id, key, line, detail, aliases)
 
     async def calendar_managed_update(self, before, after):
-        from examples.official_document_workflow.infrastructure.storage.calendar_managed import (
-            managed_calendar,
-        )
-        from examples.shared.runtime.io import run_sync
-        await run_sync(managed_calendar().advance, self.user_id, before, after)
+        managed_calendar = _workflow_calendar_managed.attribute('managed_calendar')
+        await _io_imports.run_sync(managed_calendar().advance, self.user_id, before, after)
 
     async def reconcile_calendar(self, journal, *, allowed=object, authorize=None, keys=None):
-        from examples.official_document_workflow.infrastructure.storage.calendar_managed import (
-            managed_calendar,
-        )
+        managed_calendar = _workflow_calendar_managed.attribute('managed_calendar')
 
-        from .calendar_supersession import reconcile
+        reconcile = _workflow_calendar_supersession.attribute('reconcile')
         return await reconcile(self, managed_calendar(), journal, allowed=allowed, authorize=authorize, keys=keys)
 
     async def calendar_import_matches(self, lines):

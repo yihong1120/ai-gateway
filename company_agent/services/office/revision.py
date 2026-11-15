@@ -7,10 +7,10 @@ from pathlib import Path
 
 from langchain_core.messages import ToolMessage
 
-from company_agent.services.files.operations import output_name
-from company_agent.services.files.operations import worker
 from company_agent.services.delivery.validation import prepare_output
 from company_agent.services.files.errors import RecoverableToolError
+from company_agent.services.files.operations import output_name
+from company_agent.services.files.operations import worker
 
 
 def require_inspected(messages, args):
@@ -32,7 +32,8 @@ def require_inspected(messages, args):
                 for r in block.get('runs', [])
             ):
                 return
-    raise RecoverableToolError('artifact_inspection_required',
+    raise RecoverableToolError(
+        'artifact_inspection_required',
         '須先用 inspect_artifact 實際讀到指定草稿版本與文字 run，不能猜測位置或原文。',
     )
 
@@ -66,8 +67,10 @@ async def revise(ctx, messages, call_id, args):
         )
         await asyncio.to_thread(worker, 'extract', data=changed, suffix=suffix)
         if target == name:
-            result = await asyncio.to_thread(ctx.store.revise_artifact, ctx.owner, ctx.job,
-                                             args.artifact_id, sha, changed, call_id)
+            result = await asyncio.to_thread(
+                ctx.store.revise_artifact, ctx.owner, ctx.job,
+                args.artifact_id, sha, changed, call_id,
+            )
             return result
         result = {
             **ctx.store.artifact(ctx.owner, ctx.job, target, changed),

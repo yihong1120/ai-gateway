@@ -2,18 +2,20 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
 import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
 import sqlite3
+from contextlib import contextmanager
+from pathlib import Path
 
 from cryptography.fernet import Fernet
 from psycopg.types.json import Jsonb
 
-from examples.company_ai_access.storage.registry import Store, database_config, digest
+from examples.company_ai_access.storage.registry import database_config
+from examples.company_ai_access.storage.registry import digest
+from examples.company_ai_access.storage.registry import Store
 
 
 @contextmanager
@@ -44,8 +46,10 @@ def migrate(directory: Path, *, apply=False):
         with sqlite3.connect(source.resolve().as_uri() + '?mode=ro', uri=True) as old:
             old.row_factory = sqlite3.Row
             old.execute('BEGIN')
-            snapshot = {table: [dict(row) for row in old.execute('SELECT * FROM ' + table + ' ORDER BY ' + order)]
-                        for table, order in (('records', 'kind,id'), ('audit', 'seq'), ('limits', 'id'))}
+            snapshot = {
+                table: [dict(row) for row in old.execute('SELECT * FROM ' + table + ' ORDER BY ' + order)]
+                for table, order in (('records', 'kind,id'), ('audit', 'seq'), ('limits', 'id'))
+            }
         for row in snapshot['records']:
             data = json.loads(row['data'])
             if data['id'] != row['id'] or data.get('subject', '') != row['subject']:
@@ -55,7 +59,10 @@ def migrate(directory: Path, *, apply=False):
                 if digest(raw) != data.get('key_hash'):
                     raise ValueError('Source credential hash mismatch.')
         fingerprint = hashlib.sha256(json.dumps(snapshot, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-        report = {'counts': {table: len(rows) for table, rows in snapshot.items()}, 'snapshot_sha256': fingerprint, 'applied': False}
+        report = {
+            'counts': {table: len(rows) for table, rows in snapshot.items()},
+            'snapshot_sha256': fingerprint, 'applied': False,
+        }
         if not apply:
             return report
         store = Store(directory, legacy_import=True)
@@ -65,18 +72,30 @@ def migrate(directory: Path, *, apply=False):
                 if metadata['legacy_hash'] != fingerprint:
                     raise ValueError('Source differs from the already imported snapshot.')
                 return {**report, 'applied': True, 'already_imported': True}
-            if any(db.execute('SELECT EXISTS(SELECT 1 FROM ' + table + ') AS present').fetchone()['present']
-                   for table in snapshot):
+            if any(
+                db.execute('SELECT EXISTS(SELECT 1 FROM ' + table + ') AS present').fetchone()['present']
+                for table in snapshot
+            ):
                 raise ValueError('Refusing to merge into a nonempty PostgreSQL registry.')
             for row in snapshot['records']:
-                db.execute('INSERT INTO records VALUES (%s,%s,%s,%s)',
-                           (row['kind'], row['id'], row['subject'], Jsonb(json.loads(row['data']))))
+                db.execute(
+                    'INSERT INTO records VALUES (%s,%s,%s,%s)',
+                    (row['kind'], row['id'], row['subject'], Jsonb(json.loads(row['data']))),
+                )
             for row in snapshot['audit']:
-                db.execute('INSERT INTO audit(seq,at,event,subject,device) VALUES (%s,%s,%s,%s,%s)',
-                           tuple(row[name] for name in ('seq', 'at', 'event', 'subject', 'device')))
+                db.execute(
+                    'INSERT INTO audit(seq,at,event,subject,device) VALUES (%s,%s,%s,%s,%s)',
+                    tuple(row[name] for name in ('seq', 'at', 'event', 'subject', 'device')),
+                )
             for row in snapshot['limits']:
-                db.execute('INSERT INTO limits VALUES (%s,%s,%s)', tuple(row[name] for name in ('id', 'count', 'until')))
-            db.execute("SELECT setval(pg_get_serial_sequence('audit','seq'),COALESCE((SELECT max(seq) FROM audit),1),EXISTS(SELECT 1 FROM audit))")
+                db.execute(
+                    'INSERT INTO limits VALUES (%s,%s,%s)', tuple(
+                        row[name] for name in ('id', 'count', 'until')
+                    ),
+                )
+            db.execute(
+                "SELECT setval(pg_get_serial_sequence('audit','seq'),COALESCE((SELECT max(seq) FROM audit),1),EXISTS(SELECT 1 FROM audit))",
+            )
             # Verify complete logical content before recording success.
             for table, order in (('records', 'kind,id'), ('audit', 'seq'), ('limits', 'id')):
                 imported = db.execute('SELECT * FROM ' + table + ' ORDER BY ' + order).fetchall()
@@ -91,7 +110,10 @@ def migrate(directory: Path, *, apply=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--apply', action='store_true', help='Import into an empty PostgreSQL registry; default only previews source.')
+    parser.add_argument(
+        '--apply', action='store_true',
+        help='Import into an empty PostgreSQL registry; default only previews source.',
+    )
     args = parser.parse_args()
     try:
         report = migrate(Path(os.environ['AI_ACCESS_STATE_DIR']), apply=args.apply)

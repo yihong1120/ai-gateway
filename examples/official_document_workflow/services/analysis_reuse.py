@@ -1,16 +1,22 @@
 """Share source-derived model calls; keep instructions and personal calendars private."""
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
 import os
+from copy import deepcopy
 
 from jsonschema import Draft202012Validator
 
-from examples.shared.runtime.io import run_sync
-from examples.shared.runtime.concurrency import ModelNotStarted
 from .output_delivery import output_job_identity
+from examples.official_document_workflow.domain.calendar.relative_dates import (
+    RelativeDateProof,
+)
+from examples.official_document_workflow.domain.calendar.tracking_reminders import (
+    TrackingReminderProof,
+)
+from examples.shared.runtime.concurrency import ModelNotStarted
+from examples.shared.runtime.io import run_sync
 
 
 class DeclinedAnalysis(ModelNotStarted):
@@ -23,8 +29,6 @@ class DeclinedAnalysis(ModelNotStarted):
 
 def neutral_event(event):
     """Source duty/specification only; calculated recipient dates stay local."""
-    from examples.official_document_workflow.domain.calendar.relative_dates import RelativeDateProof
-    from examples.official_document_workflow.domain.calendar.tracking_reminders import TrackingReminderProof
 
     result = {key: deepcopy(value) for key, value in event.items() if not key.startswith('_')}
     if isinstance(event.get('_relative_date_proof'), RelativeDateProof) or isinstance(event.get('_tracking_reminder_proof'), TrackingReminderProof):
@@ -82,9 +86,14 @@ async def analyze_content(pipe, source, *, stage, prompt, schema, max_output_tok
     if identity is None:
         # Routing/settings identify semantics; provider credentials are checked
         # by the actual transport only if a new model invocation is required.
-        identity = ('document-service', os.getenv('OFFICIAL_DOCUMENT_LITELLM_BASE_URL', 'http://127.0.0.1:4000/v1').strip().rstrip('/'),
-                    pipe.valves.cloud_ocr_text_model, pipe.valves.cloud_ocr_text_reasoning_effort,
-                    pipe.valves.cloud_ocr_text_max_output_tokens)
+        identity = (
+            'document-service', os.getenv(
+                'OFFICIAL_DOCUMENT_LITELLM_BASE_URL',
+                'http://127.0.0.1:4000/v1',
+            ).strip().rstrip('/'),
+            pipe.valves.cloud_ocr_text_model, pipe.valves.cloud_ocr_text_reasoning_effort,
+            pipe.valves.cloud_ocr_text_max_output_tokens,
+        )
     key = registry.key(stage, list(revisions), source.kind, source.text, prompt, schema, max_output_tokens, identity)
     scope = output_job_identity()
     owner = getattr(pipe, '_usage_owner', None)

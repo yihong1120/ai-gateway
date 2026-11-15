@@ -1,15 +1,17 @@
 from __future__ import annotations
-import os
+
 import json
+import os
 from collections.abc import Mapping
 from urllib.parse import urlsplit
-from pydantic import Field, model_validator
+
+from pydantic import Field
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
-from .common import (
-    _env_bool,
-    DEFAULT_NATIVE_SOCIAL_ALLOWED_CLIENTS_JSON,
-    _OIDC_CLIENT_ID_RE,
-)
+
+from .common import _env_bool
+from .common import _OIDC_CLIENT_ID_RE
+from .common import DEFAULT_NATIVE_SOCIAL_ALLOWED_CLIENTS_JSON
 
 
 class NativeSettings(BaseSettings):
@@ -133,11 +135,11 @@ class NativeSettings(BaseSettings):
         if self.exchange_enabled:
             if not self.exchange_shared_secret:
                 raise RuntimeError(
-                    'Native social exchange is enabled but required settings are missing: NATIVE_SOCIAL_EXCHANGE_SHARED_SECRET'
+                    'Native social exchange is enabled but required settings are missing: NATIVE_SOCIAL_EXCHANGE_SHARED_SECRET',
                 )
             if len(self.exchange_shared_secret) < 32:
                 raise RuntimeError(
-                    'NATIVE_SOCIAL_EXCHANGE_SHARED_SECRET must be at least 32 characters'
+                    'NATIVE_SOCIAL_EXCHANGE_SHARED_SECRET must be at least 32 characters',
                 )
             _ = self.allowed_clients
         return self

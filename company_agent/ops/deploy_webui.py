@@ -9,6 +9,13 @@ from importlib.resources import files
 from pathlib import Path
 
 from examples.shared.config import load_service
+from examples.shared.runtime.modules import ModuleReference
+
+_webui_env = ModuleReference('open_webui.env')
+_webui_config = ModuleReference('open_webui.models.config')
+_webui_functions = ModuleReference('open_webui.models.functions')
+_webui_models = ModuleReference('open_webui.models.models')
+_webui_users = ModuleReference('open_webui.models.users')
 
 
 ENTRIES = {
@@ -40,11 +47,13 @@ async def deploy():
     content = function_source()
     # Match the installed-package launcher before importing Open WebUI paths.
     os.environ['FROM_INIT_PY'] = 'true'
-    from open_webui.models.functions import Functions, FunctionForm, FunctionMeta
-    from open_webui.models.models import Models, ModelForm, ModelMeta, ModelParams
-    from open_webui.models.users import Users
-    from open_webui.models.config import Config
-    from open_webui.env import DATA_DIR
+    Functions, FunctionForm, FunctionMeta = _webui_functions.attributes('Functions', 'FunctionForm', 'FunctionMeta')
+    Models, ModelForm, ModelMeta, ModelParams = _webui_models.attributes(
+        'Models', 'ModelForm', 'ModelMeta', 'ModelParams',
+    )
+    Users = _webui_users.attribute('Users')
+    Config = _webui_config.attribute('Config')
+    DATA_DIR = _webui_env.attribute('DATA_DIR')
     creator = await Users.get_first_user()
     if not creator or creator.role != 'admin':
         raise RuntimeError('需要既有管理員來部署入口。')

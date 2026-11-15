@@ -1,10 +1,12 @@
 """HTTP request, identity and response contracts. Browser responses exclude device secrets."""
-
 from __future__ import annotations
 
-from typing import Literal
 from dataclasses import dataclass
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal
+
+from pydantic import BaseModel
+from pydantic import ConfigDict
+from pydantic import Field
 
 
 class MCPPolicy(BaseModel):

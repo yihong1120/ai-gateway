@@ -1,6 +1,7 @@
 """Company Agent deployment settings and file-root configuration."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -61,7 +62,6 @@ class Settings(Strict):
     @field_validator('nas_binding_revisions')
     @classmethod
     def valid_nas_revisions(cls, values):
-        import re
         if len(set(values)) != len(values) or any(not re.fullmatch(r'[a-f0-9]{32}', v) for v in values):
             raise ValueError('NAS 帳號版本不可重複且須為有效識別碼。')
         return values
@@ -79,7 +79,6 @@ class Settings(Strict):
     @field_validator('model_profiles')
     @classmethod
     def profile_names(cls, profiles):
-        import re
 
         if len(profiles) > 12 or any(not re.fullmatch(r'[a-z][a-z0-9_-]{0,39}', key) for key in profiles):
             raise ValueError('Use at most 12 named model profiles (lowercase letters, digits, _ and -)')

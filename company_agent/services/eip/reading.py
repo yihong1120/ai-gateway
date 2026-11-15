@@ -9,10 +9,15 @@ from functools import lru_cache
 from importlib.metadata import version
 from pathlib import Path
 
-from company_agent.services.files import block_page
+import company_agent.services.files.operations as _operations_imports
+import company_agent.services.office.ocr as _ocr_imports
+import examples.official_document_workflow.infrastructure.eip.sessions as _sessions_imports
+import examples.official_document_workflow.infrastructure.office.office_input as _office_input_imports
 from company_agent.services.eip.client import attachment_list
 from company_agent.services.eip.client import binding
 from company_agent.services.eip.client import source
+from company_agent.services.files import block_page
+from company_agent.services.office import sandbox as office_sandbox
 from examples.official_document_workflow.runtime import current_resources
 from examples.shared.runtime.concurrency import run_ocr
 
@@ -104,9 +109,7 @@ async def _content_blocks(data, mode, page):
     # Hash only the authorized bytes, never a caller-provided digest or URL.
     settings = dict(await asyncio.to_thread(_reader_identity, mode))
     if mode == 'ocr':
-        from company_agent.services.office.ocr import endpoint
-        from company_agent.services.office.sandbox import IMAGE
-        settings.update(endpoint=endpoint(), max_new_tokens=4096, office_image=IMAGE)
+        settings.update(endpoint=_ocr_imports.endpoint(), max_new_tokens=4096, office_image=office_sandbox.IMAGE)
     key = cache.key(
         'eip-read-blocks-v1', hashlib.sha256(data).hexdigest(), mode,
         page if mode == 'ocr' else None, settings,
@@ -150,14 +153,12 @@ async def _snapshot(ctx, handle, item, db):
 
 
 async def _download_pdf(ctx, item, db):
-    from examples.official_document_workflow.infrastructure.eip.sessions import manual_session
     resources = current_resources()
     state = resources.state
-    from examples.official_document_workflow.infrastructure.office.office_input import to_pdf
 
     attachment = item['attachment']
     with ExitStack() as cleanup:
-        async with manual_session(ctx.owner, state, db) as current:
+        async with _sessions_imports.manual_session(ctx.owner, state, db) as current:
             fresh = await attachment_list(current, item['doc'])
             if not any(
                 r['url'] == attachment['url'] and r['name'] == attachment['name']
@@ -170,7 +171,7 @@ async def _download_pdf(ctx, item, db):
         if not size or size > ctx.settings.max_file_bytes:
             raise ValueError('附件為空或超過單檔上限。')
         content_cache = await asyncio.to_thread(lambda: resources.shared_content)
-        converted, _ = await to_pdf(raw, attachment['name'], content_cache=content_cache)
+        converted, _ = await _office_input_imports.to_pdf(raw, attachment['name'], content_cache=content_cache)
         if converted is not raw:
             cleanup.enter_context(converted)
         data = await asyncio.to_thread(converted.read, ctx.settings.max_file_bytes + 1)
@@ -180,14 +181,12 @@ async def _download_pdf(ctx, item, db):
 
 
 def _parse(data, mode, page):
-    from company_agent.services.files.operations import worker
-    from company_agent.services.office.ocr import ocr_page
 
     if mode == 'ocr':
-        parsed = ocr_page(data, '.pdf', page)
+        parsed = _ocr_imports.ocr_page(data, '.pdf', page)
         blocks, notice = parsed['blocks'], parsed['notice']
     else:
-        blocks = worker('extract', data=data, suffix='.pdf')
+        blocks = _operations_imports.worker('extract', data=data, suffix='.pdf')
         notice = 'PDF 文字層閱讀；空白頁可能是掃描影像，可明確使用 mode=ocr 指定 page。非圖面語意或版面驗證。'
     bounded = []
     for block in blocks:

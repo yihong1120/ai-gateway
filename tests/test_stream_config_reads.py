@@ -1,13 +1,18 @@
 """Stream list counts stay group-wide without per-configuration SQL reads."""
+from __future__ import annotations
 
-from datetime import datetime, timezone
-from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, patch
+from datetime import datetime
+from datetime import timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from unittest.mock import patch
 
 from fastapi import HTTPException
-from sqlalchemy import event, text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy import event
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from examples.db_management.services import stream_config_services as services
 

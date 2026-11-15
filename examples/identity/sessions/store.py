@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from examples.identity.runtime import get_identity
-
 import hashlib
 import json
 import secrets
@@ -15,6 +13,7 @@ import jwt
 from cryptography.fernet import Fernet
 from redis.asyncio import Redis
 
+from examples.identity.runtime import get_identity
 
 
 AUTH_PREFIX = 'bff:session'

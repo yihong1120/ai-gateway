@@ -1,19 +1,14 @@
 from __future__ import annotations
 
-from examples.identity.runtime import get_identity, get_settings
-
-
 import httpx
 from fastapi import HTTPException
 from fastapi import Request
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from examples.shared.runtime.http_clients import get_application_http_client
 
 from examples.identity.deployment_context import DeploymentBinding
 from examples.identity.deployment_context import resolve_request_deployment
-from examples.identity.providers.mode import require_local_login
 from examples.identity.models import User
 from examples.identity.models import USER_STATUS_ACTIVE
 from examples.identity.models import USER_STATUS_EMAIL_UNVERIFIED
@@ -21,18 +16,26 @@ from examples.identity.models import USER_STATUS_PENDING_ADMIN_APPROVAL
 from examples.identity.models import USER_STATUS_REJECTED
 from examples.identity.models import USER_STATUS_SUSPENDED
 from examples.identity.models import UserProfile
+from examples.identity.providers.mode import require_local_login
+from examples.identity.runtime import get_identity
+from examples.identity.runtime import get_settings
 from examples.identity.schemas.auth import TokenPairData
 from examples.identity.schemas.auth import UserLogin
 from examples.identity.sessions.login_guard import check_login_guard
 from examples.identity.sessions.login_guard import clear_login_guard
 from examples.identity.sessions.login_guard import clear_login_guard_for_identifier
 from examples.identity.sessions.login_guard import record_failed_login
+from examples.shared.runtime.http_clients import get_application_http_client
+from examples.shared.runtime.modules import ModuleReference
+
+_identity_features = ModuleReference('examples.identity.authorization.features')
+_identity_tokens = ModuleReference('examples.identity.sessions.tokens')
 
 # Configuration settings for JWT authentication
 HCAPTCHA_VERIFY_URL = 'https://api.hcaptcha.com/siteverify'
 ALGORITHM = 'HS256'
 SUPER_ADMIN = 'ChangDar'
-from examples.identity.sessions.tokens import ACCESS_TTL, REFRESH_TTL  # noqa: F401 - OAuth response contract
+ACCESS_TTL, REFRESH_TTL = _identity_tokens.attributes('ACCESS_TTL', 'REFRESH_TTL')  # noqa: F401 - OAuth response contract
 
 
 async def clear_login_guard_for_identifiers(
@@ -47,8 +50,6 @@ async def clear_login_guard_for_identifiers(
             continue
         seen.add(normalized)
         await clear_login_guard_for_identifier(redis_pool, normalized)
-
-
 
 
 async def _authenticate(
@@ -206,7 +207,7 @@ async def _verify_hcaptcha(
 
 
 async def verify_refresh_token(refresh_token, redis_pool, deployment=None):
-    return await get_identity().local_tokens.verify(redis_pool,refresh_token,deployment)
+    return await get_identity().local_tokens.verify(redis_pool, refresh_token, deployment)
 
 
 async def login_user(
@@ -273,22 +274,22 @@ async def login_user(
 async def issue_token_pair_for_user(user, db, redis_pool, hash_refresh_token=False, deployment=None):
     # All refresh records are hashes now, independent of the caller's transport.
     tokens = get_identity().local_tokens
-    epochs = await tokens.sessions.epochs(redis_pool,user.username)
-    features = await feature_names_for_group(db,user.group_id)
-    return await tokens.issue(redis_pool,user,features,deployment,epochs=epochs)
+    epochs = await tokens.sessions.epochs(redis_pool, user.username)
+    features = await feature_names_for_group(db, user.group_id)
+    return await tokens.issue(redis_pool, user, features, deployment, epochs=epochs)
 
 
 async def logout_user(refresh_token, authorization, redis_pool):
-    await get_identity().local_tokens.logout(redis_pool,refresh_token,authorization)
+    await get_identity().local_tokens.logout(redis_pool, refresh_token, authorization)
 
 
 async def refresh_tokens(payload, redis_pool, hash_refresh_token=False, deployment=None, request=None, db=None):
     require_local_login()
     token = payload.refresh_token or ''
     if not token:
-        raise HTTPException(status_code=401,detail='Missing refresh token')
+        raise HTTPException(status_code=401, detail='Missing refresh token')
     if deployment is None and request is not None and db is not None:
-        deployment = await resolve_request_deployment(request,db)
-    return await get_identity().local_tokens.rotate(redis_pool,token,deployment)
+        deployment = await resolve_request_deployment(request, db)
+    return await get_identity().local_tokens.rotate(redis_pool, token, deployment)
 
-from examples.identity.authorization.features import feature_names_for_group
+feature_names_for_group = _identity_features.attribute('feature_names_for_group')

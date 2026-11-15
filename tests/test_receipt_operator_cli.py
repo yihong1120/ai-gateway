@@ -1,12 +1,16 @@
 """Operator queries require existing state and cannot reopen an uncertain writer."""
 from __future__ import annotations
+
 import argparse
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from examples.official_document_workflow.cli.output_receipts import execute, existing_store, _token, _origin
+from examples.official_document_workflow.cli.output_receipts import _origin
+from examples.official_document_workflow.cli.output_receipts import _token
+from examples.official_document_workflow.cli.output_receipts import execute
+from examples.official_document_workflow.cli.output_receipts import existing_store
 from examples.official_document_workflow.infrastructure.storage.automation_store import AutomationStore
 from examples.official_document_workflow.infrastructure.storage.output_receipts import PostgresOutputReceipts
 from tests.eip_postgres import EIPPostgresTestCase
@@ -34,8 +38,12 @@ class ReceiptOperatorTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase
         self.assertEqual(await execute(argparse.Namespace(command='list', owner='other', state=None, limit=20)), [])
         inspected = await execute(argparse.Namespace(command='inspect', owner='owner', output_id='output-id'))
         self.assertEqual(inspected['receipt']['state'], 'unknown')
-        await execute(argparse.Namespace(command='annotate', owner='owner', output_id='output-id',
-            actor='local-operator', outcome='investigating', note='Checked the download inventory.'))
+        await execute(
+            argparse.Namespace(
+                command='annotate', owner='owner', output_id='output-id',
+                actor='local-operator', outcome='investigating', note='Checked the download inventory.',
+            ),
+        )
         self.assertEqual(self.repo.get('output-id', 'owner').state, 'unknown')
         self.assertFalse(self.repo.begin('output-id', 'owner', 'x.csv', 'x', 'source')[1])
         self.assertEqual(self.key.read_bytes(), key_bytes)
@@ -68,7 +76,7 @@ class TokenAndOriginTests(unittest.TestCase):
             token.chmod(0o644)
             with self.assertRaises(ValueError):
                 _token(token)
-        for origin in ('https://remote.test','http://127.0.0.1?','http://user@127.0.0.1','http://127.0.0.1/path'):
+        for origin in ('https://remote.test', 'http://127.0.0.1?', 'http://user@127.0.0.1', 'http://127.0.0.1/path'):
             with self.subTest(origin=origin), self.assertRaises(ValueError):
                 _origin(origin)
         self.assertEqual(_origin('http://127.0.0.1:18082'), 'http://127.0.0.1:18082')

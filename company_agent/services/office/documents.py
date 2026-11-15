@@ -20,6 +20,17 @@ from defusedxml import ElementTree as SafeXML
 from lxml import etree
 
 from company_agent.services.files.errors import RecoverableToolError
+from company_agent.services.office.schemas import Spreadsheet
+from examples.shared.runtime.modules import ModuleReference
+
+_docx = ModuleReference('docx')
+_docx_oxml_ns = ModuleReference('docx.oxml.ns')
+_docx_shared = ModuleReference('docx.shared')
+_openpyxl = ModuleReference('openpyxl')
+_openpyxl_utils_cell = ModuleReference('openpyxl.utils.cell')
+_pptx = ModuleReference('pptx')
+_pptx_util = ModuleReference('pptx.util')
+_pymupdf = ModuleReference('pymupdf')
 
 
 TEXT_TYPES = {'.txt', '.md', '.csv'}
@@ -70,7 +81,7 @@ def extract(data, suffix):
             {'location': f"line:{i}", 'text': line} for i, line in enumerate(text.splitlines(), 1)
         ]
     if suffix == '.pdf':
-        import pymupdf
+        pymupdf = _pymupdf.load()
 
         with pymupdf.open(stream=data, filetype='pdf') as pdf:
             if pdf.is_encrypted or len(pdf) > 100:
@@ -148,9 +159,9 @@ def edit(data, suffix, location, expected, replacement):
 
 
 def create_word(title, paragraphs):
-    from docx import Document
-    from docx.oxml.ns import qn
-    from docx.shared import Pt
+    Document = _docx.attribute('Document')
+    qn = _docx_oxml_ns.attribute('qn')
+    Pt = _docx_shared.attribute('Pt')
 
     doc = Document()
     style = doc.styles['Normal']
@@ -166,8 +177,8 @@ def create_word(title, paragraphs):
 
 
 def create_slides(slides):
-    from pptx import Presentation
-    from pptx.util import Inches, Pt
+    Presentation = _pptx.attribute('Presentation')
+    Inches, Pt = _pptx_util.attributes('Inches', 'Pt')
 
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
@@ -236,9 +247,11 @@ def spreadsheet_package(data):
                 root = SafeXML.fromstring(z.read(name), forbid_dtd=True)
                 actual_rows = max((int(row.attrib.get('r', '0')) for row in root.iter('{' + X + '}row')), default=0)
                 if actual_rows > 10_000:
-                    raise RecoverableToolError('spreadsheet_resource_limit', 'XLSX 超過 10000 列上限，未讀取或截斷資料。',
-                                               resource='worksheet_rows', actual=actual_rows, maximum=10000,
-                                               next_action='停止統計與產檔，請使用者分割來源後另開工作；不可改小讀取範圍冒充完整結果。')
+                    raise RecoverableToolError(
+                        'spreadsheet_resource_limit', 'XLSX 超過 10000 列上限，未讀取或截斷資料。',
+                        resource='worksheet_rows', actual=actual_rows, maximum=10000,
+                        next_action='停止統計與產檔，請使用者分割來源後另開工作；不可改小讀取範圍冒充完整結果。',
+                    )
                 for cell in root.iter('{' + X + '}c'):
                     cells += 1
                     match = re.fullmatch(r'([A-Z]{1,3})([1-9][0-9]{0,6})', cell.attrib.get('r', ''))
@@ -255,7 +268,7 @@ def spreadsheet_package(data):
 
 @contextmanager
 def spreadsheet_books(data):
-    from openpyxl import load_workbook
+    load_workbook = _openpyxl.attribute('load_workbook')
 
     spreadsheet_package(data)
     # Streaming avoids allocating merged ranges. Recompute dimensions from actual
@@ -295,14 +308,17 @@ def spreadsheet_value(value):
 
 
 def read_spreadsheet(data, sheet=None, start_row=1, row_limit=20, column_limit=20):
-    from openpyxl.utils.cell import get_column_letter
+    get_column_letter = _openpyxl_utils_cell.attribute('get_column_letter')
 
     if not (1 <= start_row <= 10_000 and 1 <= row_limit <= 50 and 1 <= column_limit <= 100):
         raise ValueError('XLSX 閱讀範圍超過上限。')
     with spreadsheet_books(data) as (book, cached):
         selected = sheet if sheet is not None else book.sheetnames[0]
         if selected not in book.sheetnames:
-            raise RecoverableToolError('sheet_not_found', '找不到指定工作表，請使用精確名稱。', requested_sheet=selected, available_sheets=book.sheetnames)
+            raise RecoverableToolError(
+                'sheet_not_found', '找不到指定工作表，請使用精確名稱。',
+                requested_sheet=selected, available_sheets=book.sheetnames,
+            )
         ws, cache = book[selected], cached[selected]
         rows = []
         bounds = {
@@ -371,7 +387,10 @@ def analyze_spreadsheet(data, sheet, column, start_row, end_row):
         raise ValueError('XLSX 分析範圍超過上限。')
     with spreadsheet_books(data) as (book, _cached):
         if sheet not in book.sheetnames:
-            raise RecoverableToolError('sheet_not_found', '找不到指定工作表，請使用精確名稱。', requested_sheet=sheet, available_sheets=book.sheetnames)
+            raise RecoverableToolError(
+                'sheet_not_found', '找不到指定工作表，請使用精確名稱。',
+                requested_sheet=sheet, available_sheets=book.sheetnames,
+            )
         ws = book[sheet]
         values = []
         excluded = {'formula': 0, 'blank': 0, 'other': 0}
@@ -411,7 +430,6 @@ def create_spreadsheet(sheets):
     Strings are inline text, even if they start with =, +, -, or @. There is no
     formula field or code execution. openpyxl reopens this package before delivery.
     """
-    from company_agent.services.office.schemas import Spreadsheet
 
     validated = Spreadsheet(name='draft.xlsx', sheets=sheets)
     content_ns = 'http://schemas.openxmlformats.org/package/2006/content-types'

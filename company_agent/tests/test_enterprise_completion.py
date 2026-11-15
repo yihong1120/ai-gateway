@@ -9,9 +9,11 @@ from unittest.mock import patch
 import httpx
 from langchain_core.messages import AIMessage
 
+from company_agent.runtime import completion
 from company_agent.runtime.execution import DocumentAgent
 from company_agent.runtime.models import close_model
 from company_agent.runtime.models import GatewayModel
+from company_agent.runtime.storage import Store
 from company_agent.tests.test_agent import call
 from company_agent.tests.test_agent import Fixture
 from company_agent.tests.test_multi_agent import RawRoleModel
@@ -121,8 +123,6 @@ class EnterpriseTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertEqual([f['name'] for f in result['files']], ['ok.txt'])
 
     async def test_batched_completion_does_not_bypass_final_artifact_validation(self):
-        from company_agent.runtime import completion
-        from company_agent.runtime.storage import Store
 
         created = threading.Event()
         artifact, complete = Store.artifact, completion.complete
@@ -168,11 +168,11 @@ class EnterpriseTests(unittest.IsolatedAsyncioTestCase, Fixture):
 
     async def test_blocked_child_cannot_be_claimed_complete(self):
         result, _ = await self.run_model(
-                coordinator=[
-                    call('delegate_document', {'task': '建立草稿'}, 'd'),
-                    finish(), finish(outcome='blocked', summary='子任務缺來源。'),
-                ],
-                document=[finish('complete_assignment', 'needs_input', summary='缺少來源。')],
+            coordinator=[
+                call('delegate_document', {'task': '建立草稿'}, 'd'),
+                finish(), finish(outcome='blocked', summary='子任務缺來源。'),
+            ],
+            document=[finish('complete_assignment', 'needs_input', summary='缺少來源。')],
         )
         self.assertNotEqual(result['status'], 'done', result)
         self.assertIn('尚有子任務未完成', str(result['tool_feedback']))
@@ -207,12 +207,12 @@ class EnterpriseTests(unittest.IsolatedAsyncioTestCase, Fixture):
             ids.append(json.loads(messages[-1].content)['id'])
             return finish('complete_assignment', ids=ids)
         result, _ = await self.run_model(
-                coordinator=[
-                    call('delegate_document', {'task': '建立草稿'}, 'd'), call('delegate_reviewer', {'task': '核對草稿'}, 'r'),
-                    lambda _:finish(ids=ids), lambda _:finish(outcome='blocked', ids=ids, summary='尚未讀取核對。'),
-                ],
-                document=[call('create_text', {'name': 'ok.txt', 'content': 'verified'}, 'create'), document_done],
-                reviewer=[finish('complete_assignment', summary='已核對。')],
+            coordinator=[
+                call('delegate_document', {'task': '建立草稿'}, 'd'), call('delegate_reviewer', {'task': '核對草稿'}, 'r'),
+                lambda _:finish(ids=ids), lambda _:finish(outcome='blocked', ids=ids, summary='尚未讀取核對。'),
+            ],
+            document=[call('create_text', {'name': 'ok.txt', 'content': 'verified'}, 'create'), document_done],
+            reviewer=[finish('complete_assignment', summary='已核對。')],
         )
         self.assertEqual(result['status'], 'blocked', result)
         self.assertEqual(len(result['files']), 1)
@@ -220,13 +220,13 @@ class EnterpriseTests(unittest.IsolatedAsyncioTestCase, Fixture):
     async def test_all_outputs_must_be_disclosed(self):
         self.config.require_artifact_review = False
         result, _ = await self.run_model(
-                coordinator=[call('delegate_document', {'task': '建立草稿'}, 'd'), finish(), finish(outcome='blocked')],
-                document=[
-                    call(
-                        'create_text', {'name': 'ok.txt', 'content': 'verified'},
-                        'create',
-                    ), finish('complete_assignment'),
-                ],
+            coordinator=[call('delegate_document', {'task': '建立草稿'}, 'd'), finish(), finish(outcome='blocked')],
+            document=[
+                call(
+                    'create_text', {'name': 'ok.txt', 'content': 'verified'},
+                    'create',
+                ), finish('complete_assignment'),
+            ],
         )
         self.assertEqual(result['status'], 'blocked', result)
         self.assertIn('完成清單未列出', str(result['tool_feedback']))
@@ -263,8 +263,8 @@ class EnterpriseTests(unittest.IsolatedAsyncioTestCase, Fixture):
             self.assertIn('伺服器本工作產出清單', messages[0].content)
             return finish(ids=ids)
         result, _ = await self.run_model(
-                coordinator=[call('delegate_document', {'task': '建立草稿'}, 'd'), finish(), corrected],
-                document=[call('create_text', {'name': 'ok.txt', 'content': 'verified'}, 'create'), created],
+            coordinator=[call('delegate_document', {'task': '建立草稿'}, 'd'), finish(), corrected],
+            document=[call('create_text', {'name': 'ok.txt', 'content': 'verified'}, 'create'), created],
         )
         self.assertEqual(result['status'], 'done', result)
         self.assertNotIn('errors', result)

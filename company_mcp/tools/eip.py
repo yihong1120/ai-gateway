@@ -1,6 +1,11 @@
 """EIP read contracts share the existing business validators."""
-from company_agent.services.eip.schemas import CalendarQuery, EIPAttachments, EIPQuery, EIPRead
+from __future__ import annotations
+
 from .common import Workspace
+from company_agent.services.eip.schemas import CalendarQuery
+from company_agent.services.eip.schemas import EIPAttachments
+from company_agent.services.eip.schemas import EIPQuery
+from company_agent.services.eip.schemas import EIPRead
 
 
 class Documents(Workspace, EIPQuery):

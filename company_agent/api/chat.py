@@ -1,20 +1,25 @@
 """Publish owned durable job progress/results into the originating WebUI messages."""
-
 from __future__ import annotations
 
 import asyncio
 import logging
 
-from company_agent.api.progress import STATUSES, progress_text
+from company_agent.api.progress import progress_text
+from company_agent.api.progress import STATUSES
+from examples.shared.runtime.modules import ModuleReference
+
+_agent_pipe = ModuleReference('company_agent.api.pipe')
+_webui_chats = ModuleReference('open_webui.models.chats')
+_webui_main = ModuleReference('open_webui.socket.main')
 
 logger = logging.getLogger(__name__)
 
 
 async def publish_job(queue, row, io, result_reader=None):
-    from open_webui.models.chats import Chats
-    from open_webui.socket.main import get_event_emitter
+    Chats = _webui_chats.attribute('Chats')
+    get_event_emitter = _webui_main.attribute('get_event_emitter')
 
-    from company_agent.api.pipe import markdown
+    markdown = _agent_pipe.attribute('markdown')
 
     chat = await Chats.get_chat_by_id_and_user_id(row['chat'], row['owner'])
     if chat is None:
@@ -51,7 +56,7 @@ async def publish_job(queue, row, io, result_reader=None):
                 'role': 'assistant',
                 'status': 'completed' if done else 'in_progress',
                 'content': [{'type': 'output_text', 'text': content}],
-            }
+            },
         ]
         saved = await Chats.upsert_message_to_chat_by_id_and_message_id(
             row['chat'],
@@ -85,7 +90,7 @@ async def publish_job(queue, row, io, result_reader=None):
                         'output': output,
                         'done': done,
                     },
-                }
+                },
             )
 
 

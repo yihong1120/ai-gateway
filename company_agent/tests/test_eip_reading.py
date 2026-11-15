@@ -11,12 +11,16 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import patch
 
+import examples.official_document_workflow.infrastructure.eip.calendar_read as _calendar_read_imports
 from company_agent.runtime.context import Context
-from company_agent.services.eip.client import remember
 from company_agent.services.eip import reading
+from company_agent.services.eip.client import remember
 from company_agent.services.eip.reading import read_attachment
 from company_agent.services.eip.schemas import EIPRead
 from company_agent.tests.test_agent import Fixture
+from examples.shared.runtime.modules import ModuleReference
+
+_fixture_test_calendar_tools = ModuleReference('company_agent.tests.test_calendar_tools')
 
 
 class EIPReadingTests(unittest.IsolatedAsyncioTestCase, Fixture):
@@ -55,7 +59,10 @@ class EIPReadingTests(unittest.IsolatedAsyncioTestCase, Fixture):
             patch('company_agent.services.eip.reading.binding', new=AsyncMock()), patch(
                 'examples.official_document_workflow.infrastructure.eip.sessions.manual_session', new=session,
             ),
-            patch('examples.official_document_workflow.infrastructure.office.office_input.to_pdf', new=AsyncMock(side_effect=convert)),
+            patch(
+                'examples.official_document_workflow.infrastructure.office.office_input.to_pdf',
+                new=AsyncMock(side_effect=convert),
+            ),
             patch(
                 'company_agent.services.files.operations.worker', return_value=[
                     {'location': f'page:{i}', 'text': 'body'} for i in range(8)
@@ -88,10 +95,12 @@ class EIPReadingTests(unittest.IsolatedAsyncioTestCase, Fixture):
     def owned_attachment(self, owner, *, name='另一份公文.doc', url='second-private-url'):
         ctx = Context(owner, self.store.job(owner), self.config, self.store)
         attachment = {'name': name, 'url': url}
-        handle = remember(ctx, {
-            'kind': 'attachment', 'doc': {'id': 'other-document', 'folder': 'inbox'},
-            'attachment': attachment,
-        })
+        handle = remember(
+            ctx, {
+                'kind': 'attachment', 'doc': {'id': 'other-document', 'folder': 'inbox'},
+                'attachment': attachment,
+            },
+        )
         return ctx, handle, attachment
 
     async def test_authorized_owners_share_only_blocks_after_independent_downloads(self):
@@ -149,10 +158,12 @@ class EIPReadingTests(unittest.IsolatedAsyncioTestCase, Fixture):
         parser.assert_not_called()
 
     async def test_same_source_url_with_changed_bytes_does_not_reuse_content(self):
-        with patch('company_agent.services.files.operations.worker', side_effect=[
-            [{'location': 'page:1', 'text': 'old body'}],
-            [{'location': 'page:1', 'text': 'changed body'}],
-        ]) as parser:
+        with patch(
+            'company_agent.services.files.operations.worker', side_effect=[
+                [{'location': 'page:1', 'text': 'old body'}],
+                [{'location': 'page:1', 'text': 'changed body'}],
+            ],
+        ) as parser:
             first = await read_attachment(self.ctx, EIPRead(handle=self.handle))
             other, handle, _ = self.owned_attachment('alice', name=self.att['name'], url=self.att['url'])
             with patch('examples.official_document_workflow.infrastructure.office.office_input.to_pdf', AsyncMock(return_value=(io.BytesIO(b'changed-pdf'), '公文.pdf'))):
@@ -182,7 +193,10 @@ class EIPReadingTests(unittest.IsolatedAsyncioTestCase, Fixture):
                 await read_attachment(other, EIPRead(handle=handle))
         parser.assert_not_called()
         with self.store.db() as db:
-            result = db.execute('SELECT result FROM tool_receipts WHERE owner=%s AND job=%s', ('alice', other.job)).fetchone()[0]
+            result = db.execute(
+                'SELECT result FROM tool_receipts WHERE owner=%s AND job=%s',
+                ('alice', other.job),
+            ).fetchone()[0]
         self.assertIsNone(result)
 
     async def test_content_cache_keeps_text_ocr_pages_and_configuration_separate(self):
@@ -243,10 +257,9 @@ class EIPReadingTests(unittest.IsolatedAsyncioTestCase, Fixture):
             self.assertEqual(parse.call_count, 1)
 
     async def test_calendar_attachment_uses_detail_and_downloads_once_for_pagination(self):
-        from company_agent.tests.test_calendar_tools import row, detail_rows
-        from examples.official_document_workflow.infrastructure.eip.calendar_read import detail
+        row, detail_rows = _fixture_test_calendar_tools.attributes('row', 'detail_rows')
         rows = detail_rows()
-        attachment = detail(rows, row()[2])['attachments'][0]
+        attachment = _calendar_read_imports.detail(rows, row()[2])['attachments'][0]
         handle = remember(
             self.ctx, {
                 'kind': 'attachment', 'doc': {
@@ -290,7 +303,7 @@ class EIPReadingTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertTrue(raw.closed)
 
     async def test_removed_calendar_attachment_is_not_downloaded(self):
-        from company_agent.tests.test_calendar_tools import row, detail_rows
+        row, detail_rows = _fixture_test_calendar_tools.attributes('row', 'detail_rows')
         handle = remember(
             self.ctx, {
                 'kind': 'attachment', 'doc': {

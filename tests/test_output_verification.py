@@ -1,16 +1,23 @@
 """HTTP and storage boundaries reject the same identity and content changes."""
+from __future__ import annotations
 
-from dataclasses import replace
+import copy
 import hashlib
-from pathlib import Path
 import tempfile
-from types import SimpleNamespace
 import unittest
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
-from examples.official_document_workflow.application.output_receipts import OutputReceipt
-from examples.official_document_workflow.application.output_review import WebUIOutputVerifier
+
+from examples.official_document_workflow.application.output_receipts import (
+    OutputReceipt,
+)
+from examples.official_document_workflow.application.output_review import (
+    WebUIOutputVerifier,
+)
 from examples.official_document_workflow.services.file_access import FileAccess
 
 
@@ -53,7 +60,6 @@ class SharedVerificationTests(unittest.IsolatedAsyncioTestCase):
                 'too_large',
                 'size',
             ):
-                import copy
 
                 item = copy.deepcopy(base)
                 content, expected = data, receipt
@@ -72,7 +78,7 @@ class SharedVerificationTests(unittest.IsolatedAsyncioTestCase):
                 path.write_bytes(content)
                 row = SimpleNamespace(**item, path=str(path))
                 files = SimpleNamespace(
-                    get_file_by_id_and_user_id=AsyncMock(return_value=row)
+                    get_file_by_id_and_user_id=AsyncMock(return_value=row),
                 )
                 storage = SimpleNamespace(get_file=lambda value: value)
                 local = await FileAccess(files, storage).inspect(expected)
@@ -80,7 +86,7 @@ class SharedVerificationTests(unittest.IsolatedAsyncioTestCase):
                 def request(request):
                     if request.url.path == '/api/v1/auths/':
                         return httpx.Response(
-                            200, json={'id': 'admin', 'role': 'admin'}
+                            200, json={'id': 'admin', 'role': 'admin'},
                         )
                     return (
                         httpx.Response(200, content=content)
@@ -89,13 +95,13 @@ class SharedVerificationTests(unittest.IsolatedAsyncioTestCase):
                     )
 
                 async with httpx.AsyncClient(
-                    base_url='http://webui', transport=httpx.MockTransport(request)
+                    base_url='http://webui', transport=httpx.MockTransport(request),
                 ) as client:
                     remote = await WebUIOutputVerifier(client).verify(expected)
                 with self.subTest(change=change):
                     self.assertEqual(local.outcome, remote.outcome)
                     self.assertEqual(
-                        local.outcome, 'verified' if change == 'valid' else 'mismatch'
+                        local.outcome, 'verified' if change == 'valid' else 'mismatch',
                     )
                     if change != 'valid':
                         self.assertEqual(local.reason, remote.proof['reason'])
@@ -103,8 +109,8 @@ class SharedVerificationTests(unittest.IsolatedAsyncioTestCase):
     async def test_unavailable_storage_is_not_reported_as_missing(self):
         files = SimpleNamespace(
             get_file_by_id_and_user_id=AsyncMock(
-                side_effect=OSError('private diagnostics')
-            )
+                side_effect=OSError('private diagnostics'),
+            ),
         )
         result = await FileAccess(files, None).inspect(None)
         self.assertEqual(result.outcome, 'unavailable')

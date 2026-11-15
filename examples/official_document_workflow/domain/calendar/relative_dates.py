@@ -17,6 +17,9 @@ from zoneinfo import ZoneInfo
 from pydantic import TypeAdapter
 
 from .contracts import RelativeDeadline
+from examples.shared.runtime.modules import ModuleReference
+
+_workflow_calendar_semantics = ModuleReference('examples.official_document_workflow.domain.calendar.calendar_semantics')
 
 
 ESTIMATE_TITLE = '【期限推估】'
@@ -50,8 +53,10 @@ class ReceiptContext:
         return cls(flow_id, fields.get('發文字號', ''), form_date(fields.get('收文日期')))
 
     def record(self):
-        return {'flow_id': self.flow_id, 'reference_number': self.reference_number,
-                'received_date': self.received_date, 'source': 'EIP 收文日期'}
+        return {
+            'flow_id': self.flow_id, 'reference_number': self.reference_number,
+            'received_date': self.received_date, 'source': 'EIP 收文日期',
+        }
 
     def for_document(self, document):
         if not self.received_date or not self.reference_number:
@@ -68,8 +73,10 @@ def integer(value):
     value = value.translate(str.maketrans('壹貳參肆伍陸柒捌玖拾佰仟', '一二三四五六七八九十百千'))
     if value.isdecimal():
         return int(value)
-    digits = {'零': 0, '一': 1, '二': 2, '兩': 2, '三': 3, '四': 4,
-              '五': 5, '六': 6, '七': 7, '八': 8, '九': 9}
+    digits = {
+        '零': 0, '一': 1, '二': 2, '兩': 2, '三': 3, '四': 4,
+        '五': 5, '六': 6, '七': 7, '八': 8, '九': 9,
+    }
     total = current = 0
     for char in value:
         if char in digits:
@@ -84,15 +91,19 @@ def integer(value):
 
 def period_matches(evidence, spec):
     """Check only the quoted period selected for this work, not the corpus."""
-    anchor = (r'(?:文到|函到|收文|送達|收到(?:本函|本公文)?|收受(?:本函|本公文)?|接獲本函)'
-              if spec['anchor'] == 'receipt' else r'(?:發文|發函|函發)')
+    anchor = (
+        r'(?:文到|函到|收文|送達|收到(?:本函|本公文)?|收受(?:本函|本公文)?|接獲本函)'
+        if spec['anchor'] == 'receipt' else r'(?:發文|發函|函發)'
+    )
     pattern = anchor + r'[^。；;]{0,32}?(?<![0-9年月./-])([0-9零一二兩三四五六七八九十百千壹貳參肆伍陸柒捌玖拾佰仟]+)(?:個)?(工作日|工作天|曆日|日曆天|日|天|週|星期)'
     periods = set()
     for match in re.finditer(pattern, normalized(evidence)):
         count = integer(match[1])
         unit = match[2]
-        periods.add((count * (7 if unit in ('週', '星期') else 1),
-                     'working_days' if unit in ('工作日', '工作天') else 'calendar_days'))
+        periods.add((
+            count * (7 if unit in ('週', '星期') else 1),
+            'working_days' if unit in ('工作日', '工作天') else 'calendar_days',
+        ))
     if periods != {(spec['days'], spec['day_type'])}:
         return False
     inclusive = bool(re.search(r'(?<!不)含(?:當|收文|發文)日|當日計入', normalized(evidence)))
@@ -128,20 +139,26 @@ class RelativeDateProof:
         return value == self.deadline and period_matches(evidence, self.spec)
 
     def audit(self):
-        return {'estimated': True, 'anchor_date': self.anchor_date,
-                'anchor_source': self.anchor_source, 'deadline': self.deadline,
-                'receipt_date_recorded': self.anchor_source == 'EIP 收文日期',
-                'holiday_rules_verified': False,
-                'reference_number': self.reference_number, **self.spec}
+        return {
+            'estimated': True, 'anchor_date': self.anchor_date,
+            'anchor_source': self.anchor_source, 'deadline': self.deadline,
+            'receipt_date_recorded': self.anchor_source == 'EIP 收文日期',
+            'holiday_rules_verified': False,
+            'reference_number': self.reference_number, **self.spec,
+        }
 
     def notice(self):
         spec = self.spec
         rule = '含起算日' if spec['include_anchor_day'] else '次日起算'
         unit = '個工作日' if spec['day_type'] == 'working_days' else '個曆日'
-        caveat = ('工作日僅排除週末，公司假日與補班待核對。' if spec['day_type'] == 'working_days'
-                  else '依曆日試算，假日順延待核對。')
-        return '\n'.join([ESTIMATE_NOTICE, f'起算依據：{self.anchor_source} {self.anchor_date}',
-                          f'計算方式：{rule} {spec["days"]} {unit} → {self.deadline}', caveat])
+        caveat = (
+            '工作日僅排除週末，公司假日與補班待核對。' if spec['day_type'] == 'working_days'
+            else '依曆日試算，假日順延待核對。'
+        )
+        return '\n'.join([
+            ESTIMATE_NOTICE, f'起算依據：{self.anchor_source} {self.anchor_date}',
+            f'計算方式：{rule} {spec["days"]} {unit} → {self.deadline}', caveat,
+        ])
 
 
 def estimate_event(event, sources, document, receipt_context=None):
@@ -155,7 +172,7 @@ def estimate_event(event, sources, document, receipt_context=None):
         spec = TypeAdapter(RelativeDeadline).validate_python(relation['relative_deadline'])
     except ValueError as error:
         raise ValueError('相對期限推估欄位格式不完整。') from error
-    from .calendar_semantics import resolve_spans
+    resolve_spans = _workflow_calendar_semantics.attribute('resolve_spans')
 
     refs = event.get('evidence_spans') or {}
     spans = refs.get('start_date') or refs.get('action')
@@ -174,10 +191,14 @@ def estimate_event(event, sources, document, receipt_context=None):
         anchor = document.issued.gregorian.replace('/', '-')
         source = '公文發文日期' + ('（暫代送達日，實際送達日待確認）' if spec['anchor'] == 'receipt' else '')
     deadline = add_days(anchor, spec)
-    proof = RelativeDateProof(anchor, source, tuple(spec.items()), deadline,
-                              document.reference_number, hashlib.sha256(evidence.encode()).hexdigest())
-    updated = {**event, 'start_date': deadline, 'end_date': deadline if event.get('end_date') else None,
-               'tentative_schedule': None, '_relative_date_proof': proof,
-               'evidence_spans': {**refs, 'start_date': list(spans)}}
+    proof = RelativeDateProof(
+        anchor, source, tuple(spec.items()), deadline,
+        document.reference_number, hashlib.sha256(evidence.encode()).hexdigest(),
+    )
+    updated = {
+        **event, 'start_date': deadline, 'end_date': deadline if event.get('end_date') else None,
+        'tentative_schedule': None, '_relative_date_proof': proof,
+        'evidence_spans': {**refs, 'start_date': list(spans)},
+    }
     updated['assignment'] = {**relation, 'anchor_date': anchor}
     return updated

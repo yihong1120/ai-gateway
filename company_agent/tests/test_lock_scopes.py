@@ -1,8 +1,9 @@
 """Unrelated jobs progress while per-job mutations and global limits serialize."""
+from __future__ import annotations
 
+import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
-import time
 
 from company_agent.tests.test_agent import Fixture
 
@@ -25,11 +26,11 @@ class MutationLockTests(Fixture):
             try:
                 # Different owners and jobs must not wait for the held transaction.
                 result = pool.submit(
-                    self.store.artifact, 'bob', other, 'other.txt', b'other'
+                    self.store.artifact, 'bob', other, 'other.txt', b'other',
                 ).result(timeout=2)
                 self.assertEqual(result['name'], 'other.txt')
                 waiting = pool.submit(
-                    self.store.artifact, 'alice', self.job, 'same.txt', b'same'
+                    self.store.artifact, 'alice', self.job, 'same.txt', b'same',
                 )
                 time.sleep(0.05)
                 self.assertFalse(waiting.done())

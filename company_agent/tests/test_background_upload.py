@@ -2,28 +2,37 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import nullcontext
 import json
+import sys
 import types
 import unittest
+from contextlib import nullcontext
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
 from unittest.mock import patch
 
 from pydantic import BaseModel
 
+import company_agent.api.pipe as _pipe_imports
+import examples.official_document_workflow.runtime as _runtime_imports
 from company_agent.api.queue import WorkQueue
 from company_agent.api.service import Service
 from company_agent.tests.test_agent import Fixture
 from examples.official_document_workflow.application import background_upload as upload
+from examples.official_document_workflow.infrastructure.storage.processing_cache import (
+    upload_outcome,
+)
 from examples.shared.runtime import concurrency
-from examples.official_document_workflow.infrastructure.storage.processing_cache import upload_outcome
+from examples.shared.runtime.modules import ModuleReference
+
+_webui_chats = ModuleReference('open_webui.models.chats')
+_webui_functions = ModuleReference('open_webui.models.functions')
+_fixture_test_official_upload_groups = ModuleReference('tests.test_official_upload_groups')
 
 
 class BackgroundUploadTests(unittest.IsolatedAsyncioTestCase, Fixture):
     def setUp(self):
         super().setUp()
-        import sys
         functions = types.ModuleType('open_webui.models.functions')
         functions.Functions = types.SimpleNamespace(get_function_by_id=AsyncMock())
         chats = types.ModuleType('open_webui.models.chats')
@@ -85,7 +94,7 @@ class BackgroundUploadTests(unittest.IsolatedAsyncioTestCase, Fixture):
         )
         self.modules.start()
         self.addCleanup(self.modules.stop)
-        from open_webui.models.functions import Functions
+        Functions = _webui_functions.attribute('Functions')
         self.function_patch = patch.object(
             Functions, 'get_function_by_id',
             AsyncMock(side_effect=lambda _: self.function),
@@ -94,11 +103,15 @@ class BackgroundUploadTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.addCleanup(self.function_patch.stop)
 
     async def test_trusted_chat_reply_uses_saved_continuation_without_enqueuing_work(self):
-        from open_webui.models.chats import Chats
-        chat = {'history': {'currentId': 'answer', 'messages': {
-            'question': {'id': 'question', 'role': 'user', 'content': '全部', 'files': []},
-            'answer': {'id': 'answer', 'role': 'assistant', 'parentId': 'question'},
-        }}}
+        Chats = _webui_chats.attribute('Chats')
+        chat = {
+            'history': {
+                'currentId': 'answer', 'messages': {
+                    'question': {'id': 'question', 'role': 'user', 'content': '全部', 'files': []},
+                    'answer': {'id': 'answer', 'role': 'assistant', 'parentId': 'question'},
+                },
+            },
+        }
         self.pipe.clarifications = types.SimpleNamespace(
             scope=Mock(return_value='trusted-scope'), complete=AsyncMock(return_value='continued CSV'),
         )
@@ -125,7 +138,7 @@ class BackgroundUploadTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertFalse(self.started.is_set())
 
     async def test_submission_enqueues_before_document_slot_and_disconnect_preserves_owned_job(self):
-        from open_webui.models.chats import Chats
+        Chats = _webui_chats.attribute('Chats')
         chat = {
             'history': {
                 'messages': {
@@ -144,12 +157,14 @@ class BackgroundUploadTests(unittest.IsolatedAsyncioTestCase, Fixture):
                 async def emit(event):
                     accepted.set()
 
-                task = asyncio.create_task(self.pipe.pipe(
+                task = asyncio.create_task(
+                    self.pipe.pipe(
                         {'messages': [{'content': 'forged'}]}, __user__={'id': 'alice'},
                         __files__=[{'id': 'forged-file'}],
                         __metadata__={'chat_id': 'chat', 'message_id': 'a'},
                         __event_emitter__=emit,
-                    ))
+                    ),
+                )
                 try:
                     await asyncio.wait_for(accepted.wait(), 2)
                     self.assertFalse(task.done())
@@ -165,11 +180,10 @@ class BackgroundUploadTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.svc.model_factory.assert_not_called()
 
     async def test_chat_observer_returns_document_result_and_downloads_without_replaying(self):
-        from company_agent.api.pipe import wait_for_result
 
         key = self.enqueue()
         events = AsyncMock()
-        task = asyncio.create_task(wait_for_result(self.svc, 'alice', key, events))
+        task = asyncio.create_task(_pipe_imports.wait_for_result(self.svc, 'alice', key, events))
         try:
             async with asyncio.timeout(3):
                 while not events.await_count:
@@ -226,18 +240,19 @@ class BackgroundUploadTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.svc.model_factory.assert_not_called()
 
     async def test_background_document_binds_the_same_app_content_cache_as_eip(self):
-        from examples.official_document_workflow.runtime import current_resources
         self.pipe.valves.document_analysis_cache_enabled = True
         key = self.enqueue('shared-content')
         await self.svc._run_claimed(self.queue.claim())
         result = self.queue.public('alice', key)
         self.assertEqual(result['status'], 'done', result)
-        self.assertIs(self.pipe.content_cache, current_resources().shared_content)
-        self.assertIs(self.pipe.evidence_cache, current_resources().shared_content)
+        self.assertIs(self.pipe.content_cache, _runtime_imports.current_resources().shared_content)
+        self.assertIs(self.pipe.evidence_cache, _runtime_imports.current_resources().shared_content)
         self.svc.model_factory.assert_not_called()
 
     async def test_native_pdf_pipeline_records_pdf_word_csv_and_typed_completion(self):
-        from tests.test_official_upload_groups import UploadGroupTests, DEADLINE_EVIDENCE, payload
+        UploadGroupTests, DEADLINE_EVIDENCE, payload = _fixture_test_official_upload_groups.attributes(
+            'UploadGroupTests', 'DEADLINE_EVIDENCE', 'payload',
+        )
         fixture = UploadGroupTests()
         fixture.addCleanup = self.addCleanup
         fixture.setUp()

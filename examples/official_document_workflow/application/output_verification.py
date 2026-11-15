@@ -1,9 +1,9 @@
 """Pure, shared identity rules and bounded content proof for every file adapter."""
-
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import hashlib
+from dataclasses import dataclass
+from dataclasses import field
 from typing import Literal
 
 from examples.official_document_workflow.domain.documents import OutputUncertain
@@ -53,7 +53,7 @@ class ContentProof:
         self.size += len(block)
         if self.size > self.limit:
             raise OutputMismatch(
-                'file_size_limit', {'bytes': self.size, 'limit': self.limit}
+                'file_size_limit', {'bytes': self.size, 'limit': self.limit},
             )
         self.digest.update(block)
 

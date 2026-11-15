@@ -5,17 +5,22 @@ import builtins
 import importlib.util
 import json
 import os
-from pathlib import Path
 import sys
 import tempfile
-from types import ModuleType
 import unittest
-from unittest.mock import Mock, patch
+from pathlib import Path
+from types import ModuleType
+from unittest.mock import Mock
+from unittest.mock import patch
 
-from company_agent.ops import deploy_webui, smoke_webui
-from examples.company_ai_access.deployment.production import run, smoke
-from examples.shared.config import ConfigurationError, read_service
+from dotenv import load_dotenv
 
+from company_agent.ops import deploy_webui
+from company_agent.ops import smoke_webui
+from examples.company_ai_access.deployment.production import run
+from examples.company_ai_access.deployment.production import smoke
+from examples.shared.config import ConfigurationError
+from examples.shared.config import read_service
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -29,7 +34,7 @@ class WebUIEnvironmentTests(unittest.IsolatedAsyncioTestCase):
         original = builtins.__import__
 
         def importing(name, *args, **kwargs):
-            if name.startswith('open_webui'):
+            if name.startswith(('open_webui', 'examples.openwebui._host')):
                 self.assertEqual(os.environ['PYTHON_DOTENV_DISABLED'], '1')
                 self.assertEqual(events, ['webui'])
                 events.append('host')
@@ -60,7 +65,6 @@ class WebUIEnvironmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events, ['webui', 'host'])
 
     def test_upstream_dotenv_honors_disabled_flag_even_with_a_real_candidate_file(self):
-        from dotenv import load_dotenv
 
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'PYTHON_DOTENV_DISABLED': '1'}, clear=True):
             source = Path(directory) / '.env'
@@ -94,6 +98,7 @@ class ProductionConfigurationTests(unittest.TestCase):
         uvicorn.run = Mock(side_effect=start)
         with patch.dict(os.environ, {'AI_GATEWAY_CONFIG': str(self.config)}, clear=True), \
                 patch.object(run.Path, 'home', return_value=self.root), \
+                patch.object(run, 'uvicorn', uvicorn), \
                 patch.object(sys, 'path', list(sys.path)), patch.dict(sys.modules, {'uvicorn': uvicorn}):
             run.main()
         uvicorn.run.assert_called_once()

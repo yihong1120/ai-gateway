@@ -1,37 +1,34 @@
 """Aggregate an authorised ledger once; construct detail models only for a page."""
-
 from __future__ import annotations
 
 import hashlib
 import json
 from collections import defaultdict
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from dataclasses import field
+from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
 from typing import Any
-from examples.ai_usage.config import AiUsageSettings
-from examples.ai_usage.services.directory import DirectoryUser
 
-from examples.ai_usage.schemas.admin_usage import (
-    AdminUsageRecord,
-    AdminUsageSummary,
-    AdminUserUsage,
-    UnattributedUsageRecord,
-    UsageCoverage,
-    UsageRangePeriod,
-    UsageSelection,
-)
-from examples.ai_usage.schemas.usage import SourceUsage, UnattributedCategoryUsage
-from examples.ai_usage.services.accounting import (
-    accounting_owner,
-    unattributed_category,
-)
-from examples.ai_usage.services.litellm_usage import (
-    UsageAggregate,
-    UsageFact,
-    UsageTotalsAccumulator,
-    DailyLogWindow,
-    usage_budget,
-)
+from examples.ai_usage.config import AiUsageSettings
+from examples.ai_usage.schemas.admin_usage import AdminUsageRecord
+from examples.ai_usage.schemas.admin_usage import AdminUsageSummary
+from examples.ai_usage.schemas.admin_usage import AdminUserUsage
+from examples.ai_usage.schemas.admin_usage import UnattributedUsageRecord
+from examples.ai_usage.schemas.admin_usage import UsageCoverage
+from examples.ai_usage.schemas.admin_usage import UsageRangePeriod
+from examples.ai_usage.schemas.admin_usage import UsageSelection
+from examples.ai_usage.schemas.usage import SourceUsage
+from examples.ai_usage.schemas.usage import UnattributedCategoryUsage
+from examples.ai_usage.services.accounting import accounting_owner
+from examples.ai_usage.services.accounting import unattributed_category
+from examples.ai_usage.services.directory import DirectoryUser
+from examples.ai_usage.services.litellm_usage import DailyLogWindow
+from examples.ai_usage.services.litellm_usage import usage_budget
+from examples.ai_usage.services.litellm_usage import UsageAggregate
+from examples.ai_usage.services.litellm_usage import UsageFact
+from examples.ai_usage.services.litellm_usage import UsageTotalsAccumulator
 
 _MIN_TIME = datetime.min.replace(tzinfo=timezone.utc)
 
@@ -68,7 +65,7 @@ class AdminUsageData:
         return len(self._records)
 
     def records_page(self, start, size):
-        return [entry.model() for entry in self._records[start : start + size]]
+        return [entry.model() for entry in self._records[start: start + size]]
 
     def unattributed_page(self, start, size, category=None):
         matching = (
@@ -77,9 +74,8 @@ class AdminUsageData:
             else [entry for entry in self._unattributed if entry.category == category]
         )
         return len(matching), [
-            entry.model() for entry in matching[start : start + size]
+            entry.model() for entry in matching[start: start + size]
         ]
-
 
 
 class _OwnerTotals:
@@ -117,10 +113,11 @@ def build_admin_usage_data(
             allowed[user.end_user].append(user.identity.model_dump())
     aggregate, selected = UsageAggregate(), _OwnerTotals()
     attributed, unattributed = UsageTotalsAccumulator(), UsageTotalsAccumulator()
-    by_owner = defaultdict(_OwnerTotals)
-    budgets = defaultdict(UsageTotalsAccumulator)
-    categories = defaultdict(UsageTotalsAccumulator)
-    records, unallocated = [], []
+    by_owner: defaultdict[str, _OwnerTotals] = defaultdict(_OwnerTotals)
+    budgets: defaultdict[str, UsageTotalsAccumulator] = defaultdict(UsageTotalsAccumulator)
+    categories: defaultdict[str, UsageTotalsAccumulator] = defaultdict(UsageTotalsAccumulator)
+    records: list[_Record] = []
+    unallocated: list[_Record] = []
     for row in rows:
         owner = accounting_owner(row, settings)
         if owner in excluded_subjects or (
@@ -136,7 +133,7 @@ def build_admin_usage_data(
             continue
         aggregate.add(fact)
         selected.add(fact)
-        if owner in allowed:
+        if owner is not None and owner in allowed:
             attributed.add(fact)
             by_owner[owner].add(fact)
             records.extend(_Record(fact, identity) for identity in allowed[owner])
@@ -146,7 +143,7 @@ def build_admin_usage_data(
             categories[category].add(fact)
             reference = str(
                 row.get('request_id')
-                or json.dumps(fact.reference_data(), sort_keys=True)
+                or json.dumps(fact.reference_data(), sort_keys=True),
             )
             unallocated.append(
                 _Record(
@@ -154,19 +151,19 @@ def build_admin_usage_data(
                     accounting_id=hashlib.sha256(reference.encode()).hexdigest()[:24],
                     reason='identity_not_linked' if owner else 'missing_identity',
                     category=category,
-                )
+                ),
             )
     records.sort(
         key=lambda entry: (
-            entry.identity['user_id'],
+            entry.identity['user_id'] if entry.identity is not None else '',
             entry.fact.model,
             entry.fact.provider,
             entry.fact.fields['total_tokens'],
             entry.fact.spend_usd,
-        )
+        ),
     )
     records.sort(key=lambda entry: entry.fact.started_at or _MIN_TIME, reverse=True)
-    unallocated.sort(key=lambda entry: entry.accounting_id)
+    unallocated.sort(key=lambda entry: entry.accounting_id or '')
     unallocated.sort(key=lambda entry: entry.fact.started_at or _MIN_TIME, reverse=True)
     user_items = []
     for user in users:
@@ -177,7 +174,7 @@ def build_admin_usage_data(
                 account_status=user.account_status,
                 ai_identity_linked=user.end_user is not None,
                 budget=usage_budget(
-                    settings, budgets[user.end_user or ''].spend_usd
+                    settings, budgets[user.end_user or ''].spend_usd,
                 )
                 if user.end_user and window.is_today
                 else None,
@@ -185,7 +182,7 @@ def build_admin_usage_data(
                 user_totals=totals.user.schema(),
                 service_totals=totals.service.schema(),
                 sources=totals.source_models(),
-            )
+            ),
         )
     linked = sum(user.end_user is not None for user in users)
     return AdminUsageData(
@@ -218,7 +215,7 @@ def build_admin_usage_data(
             ),
             unattributed_categories=[
                 UnattributedCategoryUsage(
-                    category=category, totals=categories[category].schema()
+                    category=category, totals=categories[category].schema(),
                 )
                 for category in sorted(categories)
             ],

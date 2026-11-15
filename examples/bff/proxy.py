@@ -1,21 +1,21 @@
 """BFF proxy operations."""
-
 from __future__ import annotations
 
 from fastapi import Request
-
 from fastapi.responses import Response
-
 from redis.asyncio import Redis
-
-from examples.identity.deployment_context import DeploymentBinding
 
 from examples.bff.proxy_config import resolve_upstream
 from examples.bff.proxy_headers import _proxy_response_headers
 from examples.bff.proxy_http import _send_proxy_request
 from examples.bff.proxy_responses import rewrite_response
-from examples.bff.proxy_streams import _is_sse_request, _proxy_streaming_request
+from examples.bff.proxy_streams import _is_sse_request
+from examples.bff.proxy_streams import _proxy_streaming_request
 from examples.bff.proxy_tokens import _get_proxy_access_token_or_503
+from examples.identity.deployment_context import DeploymentBinding
+from examples.shared.runtime.modules import ModuleReference
+
+_examples_bff_proxy_tokens = ModuleReference('examples.bff.proxy_tokens')
 
 
 async def proxy_request(
@@ -95,6 +95,6 @@ async def proxy_request(
     )
 
 
-from examples.bff.proxy_tokens import get_proxy_access_token
+get_proxy_access_token = _examples_bff_proxy_tokens.attribute('get_proxy_access_token')
 
 __all__ = ['proxy_request', 'resolve_upstream', 'get_proxy_access_token']

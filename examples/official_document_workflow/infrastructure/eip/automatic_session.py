@@ -1,11 +1,12 @@
 """One authenticated hourly run; failed operations propagate without replay."""
 from __future__ import annotations
 
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack
 
+from . import calendar_attachments
+from . import calendar_projects
 from examples.shared.runtime.io import run_sync
-
-from . import calendar_attachments, calendar_projects
 
 
 class AutomaticSession:
@@ -20,19 +21,19 @@ class AutomaticSession:
         return self.adapter.user_id if self.adapter else ''
 
     async def check_active(self):
-        if not await run_sync(self.store.active,self.owner, self.generation):
+        if not await run_sync(self.store.active, self.owner, self.generation):
             self.usable = False
             raise ValueError('自動處理已暫停或綁定變更，未繼續連線。')
         if not await self.verify(self.owner):
             self.usable = False
-            await run_sync(self.store.pause,self.owner)
+            await run_sync(self.store.pause, self.owner)
             raise ValueError('Open WebUI 帳號已停用，已停止 EIP 自動處理。')
 
     async def login(self):
         self.usable = False
         await self.check_active()
         async with AsyncExitStack() as cleanup:
-            secret = await run_sync(self.store.account,self.owner, secrets=True)
+            secret = await run_sync(self.store.account, self.owner, secrets=True)
             if secret is not None:
                 cleanup.callback(secret.clear)
             if not secret or secret['generation'] != self.generation:

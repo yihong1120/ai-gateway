@@ -4,12 +4,16 @@ Upstream hosted tools and server-stored conversation IDs are deliberately outsid
 this credential scope. Local function/custom calls and their replayed outputs
 pass through unchanged, including call IDs and opaque reasoning content.
 """
+from __future__ import annotations
+
 from examples.company_ai_access.errors import error
 
 
 def envelope(value):
-    if (value.get('previous_response_id') or value.get('conversation') or value.get('background')
-            or value.get('store') not in (None, False)):
+    if (
+        value.get('previous_response_id') or value.get('conversation') or value.get('background')
+        or value.get('store') not in (None, False)
+    ):
         raise error(400, 'ai_access_stateless_responses_required')
     tools = value.get('tools', [])
     if not isinstance(tools, list):
@@ -46,7 +50,8 @@ def envelope(value):
                 raise error(400, 'ai_access_invalid_input')
             if item.get('type', 'message') not in {
                     'message', 'function_call', 'function_call_output', 'custom_tool_call',
-                    'custom_tool_call_output', 'reasoning', 'compaction'}:
+                    'custom_tool_call_output', 'reasoning', 'compaction',
+            }:
                 raise error(400, 'ai_access_stateless_responses_required')
             # Remote images/files could make the gateway fetch untrusted URLs.
             content = item.get('content')
@@ -60,11 +65,14 @@ def envelope(value):
                     raise error(400, 'ai_access_invalid_input')
                 if part.get('type') == 'input_image' and (
                         not isinstance(part.get('image_url'), str)
-                        or not part['image_url'].startswith(('data:image/png;base64,', 'data:image/jpeg;base64,', 'data:image/webp;base64,'))):
+                        or not part['image_url'].startswith(('data:image/png;base64,', 'data:image/jpeg;base64,', 'data:image/webp;base64,'))
+                ):
                     raise error(400, 'ai_access_remote_content_not_allowed')
-    fields = {'model', 'input', 'instructions', 'tools', 'tool_choice', 'parallel_tool_calls',
-              'stream', 'max_output_tokens', 'reasoning', 'text', 'temperature', 'top_p',
-              'include', 'truncation'}
+    fields = {
+        'model', 'input', 'instructions', 'tools', 'tool_choice', 'parallel_tool_calls',
+        'stream', 'max_output_tokens', 'reasoning', 'text', 'temperature', 'top_p',
+        'include', 'truncation',
+    }
     body = {key: item for key, item in value.items() if key in fields}
     # Codex does not send an output limit. Bound each model turn, including
     # thinking, rather than inheriting the provider's very large default.

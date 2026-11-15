@@ -14,7 +14,11 @@ from langchain.agents.middleware.model_call_limit import ModelCallLimitExceededE
 from langchain_core.messages import AIMessage
 from langchain_core.messages import messages_to_dict
 from langchain_core.messages import ToolMessage
+from openai import RateLimitError
 
+import company_agent.graph as _graph_imports
+import company_agent.services.files.tools as _tools_imports
+from company_agent.agents.registry import ROLE_TOOLS
 from company_agent.config import Root
 from company_agent.config import Settings
 from company_agent.runtime.execution import DocumentAgent
@@ -36,6 +40,11 @@ from company_agent.services.office.documents import package
 from company_agent.services.office.schemas import Edit
 from company_agent.tests.postgres_fixture import make_state_directory
 from company_agent.tests.postgres_fixture import PostgreSQLTestCase
+from examples.shared.runtime.modules import ModuleReference
+
+_fixture_postgres_fixture = ModuleReference('company_agent.tests.postgres_fixture')
+_docx = ModuleReference('docx')
+_fitz = ModuleReference('fitz')
 
 
 class Fixture(PostgreSQLTestCase):
@@ -62,8 +71,7 @@ class Fixture(PostgreSQLTestCase):
 
     async def failed_job(self, operation, error, owner='alice'):
         """Assert native propagation, then inspect persisted state independently."""
-        from company_agent.tests.postgres_fixture import checkpointer
-        from company_agent.graph import build_graph
+        checkpointer = _fixture_postgres_fixture.attribute('checkpointer')
         with self.assertRaises(error) as caught:
             await operation
         self.native_error = caught.exception
@@ -72,7 +80,7 @@ class Fixture(PostgreSQLTestCase):
         result = self.store.result(owner, key)
         self.assertNotIn('errors', result)
         async with checkpointer(self.store) as saver:
-            snapshot = await build_graph(ScriptedModel([]), saver).aget_state({'configurable': {'thread_id': key}})
+            snapshot = await _graph_imports.build_graph(ScriptedModel([]), saver).aget_state({'configurable': {'thread_id': key}})
             subgraphs = {}
             async for saved in saver.alist({'configurable': {'thread_id': key}}):
                 namespace = saved.config['configurable']['checkpoint_ns']
@@ -252,7 +260,7 @@ class DocumentTests(unittest.TestCase):
                 edit(self.word, '.docx', location, expected, 'changed')
 
     def test_table_text_edit_keeps_run_formatting_and_body(self):
-        from docx import Document
+        Document = _docx.attribute('Document')
         doc = Document()
         doc.add_paragraph('不可變動的正文')
         run = doc.add_table(rows=1, cols=1).cell(0, 0).paragraphs[0].add_run('表格內容')
@@ -284,7 +292,7 @@ class DocumentTests(unittest.TestCase):
                 package(data.getvalue())
 
     def test_scan_pdf_is_explicitly_not_read(self):
-        import fitz
+        fitz = _fitz.load()
         with fitz.open() as pdf:
             pdf.new_page()
             data = pdf.tobytes()
@@ -363,7 +371,6 @@ class ScriptedModel:
         self.tools = tools
         outer = self
         names = {tool.name for tool in tools}
-        from company_agent.agents.registry import ROLE_TOOLS
         role = next(role for role, allowed in ROLE_TOOLS.items() if names == allowed)
 
         class Bound:
@@ -487,7 +494,6 @@ class ModelTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(429, json={'error': 'secret provider details'})
         model = GatewayModel('http://127.0.0.1:4000/v1', 'test-key', 'configured', httpx.MockTransport(handler))
         self.addAsyncCleanup(close_model, model)
-        from openai import RateLimitError
         with self.assertRaises(RateLimitError):
             await model.ainvoke([('human', 'hello')])
         self.assertEqual(len(requests), 1)
@@ -508,8 +514,7 @@ class ModelTests(unittest.IsolatedAsyncioTestCase):
             )
         model = GatewayModel('https://gateway.example/v1', 'test-key', 'configured', httpx.MockTransport(handler))
         self.addAsyncCleanup(close_model, model)
-        from company_agent.services.files.tools import file_tools
-        response = await model.bind_tools(file_tools(), parallel_tool_calls=False).ainvoke([('human', 'hello')])
+        response = await model.bind_tools(_tools_imports.file_tools(), parallel_tool_calls=False).ainvoke([('human', 'hello')])
         self.assertEqual(response.content, '好')
         self.assertEqual(
             {k: response.usage_metadata[k] for k in ('input_tokens', 'output_tokens', 'total_tokens')},

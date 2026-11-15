@@ -1,18 +1,19 @@
 """Account-action tokens are consumed in the transaction updating the account."""
-
 from __future__ import annotations
+
 from datetime import datetime
-from sqlalchemy import (
-    Boolean,
-    CheckConstraint,
-    DateTime,
-    ForeignKey,
-    Index,
-    Integer,
-    String,
-    text,
-)
-from sqlalchemy.orm import Mapped, mapped_column
+
+from sqlalchemy import Boolean
+from sqlalchemy import CheckConstraint
+from sqlalchemy import DateTime
+from sqlalchemy import ForeignKey
+from sqlalchemy import Index
+from sqlalchemy import Integer
+from sqlalchemy import String
+from sqlalchemy import text
+from sqlalchemy.orm import Mapped
+from sqlalchemy.orm import mapped_column
+
 from examples.identity.database import Base
 
 
@@ -37,20 +38,20 @@ class AccountActionToken(Base):
     )
     token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False
+        Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False,
     )
     purpose: Mapped[str] = mapped_column(String(24), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=text('CURRENT_TIMESTAMP')
+        DateTime(timezone=True), server_default=text('CURRENT_TIMESTAMP'),
     )
     expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True), nullable=False,
     )
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     delivery: Mapped[str] = mapped_column(
-        String(16), nullable=False, default='prepared'
+        String(16), nullable=False, default='prepared',
     )
     revocation_pending: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=text('FALSE')
+        Boolean, nullable=False, default=False, server_default=text('FALSE'),
     )

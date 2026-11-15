@@ -1,14 +1,13 @@
 """Pure calendar rendering configured by three explicit CSV defaults."""
-
 from __future__ import annotations
+
 from dataclasses import dataclass
-from examples.official_document_workflow.domain.documents import (
-    CALENDAR_PROJECT_CATEGORIES,
-    Deadline,
-    OfficialDocument,
-)
+
 from .scheduling import apply_tentative_schedule
 from .values import CalendarValues
+from examples.official_document_workflow.domain.documents import CALENDAR_PROJECT_CATEGORIES
+from examples.official_document_workflow.domain.documents import Deadline
+from examples.official_document_workflow.domain.documents import OfficialDocument
 
 
 @dataclass(frozen=True)
@@ -93,7 +92,7 @@ class CalendarRows:
                     'Priority': self._calendar_priority(deadline),
                     'Categories': category,
                     'Custom Field1': CalendarValues._csv_value(
-                        document.reference_number
+                        document.reference_number,
                     )
                     if document
                     else '',

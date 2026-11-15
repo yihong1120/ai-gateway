@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-from examples.identity.runtime import get_settings
-
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
 from fastapi import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from examples.identity.database import get_db
-from examples.identity.dependencies import require_tenant_deployment_administrator
-from examples.identity.dependencies import TenantDeploymentAdministrator
 from examples.db_management.schemas.deployment_enrollment_code import (
     DeploymentEnrollmentCodeCreate,
 )
@@ -26,6 +21,10 @@ from examples.db_management.schemas.deployment_enrollment_code import (
 from examples.db_management.services import (
     deployment_enrollment_code_services as code_services,
 )
+from examples.identity.database import get_db
+from examples.identity.dependencies import require_tenant_deployment_administrator
+from examples.identity.dependencies import TenantDeploymentAdministrator
+from examples.identity.runtime import get_settings
 
 router = APIRouter(tags=['deployment-enrollment-codes'])
 

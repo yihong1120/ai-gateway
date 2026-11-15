@@ -4,17 +4,20 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import unittest
-from pathlib import Path
 from functools import partial
+from pathlib import Path
 from types import SimpleNamespace
-from examples.shared.runtime.workers import WorkerHealth
 from unittest.mock import patch
 
+import company_agent.evals.capacity as _capacity_imports
 from examples.official_document_workflow.application import automation
-from examples.shared.runtime.concurrency import OwnerSlots
-from examples.official_document_workflow.infrastructure.storage.automation_store import AutomationStore
+from examples.official_document_workflow.infrastructure.storage.automation_store import (
+    AutomationStore,
+)
 from examples.official_document_workflow.infrastructure.storage.state import Journal
 from examples.official_document_workflow.infrastructure.storage.state import State
+from examples.shared.runtime.concurrency import OwnerSlots
+from examples.shared.runtime.workers import WorkerHealth
 from tests.eip_postgres import EIPPostgresTestCase
 
 
@@ -107,27 +110,26 @@ class ConcurrentAccountTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCa
 
     async def test_second_application_cannot_recover_work_while_dispatcher_lease_is_held(self):
         entered = asyncio.Event()
+
         async def run(*args):
             entered.set()
             await asyncio.Event().wait()
-        with patch.object(self.db,'recover',wraps=self.db.recover) as recover:
+        with patch.object(self.db, 'recover', wraps=self.db.recover) as recover:
             first = asyncio.create_task(self.scheduler(run).run())
             try:
-                await asyncio.wait_for(entered.wait(),3)
+                await asyncio.wait_for(entered.wait(), 3)
                 with self.assertRaises(RuntimeError):
                     await self.scheduler(run, State()).run()
-                self.assertEqual(recover.call_count,1)
+                self.assertEqual(recover.call_count, 1)
                 self.assertFalse(first.done())
             finally:
                 first.cancel()
                 with self.assertRaises(asyncio.CancelledError):
                     await first
 
-
     async def test_capacity_profile_uses_owned_scheduler_without_legacy_patches(self):
-        from company_agent.evals.capacity import profile
 
-        result = await profile(limit=1, model_limit=2, ocr_limit=1, users=1, hold=0)
+        result = await _capacity_imports.profile(limit=1, model_limit=2, ocr_limit=1, users=1, hold=0)
         self.assertEqual(result['jobs'], 3)
         self.assertEqual(result['errors'], 0)
         self.assertEqual(result['users'], 1)

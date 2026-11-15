@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import shlex
 import shutil
 import subprocess
 import tempfile
 import tomllib
 import unittest
+from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,7 +33,12 @@ def stages():
 class ContainerBuildTests(unittest.TestCase):
     def test_targets_keep_distinct_dependency_and_runtime_contracts(self):
         targets = stages()
-        self.assertEqual(set(targets), {'uv', 'management-api', 'company-office', 'eip-office', 'company-cad', 'cad-build', 'eval-preview'})
+        self.assertEqual(
+            set(targets), {
+                'uv', 'management-api', 'company-office',
+                'eip-office', 'company-cad', 'cad-build', 'eval-preview',
+            },
+        )
         self.assertEqual(targets['eval-preview'][0], ('FROM', 'company-office'))
         self.assertEqual(list(targets)[-1], 'management-api')
         for target, group, executable in (
@@ -107,10 +112,20 @@ class ContainerBuildTests(unittest.TestCase):
         if shutil.which('docker') is None:
             self.skipTest('Docker CLI is unavailable')
         context = subprocess.check_output(['docker', 'context', 'show'], text=True).strip()
-        endpoint = subprocess.check_output(['docker', 'context', 'inspect', context, '--format', '{{(index .Endpoints "docker").Host}}'], text=True).strip()
+        endpoint = subprocess.check_output(
+            [
+                'docker', 'context', 'inspect', context,
+                '--format', '{{(index .Endpoints "docker").Host}}',
+            ], text=True,
+        ).strip()
         if not endpoint.startswith('unix://'):
             self.skipTest('Context auditing requires a local Unix Docker endpoint')
-        available = subprocess.run(['docker', '--context', context, 'version', '--format', '{{.Server.Version}}'], capture_output=True, timeout=10)
+        available = subprocess.run(
+            [
+                'docker', '--context', context, 'version', '--format',
+                '{{.Server.Version}}',
+            ], capture_output=True, timeout=10,
+        )
         if available.returncode:
             self.skipTest('Local Docker daemon is unavailable')
         with tempfile.TemporaryDirectory(prefix='ai-gateway-context-audit-') as directory:
@@ -119,8 +134,10 @@ class ContainerBuildTests(unittest.TestCase):
             dockerfile.write_text('FROM scratch\nCOPY . /context\n')
 
             def export(source, output):
-                command = ['docker', '--context', context, 'buildx', 'build', '--builder', 'default',
-                           '--file', str(dockerfile), '--output', f'type=local,dest={output}', '--progress=quiet', str(source)]
+                command = [
+                    'docker', '--context', context, 'buildx', 'build', '--builder', 'default',
+                    '--file', str(dockerfile), '--output', f'type=local,dest={output}', '--progress=quiet', str(source),
+                ]
                 result = subprocess.run(command, text=True, capture_output=True, timeout=60)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 return {path.relative_to(output / 'context').as_posix() for path in (output / 'context').rglob('*') if path.is_file()}
@@ -128,8 +145,10 @@ class ContainerBuildTests(unittest.TestCase):
             fixture = temporary / 'fixture'
             fixture.mkdir()
             (fixture / '.dockerignore').write_bytes((ROOT / '.dockerignore').read_bytes())
-            allowed = {'examples/identity/models/accounts.py', 'company_agent/services/office/worker.py',
-                       'examples/shared/config.py', 'examples/deployment/cli.py'}
+            allowed = {
+                'examples/identity/models/accounts.py', 'company_agent/services/office/worker.py',
+                'examples/shared/config.py', 'examples/deployment/cli.py',
+            }
             forbidden = {
                 'config.local.toml', '.env.local', 'ocr-vllm.local.yaml', '.git/config',
                 'examples/deployment/archive/old.py', 'examples/identity/private.json',
@@ -154,6 +173,16 @@ class ContainerBuildTests(unittest.TestCase):
             self.assertIn('examples/deployment/cli.py', paths)
             for name in paths:
                 source = Path(name)
-                self.assertFalse(any(part in {'.git', 'archive', 'private', 'keys', '__pycache__'} for part in source.parts), name)
+                self.assertFalse(
+                    any(
+                        part in {'.git', 'archive', 'private', 'keys', '__pycache__'}
+                        for part in source.parts
+                    ), name,
+                )
                 self.assertFalse(source.name.startswith('.env') or source.name.startswith('config.local.'), name)
-                self.assertNotIn(source.suffix, {'.toml', '.yaml', '.yml', '.json', '.key', '.pem', '.pfx', '.p12'} if name != 'pyproject.toml' else set(), name)
+                self.assertNotIn(
+                    source.suffix, {
+                        '.toml', '.yaml', '.yml', '.json', '.key',
+                        '.pem', '.pfx', '.p12',
+                    } if name != 'pyproject.toml' else set(), name,
+                )

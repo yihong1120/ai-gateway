@@ -1,5 +1,4 @@
 """Local operator commands; never expose a key or allow anonymous admin APIs."""
-
 from __future__ import annotations
 
 import argparse
@@ -19,7 +18,7 @@ async def run(args):
                 json.dumps(
                     {'policy': service.policy(), 'devices': (await service.devices())},
                     ensure_ascii=False,
-                )
+                ),
             )
         elif args.command == 'maintain':
             print(json.dumps(await service.maintain()))

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from tests.eip_calendar_fixture import new_calendar_matches
-
 import copy
 import json
 import tempfile
@@ -17,6 +15,7 @@ from examples.official_document_workflow.infrastructure.eip.netask import js_esc
 from examples.official_document_workflow.infrastructure.eip.netask import Netask
 from examples.official_document_workflow.infrastructure.eip.netask import parse_rpc
 from examples.official_document_workflow.infrastructure.storage.state import Journal
+from tests.eip_calendar_fixture import new_calendar_matches
 from tests.eip_postgres import EIPPostgresTestCase
 
 EVENT = '2026-09-07 21:24:14.709;791504605'

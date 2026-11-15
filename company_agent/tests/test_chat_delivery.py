@@ -2,18 +2,22 @@
 from __future__ import annotations
 
 import copy
-import time
 import json
+import time
 import types
 import unittest
 from unittest.mock import AsyncMock
 from unittest.mock import patch
 
-from company_agent.tests.webui_fixture import modules as host_modules
 from company_agent.api.chat import publish_pending
 from company_agent.api.queue import WorkQueue
 from company_agent.api.service import Service
 from company_agent.tests.test_agent import Fixture
+from company_agent.tests.webui_fixture import modules as host_modules
+from examples.shared.runtime.modules import ModuleReference
+
+_webui_chats = ModuleReference('open_webui.models.chats')
+_webui_socket = ModuleReference('open_webui.socket')
 
 
 class ChatDeliveryTests(unittest.IsolatedAsyncioTestCase, Fixture):
@@ -38,8 +42,8 @@ class ChatDeliveryTests(unittest.IsolatedAsyncioTestCase, Fixture):
         async def save(chat_id, message_id, data):
             self.chat['history']['messages'][message_id].update(copy.deepcopy(data))
             return types.SimpleNamespace(chat=self.chat)
-        from open_webui.models.chats import Chats
-        from open_webui.socket import main as socket
+        Chats = _webui_chats.attribute('Chats')
+        socket = _webui_socket.attribute('main')
         for target, name, value in (
             (Chats, 'get_chat_by_id_and_user_id', AsyncMock(side_effect=owned)),
             (Chats, 'upsert_message_to_chat_by_id_and_message_id', AsyncMock(side_effect=save)),
@@ -79,7 +83,7 @@ class ChatDeliveryTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertEqual(self.queue.chat_pending(), [])
 
     async def test_finished_work_is_delivered_after_disconnect_and_outbox_restart(self):
-        from open_webui.socket import main as socket
+        socket = _webui_socket.attribute('main')
         self.chat['history']['messages']['assistant']['content'] = (
             f'工作已接收，會在背景執行；關閉聊天或頁面後仍會繼續。\n\n[查看進度](/agents?job={self.key})'
         )
@@ -148,10 +152,12 @@ class ChatDeliveryTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.queue.update(self.key, status='running', progress='正在處理第 2/3 份公文')
         await self.publish()
         self.assertIn('第 2/3 份', message['content'])
-        self.queue.update(self.key, status='partial', document_result=json.dumps({
-            'answer': '成功兩份；第三份需要重試',
-            'files': [{'id': 'docx', 'name': '公文.docx', 'url': '/api/v1/files/docx/content?attachment=true'}],
-        }))
+        self.queue.update(
+            self.key, status='partial', document_result=json.dumps({
+                'answer': '成功兩份；第三份需要重試',
+                'files': [{'id': 'docx', 'name': '公文.docx', 'url': '/api/v1/files/docx/content?attachment=true'}],
+            }),
+        )
         await self.publish()
         self.assertTrue(message['done'])
         self.assertIn('第三份需要重試', message['content'])
@@ -159,7 +165,7 @@ class ChatDeliveryTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertEqual(self.queue.chat_pending(), [])
 
     async def test_existing_document_receipt_is_recovered_after_outbox_restart(self):
-        from open_webui.socket import main as socket
+        socket = _webui_socket.attribute('main')
 
         message = await self.document()
         message['content'] = f'公文工作已接收，會在背景執行；\n\n[查看進度](/agents?job={self.key})'
@@ -176,9 +182,11 @@ class ChatDeliveryTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.queue.update(self.key, status='interrupted', progress='已中斷')
         await self.publish()
         self.assertEqual(self.queue.chat_pending(), [])
-        self.queue.update(self.key, document_result=json.dumps({
-            'answer': '', 'files': [{'url': '/api/v1/files/kept/content?attachment=true'}],
-        }))
+        self.queue.update(
+            self.key, document_result=json.dumps({
+                'answer': '', 'files': [{'url': '/api/v1/files/kept/content?attachment=true'}],
+            }),
+        )
         self.assertEqual(len(self.queue.chat_pending()), 1)
         await self.publish()
         self.assertIn('/api/v1/files/kept/content?attachment=true', message['content'])

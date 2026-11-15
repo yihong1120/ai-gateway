@@ -1,9 +1,8 @@
 """No network/GPU: grouped provenance, physical export isolation and statuses."""
 from __future__ import annotations
-from examples.official_document_workflow.services.ocr import DocumentOCR
 
-import csv
 import asyncio
+import csv
 import io
 import json
 import tempfile
@@ -15,20 +14,30 @@ from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
+from langsmith import get_tracing_context
+from langsmith import tracing_context
+
 from .test_official_document_processor_pipe import _valid_payload
 from .test_official_document_processor_pipe import DEADLINE_EVIDENCE
 from .test_official_document_processor_pipe import PIPE_MODULE as M
 from .test_official_document_processor_pipe import SOURCE
 from examples.official_document_workflow.application.group_processing import outcome
 from examples.official_document_workflow.application.group_processing import parse_group
-from examples.official_document_workflow.application.multi_agent import process_with_team
-from examples.official_document_workflow.domain.calendar.calendar_semantics import resolve_spans
+from examples.official_document_workflow.application.multi_agent import (
+    process_with_team,
+)
 from examples.official_document_workflow.domain.calendar.calendar_semantics import explicit_source_dates
+from examples.official_document_workflow.domain.calendar.calendar_semantics import resolve_spans
 from examples.official_document_workflow.domain.calendar.calendar_semantics import verify_date
 from examples.official_document_workflow.domain.calendar.calendar_semantics import verify_event_date
-from examples.official_document_workflow.domain.workflow import JobPlan
+from examples.official_document_workflow.domain.documents import OutputNotWritten
+from examples.official_document_workflow.domain.documents import OutputUncertain
 from examples.official_document_workflow.domain.validation import ContentValidationError
-from examples.official_document_workflow.domain.documents import OutputNotWritten, OutputUncertain
+from examples.official_document_workflow.domain.workflow import JobPlan
+from examples.official_document_workflow.services.ocr import DocumentOCR
+from examples.shared.runtime.modules import ModuleReference
+
+_workflow_application = ModuleReference('examples.official_document_workflow.application')
 
 
 def payload(ids=('S1', 'S2')):
@@ -98,14 +107,16 @@ class GroupTests(unittest.IsolatedAsyncioTestCase):
         return await process_with_team(self.pipe,  'owner', self.ids, [self.ids])
 
     async def test_hourly_entry_uses_direct_multi_agent_workflow(self):
-        from examples.official_document_workflow.application import integration
+        integration = _workflow_application.attribute('integration')
 
         with (
             patch.object(integration, 'configured_pipe', AsyncMock(return_value=self.pipe)),
             patch.object(integration, 'module', new=M),
-            patch.object(integration, 'current_resources', return_value=types.SimpleNamespace(
-                configure_document_cache=lambda processor: None,
-            )),
+            patch.object(
+                integration, 'current_resources', return_value=types.SimpleNamespace(
+                    configure_document_cache=lambda processor: None,
+                ),
+            ),
             patch(
                 'examples.official_document_workflow.application.integration.store',
                 return_value=object(),
@@ -299,8 +310,10 @@ class GroupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['csv_ids'], [])
         self.assertEqual(len(result['files']), 4)
         issue = result['validation_issues'][0]
-        self.assertEqual((issue['code'], issue['field'], issue['event_index']),
-                         ('event_date_evidence_mismatch', 'start_date', 1))
+        self.assertEqual(
+            (issue['code'], issue['field'], issue['event_index']),
+            ('event_date_evidence_mismatch', 'start_date', 1),
+        )
         self.assertTrue(issue['repair_attempted'])
         self.assertEqual(self.pipe.analyze_text.await_count, 2)
 
@@ -372,8 +385,10 @@ class GroupTests(unittest.IsolatedAsyncioTestCase):
         self.pipe.store_output.assert_not_awaited()
 
     async def test_unexpected_validator_error_is_not_silently_classified(self):
-        with patch('examples.official_document_workflow.application.multi_agent.DocumentAgent.validate',
-                   side_effect=ValueError('unexpected implementation failure')):
+        with patch(
+            'examples.official_document_workflow.application.multi_agent.DocumentAgent.validate',
+            side_effect=ValueError('unexpected implementation failure'),
+        ):
             with self.assertRaisesRegex(ValueError, 'unexpected implementation failure'):
                 await self.run_group()
         self.pipe.analyze_text.assert_awaited_once()
@@ -390,9 +405,11 @@ class GroupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result['errors']), 1)
         self.assertIn('附件 1', result['errors'][0])
         self.assertIn('OCR 失敗', result['errors'][0])
-        self.assertEqual([f['kind'] for f in result['files']], [
-            'document_pdf', 'document_pdf', 'document_docx', 'calendar_csv',
-        ])
+        self.assertEqual(
+            [f['kind'] for f in result['files']], [
+                'document_pdf', 'document_pdf', 'document_docx', 'calendar_csv',
+            ],
+        )
         self.assertEqual(result['files'][0]['source_name'], 'input0.pdf')
         self.assertEqual(self.pipe.render_word.call_count, 2)
         self.assertEqual(self.pipe.store_output.await_count, 4)
@@ -419,10 +436,12 @@ class GroupTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn('結果待核對', result['errors'][0])
                     self.assertEqual(len(attempted), len(set(attempted)))
                     self.assertEqual(len(result['files']), len(attempted) - 1)
-                    self.assertFalse(any(
-                        f.get('source_name') == 'input0.pdf' and f['kind'] == kind
-                        for f in result['files']
-                    ))
+                    self.assertFalse(
+                        any(
+                            f.get('source_name') == 'input0.pdf' and f['kind'] == kind
+                            for f in result['files']
+                        ),
+                    )
 
     async def test_cancelled_export_propagates_without_reporting_success(self):
         self.pipe.store_output.side_effect = asyncio.CancelledError()
@@ -611,7 +630,6 @@ class GroupTests(unittest.IsolatedAsyncioTestCase):
         self.pipe.store_output.assert_not_awaited()
 
     async def test_trace_disabled_and_only_one_semantic_call_per_flow(self):
-        from langsmith import get_tracing_context, tracing_context
 
         async def interpret(*args, **kwargs):
             self.assertFalse(get_tracing_context()['enabled'])

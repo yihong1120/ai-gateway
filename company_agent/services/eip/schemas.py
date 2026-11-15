@@ -46,7 +46,6 @@ class EIPProcess(Strict):
 
     @model_validator(mode='after')
     def unique_handles(self):
-        import re
 
         if len(set(self.handles)) != len(self.handles) or any(
             not re.fullmatch('[a-f0-9]{32}', x) for x in self.handles

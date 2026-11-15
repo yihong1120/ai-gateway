@@ -1,25 +1,18 @@
 """Shared group and calendar results for upload and EIP entry points."""
-
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from collections.abc import Mapping
 
-from examples.official_document_workflow.domain.documents import (
-    OfficialDocument,
-    PreparedDocument,
-)
-
-from examples.official_document_workflow.domain.calendar.csv_schema import (
-    CALENDAR_CSV_FORMAT,
-    CALENDAR_CSV_FORMAT_KEY,
-)
+from .analysis_state import AnalysisState
+from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT
+from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT_KEY
+from examples.official_document_workflow.domain.documents import OfficialDocument
+from examples.official_document_workflow.domain.documents import PreparedDocument
 from examples.official_document_workflow.infrastructure.eip.calendar_csv import (
     direct_import_notice,
 )
-
-from .analysis_state import AnalysisState
 
 
 @dataclass(frozen=True)
@@ -54,7 +47,7 @@ class CalendarResult:
 
     def __post_init__(self):
         object.__setattr__(
-            self, 'rows', tuple(MappingProxyType(dict(row)) for row in self.rows)
+            self, 'rows', tuple(MappingProxyType(dict(row)) for row in self.rows),
         )
         object.__setattr__(self, 'issues', tuple(self.issues))
 

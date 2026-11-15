@@ -1,17 +1,16 @@
 """Stable document values and export contracts shared by every entry point."""
-
 from __future__ import annotations
 
 import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any
+from typing import Literal
+from typing import Protocol
 
-from examples.official_document_workflow.domain.calendar.csv_schema import (  # noqa: F401
-    CALENDAR_CSV_FORMAT,
-    CALENDAR_CSV_FORMAT_KEY,
-)
+from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT  # noqa: F401 - public re-export
+from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT_KEY  # noqa: F401 - public re-export
 from examples.official_document_workflow.domain.workflow import JobPlan
 
 

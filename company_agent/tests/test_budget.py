@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 from langchain.agents.middleware.model_call_limit import ModelCallLimitExceededError
 from pydantic import ValidationError
 
+from company_agent.config import Settings
 from company_agent.runtime.execution import DocumentAgent
 from company_agent.tests.test_agent import call
 from company_agent.tests.test_agent import Fixture
@@ -62,7 +64,6 @@ class BudgetTests(unittest.IsolatedAsyncioTestCase, Fixture):
         ids = []
 
         def created(messages):
-            import json
             ids.append(json.loads(messages[-1].content)['id'])
             return finish('complete_assignment', ids=ids)
         model = Sequence([
@@ -93,6 +94,5 @@ class BudgetTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertEqual(result['budget']['used'], 3)
 
     async def test_eighty_is_hard_ceiling(self):
-        from company_agent.config import Settings
         with self.assertRaises(ValidationError):
             Settings(state_dir=str(self.private), max_steps=81)

@@ -10,13 +10,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from examples.deployment.registry.enrollments import provision_enrollment_code
+from examples.deployment.registry.enrollments import ProvisionedEnrollmentCode
+from examples.identity.dependencies import TenantDeploymentAdministrator
 from examples.identity.models import Deployment
 from examples.identity.models import DeploymentEnrollmentCode
 from examples.identity.models import DeploymentEnrollmentCodeAuditLog
 from examples.identity.models import utc_now
-from examples.identity.dependencies import TenantDeploymentAdministrator
-from examples.deployment.registry.enrollments import provision_enrollment_code
-from examples.deployment.registry.enrollments import ProvisionedEnrollmentCode
 
 _CANONICAL_UUID = re.compile(
     r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',

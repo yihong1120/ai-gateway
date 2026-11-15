@@ -7,28 +7,42 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import io
 import json
 import math
 import os
+import re
 import time
+import zipfile
 from pathlib import Path
 
 import yaml
-from examples.shared.config import read_service, config_path
 from langchain_core.messages import messages_to_dict
 
+import company_agent.runtime.models as _models_imports
+import examples.identity.adapters.webui as _webui_imports
 from company_agent.agents.registry import ROLE_TOOLS
 from company_agent.config import Root
 from company_agent.config import Settings
+from company_agent.evals.runner import Budget
+from company_agent.evals.runner import evaluation
+from company_agent.evals.runner import own_model
+from company_agent.evals.runner import release_model
+from company_agent.evals.runner import track_report
+from company_agent.evals.runner import write_json
+from company_agent.evals.sandbox import make_state_directory
 from company_agent.runtime.execution import DocumentAgent
-from company_agent.evals.runner import Budget, evaluation, own_model, release_model, track_report, write_json
 from company_agent.services.office.documents import create_slides
 from company_agent.services.office.documents import create_spreadsheet
 from company_agent.services.office.documents import create_word
 from company_agent.services.office.documents import extract
 from company_agent.services.office.documents import read_spreadsheet
 from company_agent.state import GRAPH_VERSION
-from company_agent.evals.sandbox import make_state_directory
+from examples.shared.config import config_path
+from examples.shared.config import read_service
+from examples.shared.runtime.modules import ModuleReference
+
+_agent_scenario_suite = ModuleReference('company_agent.evals.scenario_suite')
 
 
 class AnalysisInvocation:
@@ -64,8 +78,10 @@ class MeteredInvocation:
                 seconds=round(time.monotonic() - start, 3),
                 reserved_unknown_usd=reserve,
                 provider_status=getattr(exc, 'status_code', None),
-                error_flags=[flag for flag in ('resource_exhausted', 'quota', 'max_parallel', 'budget', 'cooldown')
-                             if flag in diagnostic],
+                error_flags=[
+                    flag for flag in ('resource_exhausted', 'quota', 'max_parallel', 'budget', 'cooldown')
+                    if flag in diagnostic
+                ],
             )
             outer.calls.append(row)
             # Preserve SDK type so execution can save its normal safe failure
@@ -197,9 +213,6 @@ def verify(agent, result, task, owner='benchmark'):
             bool(artifacts) and not result['artifact_review']['unreviewed_ids']
         )
     if task == 'documents':
-        import io
-        import zipfile
-        import re
 
         for name, suffix in [('report.docx', '.docx'), ('briefing.pptx', '.pptx')]:
             text = (
@@ -250,8 +263,6 @@ def verify(agent, result, task, owner='benchmark'):
             )
         checks['review_returned'] = result.get('review_status') == 'advisory_returned'
     else:
-        import io
-        import zipfile
 
         suffix = '.docx' if task == 'word_edit' else '.pptx'
         name = 'revised' + suffix
@@ -301,11 +312,9 @@ async def run(args):
         raise ValueError(
             '舊版比較工具須指定 --owner 及隔離測試 schema；一般情境請用 company_agent.evals.scenario_suite。',
         )
-    from examples.identity.adapters.webui import verified_user
-    from company_agent.runtime.models import gateway_for_verified_user
-    from company_agent.evals.scenario_suite import BilledMeter
+    BilledMeter = _agent_scenario_suite.attribute('BilledMeter')
 
-    user = await verified_user(args.owner)
+    user = await _webui_imports.verified_user(args.owner)
     env = read_service('webui', config_path(args.config))
     bases = env.get('OPENAI_API_BASE_URLS', '').split(';')
     keys = env.get('OPENAI_API_KEYS', '').split(';')
@@ -396,7 +405,7 @@ async def run(args):
                     ),
                 ],
             )
-            gateway = own_model(gateway_for_verified_user(user, bases[0], keys[0], name))
+            gateway = own_model(_models_imports.gateway_for_verified_user(user, bases[0], keys[0], name))
             gateway.client.include_response_headers = True
             meter = BilledMeter(gateway, name, rates[name], budget)
             agent = DocumentAgent(settings, meter)

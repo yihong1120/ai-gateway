@@ -1,22 +1,29 @@
 """Host-independent transport, explicit composition and integration lifetimes."""
-import asyncio
+from __future__ import annotations
+
 import ast
-from contextlib import asynccontextmanager
+import asyncio
 import importlib
-from pathlib import Path
 import subprocess
 import sys
-from types import ModuleType, SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, Mock, patch
+from contextlib import asynccontextmanager
+from pathlib import Path
+from types import ModuleType
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from unittest.mock import Mock
+from unittest.mock import patch
 
-from fastapi import FastAPI
 import httpx
+from fastapi import FastAPI
 
 from company_agent.api.lifespan import ServiceLifespan
 from company_agent.api.service import Service
 from company_mcp.adapters.webui import install
-from company_mcp.config import BACKEND_PATH, METADATA_PATH, PATH
+from company_mcp.config import BACKEND_PATH
+from company_mcp.config import METADATA_PATH
+from company_mcp.config import PATH
 from tests.company_mcp.test_resources import configuration
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -75,9 +82,11 @@ async def inactive_user():
 
 class Boundaries(unittest.TestCase):
     def test_mcp_has_no_nested_function_or_lambda_definitions(self):
-        paths = [*sorted((ROOT / 'company_mcp').rglob('*.py')),
-                 *sorted((ROOT / 'tests/company_mcp').glob('*.py')),
-                 ROOT / 'examples/shared/runtime/browser.py']
+        paths = [
+            *sorted((ROOT / 'company_mcp').rglob('*.py')),
+            *sorted((ROOT / 'tests/company_mcp').glob('*.py')),
+            ROOT / 'examples/shared/runtime/browser.py',
+        ]
         for path in paths:
             visitor = DefinitionVisitor()
             visitor.visit(ast.parse(path.read_text()))
@@ -93,12 +102,16 @@ class Boundaries(unittest.TestCase):
         for path in (ROOT / 'company_agent').rglob('*.py'):
             if 'tests' in path.parts:
                 continue
-            imports = [node.module for node in ast.walk(ast.parse(path.read_text()))
-                       if isinstance(node, ast.ImportFrom) and node.module]
+            imports = [
+                node.module for node in ast.walk(ast.parse(path.read_text()))
+                if isinstance(node, ast.ImportFrom) and node.module
+            ]
             self.assertFalse(any(name.startswith('company_mcp') for name in imports), str(path))
-        code = ('import sys; sys.path.insert(0, ' + repr(str(ROOT)) + '); '
-                'import company_mcp.server; '
-                'assert not any(n.startswith(("company_agent", "open_webui")) for n in sys.modules)')
+        code = (
+            'import sys; sys.path.insert(0, ' + repr(str(ROOT)) + '); '
+            'import company_mcp.server; '
+            'assert not any(n.startswith(("company_agent", "open_webui")) for n in sys.modules)'
+        )
         subprocess.run([sys.executable, '-I', '-c', code], cwd='/tmp', check=True, capture_output=True)
         self.assertFalse((ROOT / 'company_agent/mcp').exists())
 
@@ -128,8 +141,12 @@ class Composition(unittest.IsolatedAsyncioTestCase):
         app.state.job_integrations = (integration,)
         async with ServiceLifespan(host, Mock(return_value=service)).run(app):
             await asyncio.sleep(0)
-        self.assertEqual(events, ['host-start', 'integration-start', 'worker-start',
-                                  'worker-stop', 'integration-stop', 'host-stop'])
+        self.assertEqual(
+            events, [
+                'host-start', 'integration-start', 'worker-start',
+                'worker-stop', 'integration-stop', 'host-stop',
+            ],
+        )
         self.assertFalse(hasattr(app.state, 'job_service'))
 
     async def test_partial_integration_failure_closes_previous_integrations_without_worker(self):
@@ -162,8 +179,10 @@ class Composition(unittest.IsolatedAsyncioTestCase):
             service = Service(None, None, None, None)
             async with app.state.job_integrations[0](app, service):
                 self.assertIn('mcp_analysis', service.job_handlers)
-                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
-                                             base_url=configuration().origin) as client:
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app),
+                    base_url=configuration().origin,
+                ) as client:
                     reply = await client.post(BACKEND_PATH, json={'action': 'authorize'})
                 self.assertEqual(reply.status_code, 403)
                 self.assertIn(BACKEND_PATH, [route.path for route in app.routes])

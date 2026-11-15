@@ -1,11 +1,9 @@
 """Identity-provider-owned account-management boundaries."""
 from __future__ import annotations
 
-from examples.identity.runtime import get_settings
-
 from fastapi import HTTPException
 
-
+from examples.identity.runtime import get_settings
 
 
 def identity_provider_account_url() -> str:

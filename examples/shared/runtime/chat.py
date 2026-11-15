@@ -1,10 +1,10 @@
 """Owned chat-turn selection and durable work observation."""
-
 from __future__ import annotations
 
 import asyncio
 
-from .progress import STATUSES, progress_text
+from .progress import progress_text
+from .progress import STATUSES
 
 
 def current_turn(chat, user_message_id, assistant_id, *, require_instruction=True):
@@ -59,7 +59,7 @@ async def wait_for_result(svc, owner, key, emitter=None):
                         'description': '已接收，正在處理；進度與結果會顯示在此聊天。',
                         'done': False,
                     },
-                }
+                },
             )
         except Exception:
             pass  # Accepted work belongs to the queue even if delivery fails.
@@ -79,7 +79,7 @@ async def wait_for_result(svc, owner, key, emitter=None):
                     {
                         'type': 'status',
                         'data': {'description': description, 'done': done},
-                    }
+                    },
                 )
             except Exception:
                 pass

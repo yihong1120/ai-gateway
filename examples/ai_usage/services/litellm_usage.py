@@ -1,31 +1,33 @@
 """Read and safely aggregate a single end user's LiteLLM spend logs."""
-
 from __future__ import annotations
 
+import heapq
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, time, timedelta
 from datetime import date as CalendarDate
-from decimal import Decimal, InvalidOperation
-from typing import Any, TypedDict, cast
+from datetime import datetime
+from datetime import time
+from datetime import timedelta
+from datetime import UTC
+from decimal import Decimal
+from decimal import InvalidOperation
+from typing import Any
+from typing import cast
+from typing import TypedDict
 
 import httpx
 
 from examples.ai_usage.config import UsageQuerySettings
-from examples.ai_usage.schemas.usage import (
-    DailyUsageResponse,
-    ModelUsage,
-    UsageBudget,
-    UsagePeriod,
-    UsageRecord,
-    UsageTotals,
-)
-from examples.ai_usage.services.accounting import (
-    accounting_owner,
-    is_user_billed,
-    usage_source,
-)
+from examples.ai_usage.schemas.usage import DailyUsageResponse
+from examples.ai_usage.schemas.usage import ModelUsage
+from examples.ai_usage.schemas.usage import UsageBudget
+from examples.ai_usage.schemas.usage import UsagePeriod
+from examples.ai_usage.schemas.usage import UsageRecord
+from examples.ai_usage.schemas.usage import UsageTotals
+from examples.ai_usage.services.accounting import accounting_owner
+from examples.ai_usage.services.accounting import is_user_billed
+from examples.ai_usage.services.accounting import usage_source
 
 
 class LiteLLMUsageError(RuntimeError):
@@ -119,10 +121,10 @@ class LiteLLMUsageClient:
         return DailyLogWindow(
             now=current.now,
             started_at=datetime.combine(
-                start_date, time.min, tzinfo=self._settings.timezone
+                start_date, time.min, tzinfo=self._settings.timezone,
             ),
             reset_at=datetime.combine(
-                end_date + timedelta(days=1), time.min, tzinfo=self._settings.timezone
+                end_date + timedelta(days=1), time.min, tzinfo=self._settings.timezone,
             ),
         )
 
@@ -216,12 +218,12 @@ class LiteLLMUsageClient:
         first = DailyLogWindow(window.now, window.started_at, middle)
         second = DailyLogWindow(window.now, middle, window.reset_at)
         rows = await self._fetch_scoped_parts(
-            first, end_users, budget, include_unattributed, excluded_subjects
+            first, end_users, budget, include_unattributed, excluded_subjects,
         )
         rows.extend(
             await self._fetch_scoped_parts(
-                second, end_users, budget, include_unattributed, excluded_subjects
-            )
+                second, end_users, budget, include_unattributed, excluded_subjects,
+            ),
         )
         return rows
 
@@ -493,7 +495,7 @@ def usage_budget(settings, spend):
         limit_usd=_money_float(settings.daily_budget_usd),
         used_usd=_money_float(spend),
         remaining_usd=_money_float(
-            max(Decimal(0), settings.daily_budget_usd - spend)
+            max(Decimal(0), settings.daily_budget_usd - spend),
         ),
         is_exhausted=spend >= settings.daily_budget_usd,
     )
@@ -506,7 +508,6 @@ def build_daily_usage_response(
     rows: list[dict[str, Any]],
     record_limit: int,
 ) -> DailyUsageResponse:
-    import heapq
 
     aggregate = UsageAggregate()
 

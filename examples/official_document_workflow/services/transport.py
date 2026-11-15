@@ -1,5 +1,4 @@
 """ModelTransport responsibilities for the shared document processor."""
-
 from __future__ import annotations
 
 import logging
@@ -9,28 +8,31 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from examples.shared.runtime.concurrency import model_request
-from examples.shared.runtime.usage import request_metadata
-from examples.official_document_workflow.application.prompts import (
-    INSTRUCTION_PLANNER_PROMPT,
-    PENDING_REMINDER_RESOLUTION_PROMPT,
+from examples.official_document_workflow.application.prompts import INSTRUCTION_PLANNER_PROMPT
+from examples.official_document_workflow.application.prompts import PENDING_REMINDER_RESOLUTION_PROMPT
+from examples.official_document_workflow.domain.calendar.contracts import (
+    SINGLE_ANALYSIS_SCHEMA,
 )
-from examples.official_document_workflow.domain.documents import (
-    CloudDocumentExtraction,
-    CloudExtractionError,
-    CloudRateLimited,
-    CloudSemanticSource,
-    CloudTemporaryFailure,
-    ProcessingError,
-)
+from examples.official_document_workflow.domain.documents import CloudDocumentExtraction
+from examples.official_document_workflow.domain.documents import CloudExtractionError
+from examples.official_document_workflow.domain.documents import CloudRateLimited
+from examples.official_document_workflow.domain.documents import CloudSemanticSource
+from examples.official_document_workflow.domain.documents import CloudTemporaryFailure
+from examples.official_document_workflow.domain.documents import ProcessingError
 from examples.official_document_workflow.infrastructure.storage.processing_cache import (
     active_requests,
 )
+from examples.shared.runtime.concurrency import model_request
+from examples.shared.runtime.modules import ModuleReference
+from examples.shared.runtime.usage import request_metadata
+
+_workflow_contracts = ModuleReference('examples.official_document_workflow.domain.calendar.contracts')
+_workflow_components = ModuleReference('examples.official_document_workflow.services.components')
 
 logger = logging.getLogger(__name__)
 
 
-from .components import ConfiguredService
+ConfiguredService = _workflow_components.attribute('ConfiguredService')
 
 
 class ModelTransport(ConfiguredService):
@@ -215,9 +217,6 @@ class ModelTransport(ConfiguredService):
         self,
         source: CloudSemanticSource,
     ) -> CloudDocumentExtraction:
-        from examples.official_document_workflow.domain.calendar.contracts import (
-            SINGLE_ANALYSIS_SCHEMA,
-        )
 
         payload = await self.analyze_text(source, schema=SINGLE_ANALYSIS_SCHEMA)
         try:
@@ -249,9 +248,7 @@ class ModelTransport(ConfiguredService):
         """
         model = self.valves.cloud_ocr_text_model
         try:
-            from examples.official_document_workflow.domain.calendar.contracts import (
-                require_tentative_schedule_decision,
-            )
+            require_tentative_schedule_decision = _workflow_contracts.attribute('require_tentative_schedule_decision')
 
             if schema is not None:
                 schema = require_tentative_schedule_decision(schema)
@@ -318,7 +315,7 @@ class ModelTransport(ConfiguredService):
                     )
                     if response.status_code == 429:
                         raise CloudRateLimited(
-                            '雲端模型達到速率或額度限制（HTTP 429）；本次判讀未完成，未反覆重送或據此匯入行事曆。'
+                            '雲端模型達到速率或額度限制（HTTP 429）；本次判讀未完成，未反覆重送或據此匯入行事曆。',
                         )
                     if response.status_code in (408, 500, 502, 503, 504):
                         raise CloudTemporaryFailure('雲端模型服務暫時無法完成請求；來源保留，未據此產生行程。')
@@ -342,7 +339,7 @@ class ModelTransport(ConfiguredService):
                             continue
                         raise ProcessingError('雲端回應未完整產生；已保留來源，未以截斷內容產生或匯入行程。')
                     result = self.parser.values._cloud_json_object(
-                        self.parser.values._responses_output_text(response_body)
+                        self.parser.values._responses_output_text(response_body),
                     )
                     if cache is not None:
                         cache.put(cache_key, result)

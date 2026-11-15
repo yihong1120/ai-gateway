@@ -1,5 +1,4 @@
 """Stateless document rendering operations, independent of request and host state."""
-
 from __future__ import annotations
 
 import math
@@ -7,21 +6,26 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from examples.official_document_workflow.domain.documents import (
-    DOCX_INVALID_TEXT_CHARS,
-    DOCX_UNIFIED_FONT,
-    INVALID_FILENAME_CHARS,
-    WHITESPACE,
-    OcrLayoutBlock,
-    OcrLayoutPage,
-    OfficialDocument,
-    ProcessingError,
-)
+from examples.official_document_workflow.domain.documents import DOCX_INVALID_TEXT_CHARS
+from examples.official_document_workflow.domain.documents import DOCX_UNIFIED_FONT
+from examples.official_document_workflow.domain.documents import INVALID_FILENAME_CHARS
+from examples.official_document_workflow.domain.documents import OcrLayoutBlock
+from examples.official_document_workflow.domain.documents import OcrLayoutPage
+from examples.official_document_workflow.domain.documents import OfficialDocument
+from examples.official_document_workflow.domain.documents import ProcessingError
+from examples.official_document_workflow.domain.documents import WHITESPACE
+from examples.shared.runtime.modules import ModuleReference
+
+_PIL = ModuleReference('PIL')
+_docx_oxml = ModuleReference('docx.oxml')
+_docx_oxml_ns = ModuleReference('docx.oxml.ns')
+_docx_shared = ModuleReference('docx.shared')
+_pymupdf = ModuleReference('pymupdf')
 
 
 class DocumentRendering:
     def pdf_filename(
-        self, document: OfficialDocument, *, suffix: str = '', attachment_label: str = '', attachment_title: str = ''
+        self, document: OfficialDocument, *, suffix: str = '', attachment_label: str = '', attachment_title: str = '',
     ) -> str:
         date_part = document.issued.compact_roc
         number_part = self.safe_filename_part(document.reference_number, 72)
@@ -51,7 +55,7 @@ class DocumentRendering:
         uncommon names or document numbers even though the source text is exact.
         """
         try:
-            import pymupdf
+            pymupdf = _pymupdf.load()
         except ImportError as exc:
             raise ProcessingError('伺服器缺少讀取 PDF 文字層所需的套件') from exc
 
@@ -247,7 +251,7 @@ class DocumentRendering:
     ) -> None:
         """Clear only blocks that will be replaced by visible Word text."""
         try:
-            from PIL import ImageDraw
+            ImageDraw = _PIL.attribute('ImageDraw')
         except ImportError as exc:
             raise ProcessingError('伺服器缺少建立可編輯掃描 DOCX 所需的影像套件') from exc
 
@@ -277,8 +281,8 @@ class DocumentRendering:
     def _set_docx_unified_normal_font(document: Any) -> None:
         """Apply the required common font to newly-created Word documents."""
         try:
-            from docx.oxml.ns import qn
-            from docx.shared import Pt
+            qn = _docx_oxml_ns.attribute('qn')
+            Pt = _docx_shared.attribute('Pt')
         except ImportError as exc:
             raise ProcessingError('伺服器缺少建立 DOCX 所需的 python-docx 套件') from exc
 
@@ -308,9 +312,9 @@ class DocumentRendering:
         neighbouring OCR blocks from flowing when one block is edited.
         """
         try:
-            from docx.oxml import OxmlElement
-            from docx.oxml.ns import qn
-            from docx.shared import Pt
+            OxmlElement = _docx_oxml.attribute('OxmlElement')
+            qn = _docx_oxml_ns.attribute('qn')
+            Pt = _docx_shared.attribute('Pt')
         except ImportError as exc:
             raise ProcessingError('伺服器缺少建立可編輯掃描 DOCX 所需的套件') from exc
 
@@ -371,8 +375,8 @@ class DocumentRendering:
         the same top-left coordinate on every page.
         """
         try:
-            from docx.oxml import OxmlElement
-            from docx.oxml.ns import qn
+            OxmlElement = _docx_oxml.attribute('OxmlElement')
+            qn = _docx_oxml_ns.attribute('qn')
         except ImportError as exc:
             raise ProcessingError('伺服器缺少建立保留版面 DOCX 所需的套件') from exc
 

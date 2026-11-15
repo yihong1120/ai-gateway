@@ -1,27 +1,29 @@
 """Only confirmed non-writes may be retried; ambiguous writes are reconciled."""
-
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import inspect
 import tempfile
-from pathlib import Path
 import types
 import unittest
-from unittest.mock import AsyncMock, Mock, patch
+from pathlib import Path
+from unittest.mock import AsyncMock
+from unittest.mock import Mock
+from unittest.mock import patch
 
+from examples.official_document_workflow.domain.documents import OutputNotWritten
+from examples.official_document_workflow.domain.documents import OutputUncertain
+from examples.official_document_workflow.domain.documents import ProcessingError
+from examples.shared.runtime.modules import ModuleReference
 from tests import test_official_document_processor_pipe as fixtures
-from examples.official_document_workflow.domain.documents import (
-    OutputNotWritten,
-    OutputUncertain,
-    ProcessingError,
-)
-from examples.official_document_workflow.services import exports as exports_module
+
+_exports = ModuleReference('examples.official_document_workflow.services.exports')
 
 
 class CalendarDeliveryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        self.exports_module = _exports.load()
         fixture = fixtures.PendingCalendarClarificationPipeTests()
         fixture.setUp()
         self.pipe, self.scope = fixture.pipe, fixture.scope
@@ -35,37 +37,44 @@ class CalendarDeliveryTests(unittest.IsolatedAsyncioTestCase):
         )
         self.pipe._resolve_pending_reminder_choice = AsyncMock(
             return_value=fixtures.PIPE_MODULE.PendingReminderResolution(
-                decision='all_verified_deadlines'
-            )
+                decision='all_verified_deadlines',
+            ),
         )
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.files = {}
-        self.enterContext(patch.object(exports_module.Storage,'get_file',side_effect=lambda path:path,create=True))
         self.enterContext(
             patch.object(
-                exports_module.Files,
+                self.exports_module.Storage, 'get_file',
+                side_effect=lambda path: path, create=True,
+            ),
+        )
+        self.enterContext(
+            patch.object(
+                self.exports_module.Files,
                 'get_file_by_id_and_user_id',
                 AsyncMock(
                     side_effect=lambda key, owner: (
                         self.source if key == self.source.id else self.files.get(key)
-                    )
+                    ),
                 ),
                 create=True,
-            )
+            ),
         )
         self.pipe.exports.store_output = AsyncMock(wraps=self.pipe.exports.store_output)
         self.set_writer(self.commit)
 
     def set_writer(self, effect):
         async def write(spec):
-            if isinstance(effect,BaseException):
+            if isinstance(effect, BaseException):
                 raise effect
             spec.stream.seek(0)
             payload = spec.stream.read()
-            result = effect(output_id=spec.id,display_name=spec.name,payload=payload,kind=spec.kind,
-                            source_file_id=spec.source,user_id=spec.owner)
+            result = effect(
+                output_id=spec.id, display_name=spec.name, payload=payload, kind=spec.kind,
+                source_file_id=spec.source, user_id=spec.owner,
+            )
             return await result if inspect.isawaitable(result) else result
         self.pipe.exports.delivery.writer = AsyncMock(side_effect=write)
 
@@ -74,7 +83,7 @@ class CalendarDeliveryTests(unittest.IsolatedAsyncioTestCase):
         path.write_bytes(kwargs['payload'])
         item = types.SimpleNamespace(
             id=kwargs['output_id'],
-            filename=kwargs['display_name'],user_id=kwargs['user_id'],path=str(path),
+            filename=kwargs['display_name'], user_id=kwargs['user_id'], path=str(path),
             meta={
                 'file_hash': hashlib.sha256(kwargs['payload']).hexdigest(),
                 'data': {
@@ -90,7 +99,7 @@ class CalendarDeliveryTests(unittest.IsolatedAsyncioTestCase):
     def upload(self, stream, name):
         path = self.root / name
         path.write_bytes(stream.read())
-        return None,str(path)
+        return None, str(path)
 
     async def reply(self):
         return await self.pipe.clarifications.complete(
@@ -109,7 +118,7 @@ class CalendarDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.set_writer(self.commit)
         self.assertIn('更新後行事曆', await self.reply())
         self.assertEqual(
-            self.pipe.exports.store_output.await_args.kwargs['output_id'], first_id
+            self.pipe.exports.store_output.await_args.kwargs['output_id'], first_id,
         )
         self.assertEqual(self.store.outputs.get(first_id, 'user').state, 'stored')
         self.assertIsNone(self.store.get(self.scope))
@@ -126,12 +135,12 @@ class CalendarDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.store.get(self.scope))
         self.assertIsNotNone(self.store.review(self.scope))
         self.assertEqual(
-            self.store.outputs.get(captured['output_id'], 'user').state, 'unknown'
+            self.store.outputs.get(captured['output_id'], 'user').state, 'unknown',
         )
         self.assertIn('未重送寫入', await self.reply())
         self.commit(**captured)  # A delayed transaction becomes visible later.
         self.pipe._resolve_pending_reminder_choice.side_effect = AssertionError(
-            'must not ask the model again'
+            'must not ask the model again',
         )
         output = await self.reply()
         self.assertIn(captured['output_id'], output)
@@ -186,23 +195,23 @@ class CalendarDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
         def insert(owner, form):
             item = types.SimpleNamespace(
-                id=form.id, filename=form.filename, meta=form.meta,user_id=owner,path=form.path
+                id=form.id, filename=form.filename, meta=form.meta, user_id=owner, path=form.path,
             )
             self.files[item.id] = item
             raise RuntimeError('lost response after database commit')
 
         with (
             patch.object(
-                exports_module.Storage,
+                self.exports_module.Storage,
                 'upload_file',
-                Mock(side_effect=lambda stream,name,tags: self.upload(stream,name)),
+                Mock(side_effect=lambda stream, name, tags: self.upload(stream, name)),
                 create=True,
             ),
             patch.object(
-                exports_module.Storage, 'delete_file', Mock(), create=True
+                self.exports_module.Storage, 'delete_file', Mock(), create=True,
             ) as delete,
             patch.object(
-                exports_module.Files,
+                self.exports_module.Files,
                 'insert_new_file',
                 AsyncMock(side_effect=insert),
                 create=True,

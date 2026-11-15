@@ -5,46 +5,57 @@ deduplication, import/readback and persistent checkpoints. Only model/OCR,
 Open WebUI storage and remote EIP responses are replaced at their boundaries.
 """
 from __future__ import annotations
-from examples.official_document_workflow.runtime import current_resources
 
 import asyncio
 import copy
 import csv
 import hashlib
+import importlib
 import io
 import json
-import importlib
+import sys
 import tempfile
 import types
 import unittest
 import uuid
-import sys
 from pathlib import Path
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
 from unittest.mock import patch
 
-import pymupdf
 import httpx
+import pymupdf
 from docx import Document
 from fastapi import FastAPI
 
+import examples.official_document_workflow.domain.calendar.match_review as _match_review_imports
+import examples.official_document_workflow.infrastructure.eip.netask as _netask_imports
 from .test_eip_connector import remote
 from .test_eip_connector import verified
 from .test_eip_group_processing import payload
 from .test_official_document_processor_pipe import DEADLINE_EVIDENCE
 from .test_official_document_processor_pipe import PIPE_MODULE as M
 from .test_official_document_processor_pipe import SOURCE
-from examples.official_document_workflow.services import sources as source_service, exports as export_service, clarifications as clarification_service
 from examples.official_document_workflow.application import automation
 from examples.official_document_workflow.application import integration
+from examples.official_document_workflow.application.prompts import (
+    REVIEW_PROMPT,
+)
+from examples.official_document_workflow.domain.calendar.contracts import CALENDAR_REVIEW_SCHEMA
+from examples.official_document_workflow.domain.calendar.contracts import GROUP_ANALYSIS_SCHEMA
 from examples.official_document_workflow.infrastructure.eip.netask import Netask
 from examples.official_document_workflow.infrastructure.storage.automation_store import (
     AutomationStore,
 )
 from examples.official_document_workflow.infrastructure.storage.state import Journal
-from examples.official_document_workflow.infrastructure.storage.state import State
 from examples.official_document_workflow.infrastructure.storage.state import Link
+from examples.official_document_workflow.infrastructure.storage.state import State
+from examples.official_document_workflow.runtime import current_resources
+from examples.official_document_workflow.services import (
+    clarifications as clarification_service,
+)
+from examples.official_document_workflow.services import exports as export_service
+from examples.official_document_workflow.services import sources as source_service
 from tests.eip_postgres import EIPPostgresTestCase
 
 PROJECT = '代辦國道3號古坑交流道平面側車道工程'
@@ -86,8 +97,10 @@ def candidate():
             },
         ],
     )
-    for name in ('title', 'action', 'project_name', 'location', 'responsible_party', 'relevance',
-                 'start_date', 'start_time', 'end_date', 'end_time', 'anchor_date'):
+    for name in (
+        'title', 'action', 'project_name', 'location', 'responsible_party', 'relevance',
+        'start_date', 'start_time', 'end_date', 'end_time', 'anchor_date',
+    ):
         data['events'][0]['evidence_spans'].setdefault(name, [])
     return data
 
@@ -284,12 +297,16 @@ class PipelineIntegrationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTest
                 {'name': '2-attachment.pdf', 'url': '/fo/attachment'},
             ],
         )
+
         async def document_detail(*args):
             return {'fields': [], 'attachments': await self.adapter.attachments(*args)}
 
         self.adapter.document_detail = AsyncMock(side_effect=document_detail)
-        self.adapter.download = AsyncMock(side_effect=lambda url, *_: io.BytesIO(
-            self.attachment if url == '/fo/attachment' else self.original))
+        self.adapter.download = AsyncMock(
+            side_effect=lambda url, *_: io.BytesIO(
+                self.attachment if url == '/fo/attachment' else self.original,
+            ),
+        )
         self.adapter.stage = AsyncMock(side_effect=self.remote.stage)
         self.adapter.rpc = AsyncMock(side_effect=self.remote.rpc)
         self.adapter.calendar_projects = AsyncMock(
@@ -319,26 +336,24 @@ class PipelineIntegrationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTest
             self.addCleanup(item.stop)
 
     async def model(self, source, *, prompt, schema, max_output_tokens=None):
-        from examples.official_document_workflow.domain.calendar.match_review import model_prompt, transport_schema
-        if prompt == model_prompt():
-            self.assertEqual(schema, transport_schema())
+        if prompt == _match_review_imports.model_prompt():
+            self.assertEqual(schema, _match_review_imports.transport_schema())
             self.assertEqual(max_output_tokens, 4_000)
             data = json.loads(source.text)
-            return {'checks': [
-                {'index': item['index'], 'candidates': [
-                    {'candidate_index': c['candidate_index'], 'relation': getattr(self, 'match_relation', 'uncertain'),
-                     'reason': '對照工作內容及起訖核對。', 'incoming_quote': item['incoming']['title'],
-                     'existing_quote': c['event']['title']}
-                    for c in item['candidates']
-                ]} for item in data['events']
-            ]}
-        from examples.official_document_workflow.application.prompts import (
-            REVIEW_PROMPT,
-        )
-        from examples.official_document_workflow.domain.calendar.contracts import (
-            CALENDAR_REVIEW_SCHEMA,
-            GROUP_ANALYSIS_SCHEMA,
-        )
+            return {
+                'checks': [
+                    {
+                        'index': item['index'], 'candidates': [
+                            {
+                                'candidate_index': c['candidate_index'], 'relation': getattr(self, 'match_relation', 'uncertain'),
+                                'reason': '對照工作內容及起訖核對。', 'incoming_quote': item['incoming']['title'],
+                                'existing_quote': c['event']['title'],
+                            }
+                            for c in item['candidates']
+                        ],
+                    } for item in data['events']
+                ],
+            }
 
         reviewing = prompt.startswith(REVIEW_PROMPT)
         self.assertEqual(schema, CALENDAR_REVIEW_SCHEMA if reviewing else GROUP_ANALYSIS_SCHEMA)
@@ -361,7 +376,9 @@ class PipelineIntegrationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTest
                 return_value=[{'owner': 'alice', 'generation': self.generation}],
             ),
             patch.object(
-                automation, 'asyncio', types.SimpleNamespace(**{**vars(asyncio), 'sleep': AsyncMock(side_effect=asyncio.CancelledError)}),
+                automation, 'asyncio', types.SimpleNamespace(
+                    **{**vars(asyncio), 'sleep': AsyncMock(side_effect=asyncio.CancelledError)},
+                ),
             ),
         ):
             with self.assertRaises(asyncio.CancelledError):
@@ -489,13 +506,12 @@ class PipelineIntegrationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTest
         self.assertEqual(self.remote.writes, 1)
 
     async def test_ai_resolves_native_wording_difference_through_scheduler_without_user_confirmation(self):
-        from examples.official_document_workflow.infrastructure.eip.netask import js_escape
         task = await self.run_once()
         with self.journal.connect() as db:
             db.execute('DELETE FROM writes')
             db.execute('DELETE FROM event_receipts')
             db.execute('DELETE FROM source_manifests')
-        self.remote.fields[0] = js_escape('提交評估成果報告[AI產生]')
+        self.remote.fields[0] = _netask_imports.js_escape('提交評估成果報告[AI產生]')
         original = list(self.remote.fields)
         self.match_relation = 'duplicate'
         self.db.save_task(task, 'converted', task['payload'])

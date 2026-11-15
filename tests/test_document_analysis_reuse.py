@@ -2,37 +2,55 @@
 from __future__ import annotations
 
 import asyncio
+import multiprocessing
+import tempfile
+import time
+import unittest
 from concurrent.futures import ProcessPoolExecutor
 from copy import deepcopy
-from datetime import date, timedelta
+from datetime import date
+from datetime import timedelta
 from pathlib import Path
-import tempfile
-import multiprocessing
-import time
 from types import SimpleNamespace
-import unittest
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
+from unittest.mock import Mock
 
-from tests.eip_postgres import EIPPostgresTestCase
-from tests.test_eip_group_processing import payload, M, SOURCE
-from tests.test_eip_connector import remote
 from examples.official_document_workflow.application.multi_agent import DocumentAgent
-from examples.official_document_workflow.domain.calendar.relative_dates import ReceiptContext
+from examples.official_document_workflow.domain.calendar.relative_dates import (
+    ReceiptContext,
+)
 from examples.official_document_workflow.domain.documents import ProcessingError
-from examples.official_document_workflow.infrastructure.storage.analysis_results import AnalysisResults
 from examples.official_document_workflow.infrastructure.eip import calendar_sync
+from examples.official_document_workflow.infrastructure.storage.analysis_results import (
+    AnalysisResults,
+)
+from examples.official_document_workflow.infrastructure.storage.automation_store import (
+    AutomationStore,
+)
 from examples.official_document_workflow.services.analysis_reuse import analyze_content
 from examples.official_document_workflow.services.output_delivery import output_job
 from examples.official_document_workflow.services.source_readings import read_source
+from examples.shared.runtime.modules import ModuleReference
+from tests.eip_postgres import EIPPostgresTestCase
+from tests.test_eip_connector import remote
+from tests.test_eip_group_processing import M
+from tests.test_eip_group_processing import payload
+from tests.test_eip_group_processing import SOURCE
+
+_pymupdf = ModuleReference('pymupdf')
+_fixture_test_eip_connector = ModuleReference('tests.test_eip_connector')
 
 
-SCHEMA = {'type': 'object', 'properties': {'answer': {'type': 'string'}}, 'required': ['answer'], 'additionalProperties': False}
+SCHEMA = {
+    'type': 'object', 'properties': {'answer': {'type': 'string'}},
+    'required': ['answer'], 'additionalProperties': False,
+}
 
 
 def independent_analysis(dsn, schema, key_file):
-    from examples.official_document_workflow.infrastructure.storage.automation_store import AutomationStore
     store = AutomationStore(Path(key_file), dsn=dsn, schema=schema)
     registry = AnalysisResults(store, 'cross-process')
+
     def compute():
         with store.db() as db:
             db.execute('INSERT INTO analysis_producer_calls DEFAULT VALUES')
@@ -59,8 +77,10 @@ class AnalysisReuseTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         return pipe
 
     async def call(self, pipe, *, prompt='Read the original facts.', schema=SCHEMA, revisions=('original-sha',)):
-        return await analyze_content(pipe, M.CloudSemanticSource('original content', 'native_pdf_text'),
-                                     stage='synthetic', prompt=prompt, schema=schema, revisions=revisions)
+        return await analyze_content(
+            pipe, M.CloudSemanticSource('original content', 'native_pdf_text'),
+            stage='synthetic', prompt=prompt, schema=schema, revisions=revisions,
+        )
 
     async def test_ten_recipients_share_analysis_and_review_with_independent_dates_and_idempotent_writes(self):
         common = payload()
@@ -70,10 +90,14 @@ class AnalysisReuseTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         event.update(start_date=None, tentative_schedule=None)
         for name in ('title', 'action', 'project_name', 'location', 'responsible_party', 'relevance', 'start_date', 'start_time', 'end_date', 'end_time', 'anchor_date'):
             event['evidence_spans'].setdefault(name, [])
-        event['assignment'] = {'executor': None, 'date_basis': 'relative', 'anchor_date': None,
-                               'relative_deadline': {'anchor': 'receipt', 'days': 7, 'day_type': 'calendar_days', 'include_anchor_day': False}}
-        sources = {'S1': M.CloudSemanticSource(SOURCE, 'native_pdf_text'),
-                   'S2': M.CloudSemanticSource('請於文到後七日內提送評估報告。', 'native_pdf_text')}
+        event['assignment'] = {
+            'executor': None, 'date_basis': 'relative', 'anchor_date': None,
+            'relative_deadline': {'anchor': 'receipt', 'days': 7, 'day_type': 'calendar_days', 'include_anchor_day': False},
+        }
+        sources = {
+            'S1': M.CloudSemanticSource(SOURCE, 'native_pdf_text'),
+            'S2': M.CloudSemanticSource('請於文到後七日內提送評估報告。', 'native_pdf_text'),
+        }
         calls = {'analysis': 0, 'review': 0}
         requests = []
 
@@ -82,9 +106,13 @@ class AnalysisReuseTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.02)
             if 'issues' in schema.get('properties', {}):
                 calls['review'] += 1
-                return {'issues': [], 'checks': [{'index': 0, 'decision': 'keep', 'target': None,
-                    'reason': '原文具有成立的工作與明示期間。',
-                    'evidence_spans': [{'source_id': 'S2', 'start_line': 1, 'end_line': 1}]}]}
+                return {
+                    'issues': [], 'checks': [{
+                        'index': 0, 'decision': 'keep', 'target': None,
+                        'reason': '原文具有成立的工作與明示期間。',
+                        'evidence_spans': [{'source_id': 'S2', 'start_line': 1, 'end_line': 1}],
+                    }],
+                }
             calls['analysis'] += 1
             return deepcopy(common)
 
@@ -93,12 +121,22 @@ class AnalysisReuseTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             pipe = self.pipe(owner, upstream)
             pipe._estimate_relative_dates = True
             received = date(2026, 9, 1) + timedelta(days=n)
-            pipe._eip_receipt_context = ReceiptContext(f'private-flow-{n}', common['document']['reference_number'], received.isoformat())
+            pipe._eip_receipt_context = ReceiptContext(
+                f'private-flow-{n}', common['document']['reference_number'], received.isoformat(),
+            )
             members = []
             for i in range(2):
                 path = self.root / f'{owner}-{i}.pdf'
                 path.write_bytes(b'original-common-' + str(i).encode())
-                members.append(M.PreparedDocument(kind='pdf', source_files=(SimpleNamespace(id=f'{owner}-upload-{i}', filename=f'private-{owner}-{i}.pdf'),), pdf_path=path))
+                members.append(
+                    M.PreparedDocument(
+                        kind='pdf', source_files=(
+                            SimpleNamespace(
+                                id=f'{owner}-upload-{i}', filename=f'private-{owner}-{i}.pdf',
+                            ),
+                        ), pdf_path=path,
+                    ),
+                )
             with output_job(owner, f'job-{n}'):
                 result = await DocumentAgent(pipe, None).run(members, 1, 1, sources=sources)
             self.assertEqual(result['analysis_status'], 'validated')
@@ -182,13 +220,12 @@ class AnalysisReuseTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         pipe = self.pipe('alice', model)
         await self.call(pipe)
         with self.registry.store.db() as db:
-            db.execute("UPDATE document_analysis_results SET payload=%s", (b'corrupt',))
+            db.execute('UPDATE document_analysis_results SET payload=%s', (b'corrupt',))
         with self.assertRaises(ProcessingError):
             await self.call(self.pipe('bob', model))
         model.assert_awaited_once()
 
     async def test_missing_key_cannot_be_regenerated_when_only_paid_results_exist(self):
-        from examples.official_document_workflow.infrastructure.storage.automation_store import AutomationStore
         await self.call(self.pipe('alice', AsyncMock(return_value={'answer': 'kept'})))
         self._workflow.settings.key.unlink()
         with self.assertRaisesRegex(ValueError, '金鑰遺失'):
@@ -216,7 +253,9 @@ class AnalysisReuseTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             locked.execute('SELECT pg_advisory_lock(hashtextextended(%s,0))', (self.registry._lock_name(key),))
             with self.assertRaises(ValueError):
                 await asyncio.to_thread(self.registry.confirm_not_started, key, actor='operator', reason='Provider transport confirmed no request was submitted.')
-        self.registry.confirm_not_started(key, actor='operator', reason='Provider transport confirmed no request was submitted.')
+        self.registry.confirm_not_started(
+            key, actor='operator', reason='Provider transport confirmed no request was submitted.',
+        )
         pipe.analyze_text = AsyncMock(return_value={'answer': 'recovered'})
         self.assertEqual(await self.call(pipe), {'answer': 'recovered'})
         with self.assertRaises(ValueError):
@@ -228,8 +267,12 @@ class AnalysisReuseTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         with self.registry.store.db() as db:
             db.execute('CREATE TABLE analysis_producer_calls(id BIGSERIAL PRIMARY KEY)')
         with ProcessPoolExecutor(max_workers=2, mp_context=multiprocessing.get_context('spawn')) as pool:
-            futures = [pool.submit(independent_analysis, self.registry.store.dsn, self.registry.store.schema,
-                                   str(self._workflow.settings.key)) for _ in range(2)]
+            futures = [
+                pool.submit(
+                    independent_analysis, self.registry.store.dsn, self.registry.store.schema,
+                    str(self._workflow.settings.key),
+                ) for _ in range(2)
+            ]
             values = await asyncio.gather(*(asyncio.to_thread(future.result, 15) for future in futures))
         self.assertEqual(values, [{'answer': 'one model invocation'}] * 2)
         with self.registry.store.db() as db:
@@ -237,6 +280,7 @@ class AnalysisReuseTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
 
     async def test_cancelled_recipient_does_not_cancel_another_recipients_analysis(self):
         entered, finish = asyncio.Event(), asyncio.Event()
+
         async def compute(*args, **kwargs):
             entered.set()
             await finish.wait()
@@ -262,7 +306,7 @@ class AnalysisReuseTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         model.assert_awaited_once()
 
     def source_document(self, owner):
-        import pymupdf
+        pymupdf = _pymupdf.load()
         first = self.root / 'original.pdf'
         if not first.exists():
             with pymupdf.open() as document:
@@ -276,7 +320,11 @@ class AnalysisReuseTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         model = AsyncMock(return_value={'answer': 'verified facts'})
         alice, bob = self.pipe('alice', model), self.pipe('bob', model)
         alice.ocr_context = AsyncMock(return_value=((), None))
-        alice.semantic_source = Mock(return_value=M.CloudSemanticSource('Original line one\nOriginal line two', 'native_pdf_text'))
+        alice.semantic_source = Mock(
+            return_value=M.CloudSemanticSource(
+                'Original line one\nOriginal line two', 'native_pdf_text',
+            ),
+        )
         bob.ocr_context = AsyncMock(side_effect=AssertionError('Do not rerun OCR after the rebuildable cache expires.'))
         bob.semantic_source = Mock(side_effect=AssertionError('Do not replace the source line coordinates.'))
         one, _ = await read_source(alice, self.source_document('alice'))
@@ -305,7 +353,7 @@ class AnalysisReuseTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         bob.ocr_context.assert_not_awaited()
 
     async def test_one_uncertain_calendar_write_does_not_repeat_analysis_or_block_other_recipients(self):
-        from tests.test_eip_connector import row
+        row = _fixture_test_eip_connector.attribute('row')
         model = AsyncMock(return_value={'answer': 'shared facts'})
         await self.call(self.pipe('alice', model))
         await self.call(self.pipe('bob', model))
@@ -314,10 +362,14 @@ class AnalysisReuseTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         journal = self._workflow.journal
         alice = calendar_sync.verified_events(rows, [remote(rows[0])], '17', journal)
         bob = calendar_sync.verified_events(rows, [remote(rows[0])], '18', journal)
-        first = SimpleNamespace(calendar_import_matches=AsyncMock(return_value=[{'status': 'new'}]),
-                                commit=AsyncMock(side_effect=TimeoutError('Ambiguous remote write.')))
-        second = SimpleNamespace(calendar_import_matches=AsyncMock(return_value=[{'status': 'new'}]),
-                                 commit=AsyncMock(return_value={'event_id': 'bob-event', 'detail_verified': True}))
+        first = SimpleNamespace(
+            calendar_import_matches=AsyncMock(return_value=[{'status': 'new'}]),
+            commit=AsyncMock(side_effect=TimeoutError('Ambiguous remote write.')),
+        )
+        second = SimpleNamespace(
+            calendar_import_matches=AsyncMock(return_value=[{'status': 'new'}]),
+            commit=AsyncMock(return_value={'event_id': 'bob-event', 'detail_verified': True}),
+        )
         with self.assertRaises(TimeoutError):
             await calendar_sync.write_events(first, alice, journal)
         with self.assertRaises(ValueError):

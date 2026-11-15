@@ -1,6 +1,9 @@
 """Provision only the dedicated dev OIDC client and its operator roles."""
+from __future__ import annotations
+
 import json
 from pathlib import Path
+
 import httpx
 
 BASE = 'https://changdar-server.mooo.com/keycloak'
@@ -12,11 +15,13 @@ MARKER = 'ai-gateway-local-dev-v1'
 def provision():
     values = json.loads((Path.home() / 'service-migration-phase5/source-keycloak-env.json').read_text())
     with httpx.Client(timeout=30, trust_env=False) as client:
-        response = client.post(BASE + '/realms/master/protocol/openid-connect/token', data={
-            'client_id': 'admin-cli', 'grant_type': 'password',
-            'username': values['KC_BOOTSTRAP_ADMIN_USERNAME'],
-            'password': values['KC_BOOTSTRAP_ADMIN_PASSWORD'],
-        })
+        response = client.post(
+            BASE + '/realms/master/protocol/openid-connect/token', data={
+                'client_id': 'admin-cli', 'grant_type': 'password',
+                'username': values['KC_BOOTSTRAP_ADMIN_USERNAME'],
+                'password': values['KC_BOOTSTRAP_ADMIN_PASSWORD'],
+            },
+        )
         response.raise_for_status()
         client.headers['Authorization'] = 'Bearer ' + response.json()['access_token']
         prefix = BASE + '/admin/realms/visionnaire'
@@ -72,5 +77,7 @@ def provision():
         else:
             api('POST', path + '/protocol-mappers/models', json=mapper)
         secret = api('GET', path + '/client-secret')['value']
-        return secret, {'id': user['id'], 'email': user.get('email') or f"oidc@{user['id']}.local",
-                        'name': user.get('firstName') or user['username']}
+        return secret, {
+            'id': user['id'], 'email': user.get('email') or f"oidc@{user['id']}.local",
+            'name': user.get('firstName') or user['username'],
+        }

@@ -14,11 +14,15 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from examples.identity.database import get_db
-from examples.identity.sessions.jwt import jwt_access
-from examples.identity.sessions.jwt import JwtAuthorizationCredentials
-from examples.identity.models import User
-from examples.identity.redis_pool import get_redis_pool
 from examples.identity.dependencies import get_current_user
+from examples.identity.models import User
+from examples.identity.providers.native_api import begin_native_social_exchange
+from examples.identity.providers.native_api import begin_native_social_link
+from examples.identity.providers.native_api import complete_native_social_exchange
+from examples.identity.providers.native_api import complete_native_social_link
+from examples.identity.providers.native_api import confirm_native_social_email_link
+from examples.identity.providers.native_api import redeem_keycloak_native_social_exchange
+from examples.identity.redis_pool import get_redis_pool
 from examples.identity.schemas.auth import NativeSocialEmailLinkConfirmRequest
 from examples.identity.schemas.auth import NativeSocialExchangeBeginRequest
 from examples.identity.schemas.auth import NativeSocialExchangeBeginResponse
@@ -28,12 +32,8 @@ from examples.identity.schemas.auth import NativeSocialLinkBeginRequest
 from examples.identity.schemas.auth import NativeSocialLinkBeginResponse
 from examples.identity.schemas.auth import NativeSocialLinkCompleteRequest
 from examples.identity.schemas.auth import NativeSocialLinkResponse
-from examples.identity.providers.native_api import begin_native_social_exchange
-from examples.identity.providers.native_api import begin_native_social_link
-from examples.identity.providers.native_api import complete_native_social_exchange
-from examples.identity.providers.native_api import complete_native_social_link
-from examples.identity.providers.native_api import confirm_native_social_email_link
-from examples.identity.providers.native_api import redeem_keycloak_native_social_exchange
+from examples.identity.sessions.jwt import jwt_access
+from examples.identity.sessions.jwt import JwtAuthorizationCredentials
 
 router = APIRouter(prefix='/auth/native-social', tags=['native-social'])
 

@@ -1,32 +1,24 @@
 """BFF streams operations."""
-
 from __future__ import annotations
 
 import asyncio
-from anyio import CancelScope
-
 import json
-
 from collections.abc import AsyncIterator
 
 import httpx
-
+from anyio import CancelScope
 from fastapi import HTTPException
-
 from fastapi import Request
-
 from fastapi.responses import StreamingResponse
-
 from redis.asyncio import Redis
 
-from examples.identity.deployment_context import DeploymentBinding
-
-from examples.shared.runtime.http_clients import HttpClientPool
-
-from examples.identity.settings.bff import get_bff_options
 from examples.bff.proxy_config import logger
-from examples.bff.proxy_headers import _proxy_request_headers, _proxy_response_headers
+from examples.bff.proxy_headers import _proxy_request_headers
+from examples.bff.proxy_headers import _proxy_response_headers
 from examples.bff.proxy_tokens import _get_proxy_access_token_or_503
+from examples.identity.deployment_context import DeploymentBinding
+from examples.identity.settings.bff import get_bff_options
+from examples.shared.runtime.http_clients import HttpClientPool
 
 
 def _is_sse_request(request: Request, suffix: str) -> bool:

@@ -17,13 +17,26 @@ from .test_official_document_processor_pipe import PIPE_MODULE as M
 from examples.official_document_workflow.application.long_source import group_text
 from examples.official_document_workflow.application.long_source import source_lines
 from examples.official_document_workflow.application.long_source import windows
-from examples.official_document_workflow.domain.calendar.calendar_semantics import resolve_spans
+from examples.official_document_workflow.domain.calendar.calendar_semantics import (
+    resolve_spans,
+)
+from examples.official_document_workflow.domain.validation import ContentValidationError
 from examples.official_document_workflow.infrastructure.eip import calendar_csv
 from examples.official_document_workflow.infrastructure.eip.netask import Netask
-from examples.official_document_workflow.infrastructure.office.office_input import validate
-from examples.official_document_workflow.infrastructure.storage.automation_store import AutomationStore
-from examples.official_document_workflow.infrastructure.storage.processing_cache import ProcessingCache
+from examples.official_document_workflow.infrastructure.office.office_input import (
+    validate,
+)
+from examples.official_document_workflow.infrastructure.storage.automation_store import (
+    AutomationStore,
+)
+from examples.official_document_workflow.infrastructure.storage.processing_cache import (
+    ProcessingCache,
+)
+from examples.shared.runtime.modules import ModuleReference
 from tests.eip_postgres import EIPPostgresTestCase
+
+_workflow_application = ModuleReference('examples.official_document_workflow.application')
+_fixture_test_eip_connector = ModuleReference('tests.test_eip_connector')
 
 
 def answer_for(source, keep):
@@ -117,7 +130,6 @@ class LargeSourceTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(count, reading['windows']+1)
 
     async def test_incomplete_or_fabricated_ranges_never_accepted(self):
-        from examples.official_document_workflow.domain.validation import ContentValidationError
         for update in (
             {'read_count': 0}, {'first_id': 'other'}, {'uncertain': True},
             {'keep_ranges': [[0, 1]]}, {'keep_ranges': [[1, 1], [1, 2]]},
@@ -211,8 +223,8 @@ class LargeSourceTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         client.post.assert_awaited_once()
 
     def test_large_csv_description_is_preserved_not_truncated(self):
-        from examples.official_document_workflow.application import integration
-        from .test_eip_connector import row, csv_bytes
+        integration = _workflow_application.attribute('integration')
+        row, csv_bytes = _fixture_test_eip_connector.attributes('row', 'csv_bytes')
         item = row()
         item['Description'] = '完整內容與標點，保持換行。\n'*80000
         with patch.object(integration, 'module', new=M):
@@ -221,7 +233,6 @@ class LargeSourceTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(transport), 1024*1024)
 
     async def test_dense_relevant_content_not_summarized_or_discarded_to_force_success(self):
-        from examples.official_document_workflow.domain.validation import ContentValidationError
         self.pipe.analyze_text = AsyncMock(side_effect=lambda s, **kw: answer_for(s, lambda i: True))
         with self.assertRaises(ContentValidationError) as caught:
             await group_text(self.pipe,  self.members, self.sources)
@@ -229,7 +240,6 @@ class LargeSourceTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertFalse(caught.exception.can_auto_repair)
 
     async def test_mandatory_evidence_over_budget_stops_before_paid_window_calls(self):
-        from examples.official_document_workflow.domain.validation import ContentValidationError
         original = ('115年10月28日期限：保留本件完整原文證據。\n' * 300)
         sources = {'S1': M.CloudSemanticSource(original, 'native_pdf_text')}
         self.pipe.analyze_text = AsyncMock()

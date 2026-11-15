@@ -1,19 +1,23 @@
 """Real transactions, contention and offline migration; no external services."""
+from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 import json
 import os
 import sqlite3
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from cryptography.fernet import Fernet
 import psycopg
+from cryptography.fernet import Fernet
 
-from examples.company_ai_access.cli.migrate import migrate, stopped_registry
-from examples.company_ai_access.storage.registry import Store, database_config, digest
+from examples.company_ai_access.cli.migrate import migrate
+from examples.company_ai_access.cli.migrate import stopped_registry
+from examples.company_ai_access.storage.registry import database_config
+from examples.company_ai_access.storage.registry import digest
+from examples.company_ai_access.storage.registry import Store
 from examples.company_ai_access.storage.repository import Repository
 from tests.ai_access_postgres import access_database
 
@@ -47,7 +51,7 @@ class Registry(unittest.IsolatedAsyncioTestCase):
                 [
                     ('device', {'id': 'a', 'key_hash': 'same'}),
                     ('device', {'id': 'b', 'key_hash': 'same'}),
-                ]
+                ],
             )
         self.assertEqual((await self.store.list('device')), [])
 
@@ -143,7 +147,7 @@ class Registry(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.store.list('device')), [])
         async with self.store.db() as db:
             self.assertIsNone(
-                (await (await db.execute('SELECT legacy_hash FROM registry_metadata')).fetchone())['legacy_hash']
+                (await (await db.execute('SELECT legacy_hash FROM registry_metadata')).fetchone())['legacy_hash'],
             )
 
     async def test_changed_legacy_snapshot_is_rejected(self):

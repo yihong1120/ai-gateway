@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 import html
-from html.parser import HTMLParser
 import json
-from pathlib import Path
 import re
 import statistics
 import unicodedata
+from collections import Counter
+from html.parser import HTMLParser
+from pathlib import Path
 
 from rapidfuzz.distance import Levenshtein
 
@@ -80,9 +80,16 @@ def summarize(root, destination):
             fields += total
             cell_hits += cell_got
             cells += cell_total
-            result = {k: row.get(k) for k in ('case', 'kind', 'repeat', 'success', 'seconds', 'gpu_peak_MiB', 'gpu_min_free_MiB', 'error')}
-            result.update(critical_fields_matched=got, critical_fields_total=total,
-                          table_cells_matched=cell_got, table_cells_total=cell_total)
+            result = {
+                k: row.get(k) for k in (
+                    'case', 'kind', 'repeat', 'success',
+                    'seconds', 'gpu_peak_MiB', 'gpu_min_free_MiB', 'error',
+                )
+            }
+            result.update(
+                critical_fields_matched=got, critical_fields_total=total,
+                table_cells_matched=cell_got, table_cells_total=cell_total,
+            )
             if row['case'].startswith('synthetic'):
                 truth, predicted = normalized(case['ground_truth']), normalized(output)
                 distance = Levenshtein.distance(truth, predicted)
@@ -101,7 +108,8 @@ def summarize(root, destination):
                 expected = [case['table_cells'][i:i + 4] for i in range(0, len(case['table_cells']), 4)]
                 result['table_rows_exact'] = sum(
                     any([normalized(c) for c in expected_row] == observed[-4:] for observed in table.rows)
-                    for expected_row in expected)
+                    for expected_row in expected
+                )
                 result['table_rows_total'] = len(expected)
             results.append(result)
         times = [r['seconds'] for r in results if r['success']]
@@ -128,19 +136,25 @@ def summarize(root, destination):
     for file in sorted(root.glob('*-coexist-gemma.json')):
         data = json.loads(file.read_text())
         gemma.append({k: v for k, v in data.items() if k != 'requests'})
-    report = {'date': '2026-10-14', 'timezone': 'Asia/Taipei',
-              'corpus_pages': len(cases), 'synthetic_pages': sum(k.startswith('synthetic') for k in cases),
-              'real_pages': sum(k.startswith('real') for k in cases),
-              'metrics': {'cer': 'Levenshtein distance on normalized synthetic full text only; lower is better.',
-                          'critical_fields': 'Exact normalized match; numeric fields use digit boundaries.',
-                          'real_documents': 'Embedded PDF text provides field references; no full-page CER because image-only stamps are not fully transcribed.',
-                          'normalization': 'NFKC, whitespace/markup removal, thousands-separator normalization; traditional/simplified characters are NOT merged.'},
-              'profiles': reports, 'gemma_coexist': gemma}
+    report = {
+        'date': '2026-10-14', 'timezone': 'Asia/Taipei',
+        'corpus_pages': len(cases), 'synthetic_pages': sum(k.startswith('synthetic') for k in cases),
+        'real_pages': sum(k.startswith('real') for k in cases),
+        'metrics': {
+            'cer': 'Levenshtein distance on normalized synthetic full text only; lower is better.',
+            'critical_fields': 'Exact normalized match; numeric fields use digit boundaries.',
+            'real_documents': 'Embedded PDF text provides field references; no full-page CER because image-only stamps are not fully transcribed.',
+            'normalization': 'NFKC, whitespace/markup removal, thousands-separator normalization; traditional/simplified characters are NOT merged.',
+        },
+        'profiles': reports, 'gemma_coexist': gemma,
+    }
     destination.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
     for r in reports:
-        print(r['label'], 'success', r['successes'], '/', r['requests'],
-              'median', r['median_page_seconds'], 'CER%', r['synthetic_cer_percent'],
-              'fields%', r['critical_field_recall_percent'], 'cells%', r['table_cell_recall_percent'])
+        print(
+            r['label'], 'success', r['successes'], '/', r['requests'],
+            'median', r['median_page_seconds'], 'CER%', r['synthetic_cer_percent'],
+            'fields%', r['critical_field_recall_percent'], 'cells%', r['table_cell_recall_percent'],
+        )
 
 
 if __name__ == '__main__':

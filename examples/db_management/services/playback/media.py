@@ -1,11 +1,15 @@
 from __future__ import annotations
+
 from typing import Any
+
 from redis.asyncio import Redis
-from examples.identity.sessions.store import create_media_session, renew_media_session, delete_media_session
-from examples.db_management.schemas.playback import StreamingPlaybackItem
-from examples.shared.host import integrations
 
 from .identity import PlaybackPrincipal
+from examples.db_management.schemas.playback import StreamingPlaybackItem
+from examples.identity.sessions.store import create_media_session
+from examples.identity.sessions.store import delete_media_session
+from examples.identity.sessions.store import renew_media_session
+from examples.shared.host import integrations
 
 
 def _streaming_session_descriptors(

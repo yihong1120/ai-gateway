@@ -1,23 +1,25 @@
 """Async ownership, cancellation and device-state transaction regressions."""
-
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import AsyncMock, patch
+from pathlib import Path
+from unittest.mock import AsyncMock
+from unittest.mock import patch
 
-from fastapi import FastAPI, Request
 import httpx
+from fastapi import FastAPI
+from fastapi import Request
 from psycopg_pool import PoolClosed
 
 from examples.company_ai_access.config import Settings
-from examples.company_ai_access.storage.repository import Repository
 from examples.company_ai_access.runtime import runtime
-from examples.company_ai_access.storage.registry import Store
 from examples.company_ai_access.services.devices import challenge
-from examples.company_ai_access.services.inference import InferenceProxy, stream_response
+from examples.company_ai_access.services.inference import InferenceProxy
+from examples.company_ai_access.services.inference import stream_response
+from examples.company_ai_access.storage.registry import Store
+from examples.company_ai_access.storage.repository import Repository
 from tests.ai_access_postgres import access_database
 from tests.test_company_ai_access import Fixture
 
@@ -183,13 +185,13 @@ class Transport(unittest.IsolatedAsyncioTestCase):
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(
                 lambda request: httpx.Response(502, stream=stream),
-            )
+            ),
         ) as client:
             settings = type('Settings', (), {'litellm_url': 'http://127.0.0.1:4000'})()
             request = Request({'type': 'http', 'headers': []})
             with self.assertRaises(asyncio.CancelledError):
                 await InferenceProxy(settings, client).forward(
-                    request, 'synthetic', {'subject': 'alice'}, {}, '/v1/responses'
+                    request, 'synthetic', {'subject': 'alice'}, {}, '/v1/responses',
                 )
         self.assertTrue(stream.closed)
 

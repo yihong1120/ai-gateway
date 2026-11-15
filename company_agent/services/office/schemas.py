@@ -8,7 +8,11 @@ from pydantic import Field
 from pydantic import field_validator
 from pydantic import model_validator
 
+import company_agent.services.office.worker as _worker_imports
 from company_agent.schemas import Strict
+from examples.shared.runtime.modules import ModuleReference
+
+_openpyxl_utils_cell = ModuleReference('openpyxl.utils.cell')
 
 
 class Paragraph(Strict):
@@ -54,8 +58,10 @@ class Slides(Strict):
 
 
 class SingleRunReplacement(Strict):
-    replacement: str = Field(max_length=5000,
-        description='單一文字run的替換文字，不接受CR、LF換行或tab。多段內容另製新版；不要在此欄新增段落。')
+    replacement: str = Field(
+        max_length=5000,
+        description='單一文字run的替換文字，不接受CR、LF換行或tab。多段內容另製新版；不要在此欄新增段落。',
+    )
 
     @field_validator('replacement')
     @classmethod
@@ -182,8 +188,7 @@ class SpreadsheetReport(Spreadsheet):
 
     @model_validator(mode='after')
     def references(self):
-        from openpyxl.utils.cell import coordinate_to_tuple
-        from company_agent.services.office.worker import formula_valid
+        coordinate_to_tuple = _openpyxl_utils_cell.attribute('coordinate_to_tuple')
 
         sheets = {s.name: s for s in self.sheets}
         seen = set()
@@ -202,7 +207,7 @@ class SpreadsheetReport(Spreadsheet):
                 or (c <= len(sheet.rows[r - 1]) and sheet.rows[r - 1][c - 1] is not None)
             ):
                 raise ValueError('Formula requires an existing empty target')
-            formula_valid(f.formula, rows, cols)
+            _worker_imports.formula_valid(f.formula, rows, cols)
         for chart in self.charts:
             if chart.sheet not in sheets:
                 raise ValueError('Missing chart sheet')

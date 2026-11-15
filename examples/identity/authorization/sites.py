@@ -1,13 +1,21 @@
 """Account/group site entitlements and notification defaults on the shared metadata."""
 from __future__ import annotations
+
 from typing import Final
-from sqlalchemy import column, Integer, literal, values
+
+from sqlalchemy import column
+from sqlalchemy import Integer
+from sqlalchemy import literal
+from sqlalchemy import values
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from examples.identity.models import site_groups_table, SiteNotificationPreference
+
+from examples.identity.models import site_groups_table
+from examples.identity.models import SiteNotificationPreference
 
 _bulk_insert_chunk_size: Final[int] = 250
+
 
 def _chunks(values_: list[int], size: int) -> list[list[int]]:
     """Split identifiers into bounded SQL VALUES inputs."""
@@ -81,4 +89,3 @@ async def seed_site_notification_preferences(
                     index_elements=['user_id', 'site_id'],
                 ),
             )
-

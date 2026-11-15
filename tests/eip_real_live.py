@@ -12,7 +12,15 @@ import hashlib
 import json
 import os
 from dataclasses import asdict
+from functools import partial
 from pathlib import Path
+
+from langsmith import tracing_context
+
+from examples.official_document_workflow.application.multi_agent import DocumentAgent
+from examples.shared.runtime.modules import ModuleReference
+
+_workflow_integration = ModuleReference('examples.official_document_workflow.application.integration')
 
 
 class RequestCapture:
@@ -59,11 +67,7 @@ class RequestCapture:
 
 
 async def evaluate_document(record, folder, *, model=None):
-    from langsmith import tracing_context
-    from examples.official_document_workflow.application.integration import (
-        configured_pipe,
-    )
-    from examples.official_document_workflow.application.multi_agent import DocumentAgent
+    configured_pipe = _workflow_integration.attribute('configured_pipe')
 
     pipe = await configured_pipe()
     if model:
@@ -180,7 +184,6 @@ def main():
         records = [r for r in records if str(r['document_id']) in wanted]
         if {str(r['document_id']) for r in records} != wanted:
             parser.error('Unknown case IDs')
-    from functools import partial
 
     results = asyncio.run(run_batch(records, args.output, partial(evaluate_document, model=args.model)))
     return int(any(r.get('deferred') or r.get('errors') for r in results))

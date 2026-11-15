@@ -5,26 +5,37 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from unittest.mock import patch
 
+import httpx
 from langchain_core.messages import AIMessage
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableLambda
+from openai import RateLimitError
 
+import company_agent.evals.scenario_suite as _scenario_suite_imports
+import company_agent.services.office.documents as _documents_imports
+from company_agent.config import ModelRoute
+from company_agent.config import Settings
 from company_agent.evals.benchmark import Budget
 from company_agent.evals.benchmark import verify
 from company_agent.evals.scenario_suite import BilledMeter
 from company_agent.evals.scenario_suite import checks_for
 from company_agent.evals.scenario_suite import prepare
+from company_agent.runtime.models import routed_model
+from company_agent.runtime.models import select_model
 from company_agent.runtime.models import UserBilledModel
+from company_agent.runtime.models import WebBilledModel
 from company_agent.tests import coordinator_tools
 from company_agent.tests.test_agent import Fixture
+from examples.shared.runtime.modules import ModuleReference
+
+_openpyxl = ModuleReference('openpyxl')
 
 
 class ScenarioMeterTests(unittest.IsolatedAsyncioTestCase):
     async def test_role_routing_preserves_shared_budget_identity_and_analysis_options(self):
-        from company_agent.config import ModelRoute, Settings
-        from company_agent.runtime.models import WebBilledModel, routed_model, select_model
-        from langchain_core.runnables import RunnableLambda
-        from unittest.mock import AsyncMock, patch
         seen = []
 
         class Client:
@@ -97,11 +108,21 @@ class ScenarioMeterTests(unittest.IsolatedAsyncioTestCase):
         meter = BilledMeter(inner, 'test', {'input': .000001, 'output': .000001, 'cache': .000001}, Budget(.1))
         self.assertIsInstance(meter, UserBilledModel)
         await meter.bind_tools(coordinator_tools()).ainvoke([HumanMessage(content='test')])
-        self.assertEqual(seen, [{'user': 'verified-subject', 'extra_body': {'metadata': {'spend_logs_metadata': {'ai_usage_source': 'company_agent'}}}}])
+        self.assertEqual(
+            seen, [{
+                'user': 'verified-subject',
+                'extra_body': {'metadata': {'spend_logs_metadata': {'ai_usage_source': 'company_agent'}}},
+            }],
+        )
         with self.assertRaises(ValueError):
             meter.bind_tools(coordinator_tools(), user='someone-else')
         await meter.analyze([HumanMessage(content='synthetic image question')])
-        self.assertEqual(seen[-1], {'user': 'verified-subject', 'response_format': {'type': 'json_object'}, 'extra_body': {'metadata': {'spend_logs_metadata': {'ai_usage_source': 'company_agent'}}}})
+        self.assertEqual(
+            seen[-1], {
+                'user': 'verified-subject', 'response_format': {'type': 'json_object'},
+                'extra_body': {'metadata': {'spend_logs_metadata': {'ai_usage_source': 'company_agent'}}},
+            },
+        )
         self.assertEqual(len(meter.meter.calls), 2)
         self.assertGreater(meter.meter.budget.charged, 0)
 
@@ -114,12 +135,11 @@ class ScenarioMeterTests(unittest.IsolatedAsyncioTestCase):
 
 class ScenarioPostgresTests(Fixture):
     def test_numbered_word_paragraphs_do_not_merge_total_with_next_item(self):
-        from company_agent.services.office.documents import create_word
         fake = SimpleNamespace(settings=self.config, store=self.store)
         self.store.audit('alice', self.job, 'analyze_spreadsheet', 'done')
         for total, expected in [(30, True), (300, False)]:
             artifact = self.store.artifact(
-                'alice', self.job, 'summary.docx', create_word(
+                'alice', self.job, 'summary.docx', _documents_imports.create_word(
                     '統計', [
                         {'text': f'1. 數值合計：{total}', 'heading': False},
                         {'text': '2. 數值筆數：2 筆', 'heading': False},
@@ -134,12 +154,11 @@ class ScenarioPostgresTests(Fixture):
             self.assertEqual(checks_for(fake, result, 'data_to_document', 'alice')['numbers'], expected)
 
     def test_difficult_statistics_rejects_formula_inclusion_and_missing_tool_evidence(self):
-        from company_agent.services.office.documents import create_spreadsheet
         fake = SimpleNamespace(settings=self.config, store=self.store)
 
         def result(total):
             artifact = self.store.artifact(
-                'alice', self.job, 'checked.xlsx', create_spreadsheet([
+                'alice', self.job, 'checked.xlsx', _documents_imports.create_spreadsheet([
                     {'name': '結果', 'rows': [['合計', total], ['筆數', 3]]},
                 ]),
             )
@@ -166,7 +185,7 @@ class ScenarioPostgresTests(Fixture):
         self.assertFalse(checks['report.docx'])
 
     def test_test_input_is_synthetic_and_chart_fixture_is_real(self):
-        from openpyxl import load_workbook
+        load_workbook = _openpyxl.attribute('load_workbook')
         with tempfile.TemporaryDirectory() as temporary:
             docs = Path(temporary)/'sources'
             before = prepare(docs, 'excel_edit')
@@ -178,10 +197,6 @@ class ScenarioPostgresTests(Fixture):
 
 class ScenarioStopTests(unittest.IsolatedAsyncioTestCase, Fixture):
     async def test_rate_limit_stops_remaining_scenarios_without_calls(self):
-        from unittest.mock import AsyncMock, patch
-        from company_agent.evals.scenario_suite import run
-        import httpx
-        from openai import RateLimitError
 
         class Client:
             model_name = 'test-model'
@@ -206,7 +221,7 @@ class ScenarioStopTests(unittest.IsolatedAsyncioTestCase, Fixture):
             patch('company_agent.api.service.ServiceConfiguration.configured_settings', return_value=None), \
             patch('examples.identity.adapters.webui.verified_user', new=AsyncMock(return_value={'id': 'alice'})), \
                 patch('company_agent.evals.runner.close_model', new=AsyncMock()):
-            await run('alice', output, ['missing_source', 'documents', 'word_edit'], .5)
+            await _scenario_suite_imports.run('alice', output, ['missing_source', 'documents', 'word_edit'], .5)
         report = json.loads((output/'report.json').read_text())
         self.assertEqual(client.calls, 1)
         self.assertEqual([r['status'] for r in report['runs']], ['error', 'not_run', 'not_run'])

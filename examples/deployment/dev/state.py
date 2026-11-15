@@ -1,6 +1,15 @@
 """Create fresh dev encryption keys; never replace keys for encrypted data."""
+from __future__ import annotations
+
 import os
 from pathlib import Path
+
+from psycopg import sql
+
+from company_agent.runtime.storage import Store
+from examples.shared.runtime.modules import ModuleReference
+
+_webui_env = ModuleReference('open_webui.env')
 
 
 def ensure_private_key(path, *, has_data):
@@ -20,22 +29,26 @@ def ensure_private_key(path, *, has_data):
 
 
 def ensure_keys():
-    from open_webui.env import DATA_DIR
-    from company_agent.runtime.storage import Store
-    from psycopg import sql
+    DATA_DIR = _webui_env.attribute('DATA_DIR')
     directory = Path(DATA_DIR) / 'company_agent'
     expected = Path.home() / '.local/share/ai-gateway-dev/webui/company_agent'
     if directory != expected:
         raise RuntimeError('Refusing to initialize keys outside the dev state directory.')
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     store = Store(directory)
-    key_tables = {'checkpoint.key': ('checkpoints', 'checkpoint_blobs', 'checkpoint_writes'),
-                  'nas.key': ('nas_bindings',)}
+    key_tables = {
+        'checkpoint.key': ('checkpoints', 'checkpoint_blobs', 'checkpoint_writes'),
+        'nas.key': ('nas_bindings',),
+    }
     with store.mutex('dev_key_setup'):
         with store.db() as db:
             for key, tables in key_tables.items():
                 has_data = False
                 for table in tables:
                     if db.execute('SELECT to_regclass(%s)', (store.schema + '.' + table,)).fetchone()[0]:
-                        has_data |= db.execute(sql.SQL('SELECT EXISTS(SELECT 1 FROM {})').format(sql.Identifier(table))).fetchone()[0]
+                        has_data |= db.execute(
+                            sql.SQL('SELECT EXISTS(SELECT 1 FROM {})').format(
+                                sql.Identifier(table),
+                            ),
+                        ).fetchone()[0]
                 ensure_private_key(directory / key, has_data=has_data)

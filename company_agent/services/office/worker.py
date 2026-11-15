@@ -8,10 +8,18 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from examples.shared.runtime.modules import ModuleReference
+
+_openpyxl = ModuleReference('openpyxl')
+_openpyxl_chart = ModuleReference('openpyxl.chart')
+_openpyxl_formula = ModuleReference('openpyxl.formula')
+_openpyxl_utils_cell = ModuleReference('openpyxl.utils.cell')
+_pymupdf = ModuleReference('pymupdf')
+
 
 def formula_valid(value, rows, columns):
-    from openpyxl.formula import Tokenizer
-    from openpyxl.utils.cell import range_boundaries
+    Tokenizer = _openpyxl_formula.attribute('Tokenizer')
+    range_boundaries = _openpyxl_utils_cell.attribute('range_boundaries')
 
     if not isinstance(value, str) or not value.startswith('=') or len(value) > 300:
         raise ValueError('formula')
@@ -58,8 +66,8 @@ def formula_valid(value, rows, columns):
 
 
 def report(req):
-    from openpyxl import Workbook, load_workbook
-    from openpyxl.chart import BarChart, LineChart, Reference
+    Workbook, load_workbook = _openpyxl.attributes('Workbook', 'load_workbook')
+    BarChart, LineChart, Reference = _openpyxl_chart.attributes('BarChart', 'LineChart', 'Reference')
 
     book = Workbook()
     book.remove(book.active)
@@ -182,7 +190,7 @@ def report(req):
 
 
 def page(req):
-    import pymupdf
+    pymupdf = _pymupdf.load()
 
     source = Path('/input/source' + req['suffix'])
     with pymupdf.open(source) as doc:

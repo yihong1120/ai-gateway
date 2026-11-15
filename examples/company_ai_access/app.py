@@ -1,20 +1,22 @@
 """Standalone API for the company Flutter site's BFF allowlisted upstream."""
-
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI
+from fastapi import HTTPException
+from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from examples.company_ai_access.config import Settings
 from examples.company_ai_access.routers.assets import assets_router
 from examples.company_ai_access.routers.control import create_router
+from examples.company_ai_access.routers.dependencies import browser_principal
+from examples.company_ai_access.routers.dependencies import require_inference_network
 from examples.company_ai_access.routers.inference import inference_router
-from examples.company_ai_access.routers.dependencies import browser_principal, require_inference_network
-from examples.company_ai_access.config import Settings
-from examples.company_ai_access.runtime import runtime
 from examples.company_ai_access.routers.middleware import BodyLimit
+from examples.company_ai_access.runtime import runtime
 
 
 def create_app():
@@ -38,7 +40,7 @@ def create_app():
                 'detail': {
                     'code': 'ai_access_invalid_request',
                     'errors': [{'loc': list(item['loc']), 'type': item['type']} for item in exc.errors()],
-                }
+                },
             },
         )
 
@@ -54,7 +56,7 @@ def create_app():
         assets_router(
             browser_api_prefix='/bff/ai_access/api/company-ai' if settings.oidc_audience else '/api/company-ai',
             login_path='/bff/auth/oidc/login?return_to=/company-ai/setup' if settings.oidc_audience else '/auth',
-        )
+        ),
     )
     app.include_router(inference_router())
 
@@ -74,7 +76,7 @@ def create_app():
                 'Cache-Control': 'no-store',
                 'Referrer-Policy': 'no-referrer',
                 'X-Content-Type-Options': 'nosniff',
-            }
+            },
         )
         return response
 

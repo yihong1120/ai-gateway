@@ -7,9 +7,9 @@ from fastapi import Request
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from examples.identity.accounts import legacy_migration as legacy_password_service
 from examples.identity.database import get_db
 from examples.identity.redis_pool import get_redis_pool
-from examples.identity.accounts import legacy_migration as legacy_password_service
 
 router = APIRouter(prefix='/auth/legacy-password', tags=['internal'])
 

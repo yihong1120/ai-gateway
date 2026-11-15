@@ -6,12 +6,19 @@ import hashlib
 import json
 import logging
 import time
-from contextlib import asynccontextmanager, AsyncExitStack
+from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack
 from contextvars import ContextVar
 from copy import deepcopy
 
 import psycopg
+
 from examples.shared.runtime.database import cache_owner_lock_key
+from examples.shared.runtime.modules import ModuleReference
+
+_workflow_automation_store = ModuleReference(
+    'examples.official_document_workflow.infrastructure.storage.automation_store',
+)
 
 
 logger = logging.getLogger(__name__)
@@ -55,8 +62,10 @@ class ProcessingCache:
         try:
             now = time.time()
             # Validate/encrypt everything before starting the single transaction.
-            rows = [(self.owner, key, self.store.encode(self.owner, value), now)
-                    for key, value in values.items()]
+            rows = [
+                (self.owner, key, self.store.encode(self.owner, value), now)
+                for key, value in values.items()
+            ]
             with self.store.db() as db, db.cursor() as cursor:
                 cursor.executemany(
                     'INSERT INTO processing_chunks VALUES (%s,%s,%s,%s) ON CONFLICT(owner,key) '
@@ -126,13 +135,15 @@ async def cached_upload(pipe, owner, prepared, emitter):
     if not pipe.valves.document_analysis_cache_enabled:
         yield
         return
-    from .automation_store import store
+    store = _workflow_automation_store.attribute('store')
 
     stack = AsyncExitStack()
     try:
         backend = ProcessingCache(await asyncio.to_thread(store), owner)
         identity = await asyncio.to_thread(upload_identity, prepared)
-        requests = CachedRequests(backend, {'uploads': identity, 'valves': pipe.valves.model_dump(mode='json')}, emitter)
+        requests = CachedRequests(
+            backend, {'uploads': identity, 'valves': pipe.valves.model_dump(mode='json')}, emitter,
+        )
         await stack.enter_async_context(backend.lock(requests.key('batch')))
     except Exception as error:
         try:

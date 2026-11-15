@@ -1,11 +1,13 @@
 """Validated, application-owned loopback transport for the WebUI bridge."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import os
+from dataclasses import dataclass
+from dataclasses import field
 from urllib.parse import urlsplit
 
 import httpx
+
 from examples.company_ai_access.errors import error
 
 
@@ -18,11 +20,13 @@ class BridgeSettings:
         try:
             target = urlsplit(self.url)
             canonical = 'http://127.0.0.1' + (f':{target.port}' if target.port is not None else '')
-            valid = (self.url == canonical and target.scheme == 'http'
-                     and target.hostname == '127.0.0.1'
-                     and target.username is None and target.password is None
-                     and (target.port is None or 1 <= target.port <= 65535)
-                     and len(self.key) >= 32 and all(33 <= ord(c) <= 126 for c in self.key))
+            valid = (
+                self.url == canonical and target.scheme == 'http'
+                and target.hostname == '127.0.0.1'
+                and target.username is None and target.password is None
+                and (target.port is None or 1 <= target.port <= 65535)
+                and len(self.key) >= 32 and all(33 <= ord(c) <= 126 for c in self.key)
+            )
         except ValueError:
             valid = False
         if not valid:
@@ -59,8 +63,10 @@ class BridgeClient:
         headers = {name: value for name, value in headers.items() if name.lower() != 'x-company-ai-bridge'}
         headers['X-Company-AI-Bridge'] = self.settings.key
         try:
-            return await self.client.send(self.client.build_request(
-                method, self.settings.url + path, headers=headers, json=body, timeout=self.timeout,
-            ), stream=True)
+            return await self.client.send(
+                self.client.build_request(
+                    method, self.settings.url + path, headers=headers, json=body, timeout=self.timeout,
+                ), stream=True,
+            )
         except httpx.HTTPError:
             raise error(503, 'ai_access_dependency_unavailable')

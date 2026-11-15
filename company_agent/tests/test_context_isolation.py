@@ -6,6 +6,7 @@ import unittest
 from langchain_core.messages import AIMessage
 from langchain_core.messages import messages_to_dict
 
+import company_agent.services.office.documents as _documents_imports
 from company_agent.agents.registry import capability_catalog
 from company_agent.runtime.execution import DocumentAgent
 from company_agent.tests.test_agent import call
@@ -134,8 +135,7 @@ class IsolationTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertFalse(result['files'])
 
     async def test_real_xlsx_analysis_creation_and_independent_review(self):
-        from company_agent.services.office.documents import create_spreadsheet
-        self.file('source.xlsx', create_spreadsheet([{'name': '工程', 'rows': [[10], [20]]}]))
+        self.file('source.xlsx', _documents_imports.create_spreadsheet([{'name': '工程', 'rows': [[10], [20]]}]))
 
         def create(messages):
             stats = json.loads(messages[-1].content)

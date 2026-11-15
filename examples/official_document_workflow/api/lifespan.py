@@ -2,13 +2,20 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager, AsyncExitStack
+from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack
 
+from examples.official_document_workflow.infrastructure.eip.webui_entry import (
+    ensure_entry,
+)
+from examples.official_document_workflow.runtime import WorkflowResources
+from examples.official_document_workflow.runtime import WorkflowSettings
 from examples.shared.runtime.database import application_database_pools
 from examples.shared.runtime.io import run_sync
+from examples.shared.runtime.modules import ModuleReference
 from examples.shared.runtime.workers import supervise
-from examples.official_document_workflow.runtime import WorkflowResources, WorkflowSettings
-from examples.official_document_workflow.infrastructure.eip.webui_entry import ensure_entry
+
+_shared_jobs = ModuleReference('examples.shared.runtime.jobs')
 
 
 class WorkflowLifespan:
@@ -29,8 +36,10 @@ class WorkflowLifespan:
             task.cancel()
         await asyncio.gather(*workers, *resources.state.tasks, return_exceptions=True)
         # Attempt every session close even if one adapter fails.
-        results = await asyncio.gather(*(resources.state.unlink(owner) for owner in list(resources.state.links)),
-                                       return_exceptions=True)
+        results = await asyncio.gather(
+            *(resources.state.unlink(owner) for owner in list(resources.state.links)),
+            return_exceptions=True,
+        )
         failures = [result for result in results if isinstance(result, BaseException)]
         if failures:
             raise BaseExceptionGroup('Workflow session cleanup failed', failures)
@@ -45,7 +54,7 @@ class WorkflowLifespan:
                     app.state.database_pools = await cleanup.enter_async_context(application_database_pools())
                     await cleanup.enter_async_context(self.original(app))
                     await ensure_entry()
-                    from examples.shared.runtime.jobs import service as job_service
+                    job_service = _shared_jobs.attribute('service')
                     try:
                         jobs = job_service()
                     except RuntimeError:
@@ -53,18 +62,31 @@ class WorkflowLifespan:
                     else:
                         async def publish(owner, key):
                             def notify():
-                                if jobs.queue.output_changed(owner,key):
+                                if jobs.queue.output_changed(owner, key):
                                     return True
                                 # Automatic EIP task outputs have no WebUI job.
                                 # A foreign app's WebUI job must stay pending.
                                 with resources.store.db() as db:
-                                    return db.execute('SELECT 1 FROM tasks WHERE owner=%s AND id=%s',
-                                                      (owner,key)).fetchone() is not None
+                                    return db.execute(
+                                        'SELECT 1 FROM tasks WHERE owner=%s AND id=%s',
+                                        (owner, key),
+                                    ).fetchone() is not None
                             return await run_sync(notify)
                     workers = [
-                        asyncio.create_task(supervise(lambda: self.scheduler(resources), resources.health['scheduler'])),
+                        asyncio.create_task(
+                            supervise(
+                                lambda: self.scheduler(
+                                    resources,
+                                ), resources.health['scheduler'],
+                            ),
+                        ),
                         asyncio.create_task(supervise(resources.state.sweep, resources.health['cleanup'], interval=60)),
-                        asyncio.create_task(supervise(lambda: self.repair(resources,publish),resources.health['outputs'],interval=5)),
+                        asyncio.create_task(
+                            supervise(
+                                lambda: self.repair(resources, publish),
+                                resources.health['outputs'], interval=5,
+                            ),
+                        ),
                     ]
                     cleanup.push_async_callback(self.shutdown, resources, workers)
                     yield

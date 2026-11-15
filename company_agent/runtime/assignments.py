@@ -21,8 +21,10 @@ def check_assignment(settings, role, work_key, outputs):
         raise RecoverableToolError('duplicate_output', '同一委派的 outputs 檔名不可重複。')
     for name in outputs:
         if PurePosixPath(name).suffix.lower() not in OFFICE_OUTPUTS.get(role, set()):
-            raise RecoverableToolError('wrong_producer', 'Office 產檔由 data 負責 XLSX、document 負責 Word／PPT／文字；其他角色不透過 outputs 申請產檔。EIP／CAD 使用既有領域契約。',
-                                       role=role, name=name)
+            raise RecoverableToolError(
+                'wrong_producer', 'Office 產檔由 data 負責 XLSX、document 負責 Word／PPT／文字；其他角色不透過 outputs 申請產檔。EIP／CAD 使用既有領域契約。',
+                role=role, name=name,
+            )
 
 
 def check_output(ctx, name):
@@ -32,8 +34,12 @@ def check_output(ctx, name):
     if ctx.role not in {'coordinator', 'data', 'document', 'reviewer'}:
         return
     if PurePosixPath(name).suffix.lower() not in OFFICE_OUTPUTS.get(ctx.role, set()):
-        raise RecoverableToolError('wrong_producer', '此角色不能產製此 Office 檔案；請交回主協調，委派正確專責角色。',
-                                   role=ctx.role, name=name)
+        raise RecoverableToolError(
+            'wrong_producer', '此角色不能產製此 Office 檔案；請交回主協調，委派正確專責角色。',
+            role=ctx.role, name=name,
+        )
     if name not in ctx.assignment_outputs:
-        raise RecoverableToolError('output_not_assigned', '只能製作本次委派 outputs 明列的檔案；唯讀任務不得自行產檔。',
-                                   name=name, allowed_outputs=list(ctx.assignment_outputs))
+        raise RecoverableToolError(
+            'output_not_assigned', '只能製作本次委派 outputs 明列的檔案；唯讀任務不得自行產檔。',
+            name=name, allowed_outputs=list(ctx.assignment_outputs),
+        )

@@ -4,7 +4,6 @@ A changed schedule or colliding slots requires reconciliation, not a new write.
 Legacy receipts are looked up through owned CSVs, never inferred from titles.
 """
 from __future__ import annotations
-from examples.shared.runtime.io import run_sync
 
 from datetime import datetime
 
@@ -12,6 +11,7 @@ from . import calendar_sync
 from .calendar_projects import normalize_project_name
 from .calendar_projects import project_name_from_description
 from examples.official_document_workflow.infrastructure.eip import calendar_csv
+from examples.shared.runtime.io import run_sync
 
 
 def event_slot(row):
@@ -38,7 +38,7 @@ async def prepare_source_replay(events, user_id, journal, stage, read_csv):
             raise ValueError('同一來源含相同時段與工程的多筆候選，須先核對是否為不同工作；未重複匯入。')
         batch = journal.key(user_id, {'source_batch': scope})
         manifest = journal.key(user_id, {'slots': sorted(slots)})
-        previous_manifest = await run_sync(journal.source_manifest,batch)
+        previous_manifest = await run_sync(journal.source_manifest, batch)
         if previous_manifest is not None and previous_manifest != manifest:
             raise ValueError('此來源已有匯入紀錄，但事件數量、時間或工程已變更；須核對原行程，未另建重複行程。')
         origin = group[0]['row']['_eip_origin']
@@ -69,10 +69,12 @@ async def prepare_source_replay(events, user_id, journal, stage, read_csv):
                 if slot not in slot_set:
                     raise ValueError('舊 CSV 已有匯入紀錄且時程不一致；須核對原行程，未重送。')
                 old_by_slot.setdefault(slot, []).extend(known)
-        states = await run_sync(journal.statuses,[
-            *slots, *(k for event in group for k in event['aliases']),
-            *(k for keys in old_by_slot.values() for k in keys),
-        ])
+        states = await run_sync(
+            journal.statuses, [
+                *slots, *(k for event in group for k in event['aliases']),
+                *(k for keys in old_by_slot.values() for k in keys),
+            ],
+        )
         for event, slot in zip(group, slots):
             event['aliases'] = list(dict.fromkeys((*event['aliases'], slot, *old_by_slot.get(slot, ()))))
             known = [k for k in event['aliases'] if k in states]

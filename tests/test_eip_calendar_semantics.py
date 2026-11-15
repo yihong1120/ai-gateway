@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import copy
 import unittest
+from copy import deepcopy
+from unittest.mock import AsyncMock
+from unittest.mock import Mock
 from unittest.mock import patch
 
+import examples.official_document_workflow.application.group_processing as _group_processing_imports
 from . import test_eip_group_processing as group_tests
 from .test_official_document_processor_pipe import PIPE_MODULE as M
 from examples.official_document_workflow.application.group_processing import parse_group
+from examples.official_document_workflow.application.multi_agent import DocumentAgent
 from examples.official_document_workflow.domain.calendar.calendar_semantics import assignment_event
 from examples.official_document_workflow.domain.calendar.calendar_semantics import literal_source_candidates
 from examples.official_document_workflow.domain.calendar.calendar_semantics import resolve_spans
@@ -16,6 +21,7 @@ from examples.official_document_workflow.domain.calendar.calendar_semantics impo
 from examples.official_document_workflow.domain.calendar.calendar_semantics import verify_event_date
 from examples.official_document_workflow.domain.calendar.calendar_semantics import verify_next_day_end
 from examples.official_document_workflow.domain.calendar.calendar_semantics import verify_time
+from examples.official_document_workflow.domain.validation import ContentValidationError
 
 payload = group_tests.payload
 
@@ -66,13 +72,16 @@ def event():
 
 class CalendarSemanticsTests(unittest.TestCase):
     def test_unrelated_clock_does_not_force_a_calendar_error(self):
-        from examples.official_document_workflow.application.multi_agent import DocumentAgent
 
         agent = DocumentAgent(None, None)
         candidate = {'status': 'current', 'start_time': '09:00'}
-        state = {'payload': {'events': [candidate]}, 'sources': {'S1': M.CloudSemanticSource(
-            '會議於上午9時召開。\n前次工作於下午3時完成。', 'native_pdf_text',
-        )}, 'analysis_attempts': 2}
+        state = {
+            'payload': {'events': [candidate]}, 'sources': {
+                'S1': M.CloudSemanticSource(
+                    '會議於上午9時召開。\n前次工作於下午3時完成。', 'native_pdf_text',
+                ),
+            }, 'analysis_attempts': 2,
+        }
         with patch.object(agent, 'document_source', return_value=None), patch(
             'examples.official_document_workflow.application.multi_agent.parse_group',
             return_value=('source', 'document', [], [{'Subject': '會議'}], []),
@@ -326,7 +335,7 @@ class CalendarSemanticsTests(unittest.TestCase):
         bad = event()
         bad['start_date'] = '2026-09-09'
         with self.assertRaises(ValueError):
-            self.pipe.calendar.events( {'events': [event(), bad]}, self.sources, None)
+            self.pipe.calendar.events({'events': [event(), bad]}, self.sources, None)
 
     def test_metadata_native_pdf_wrap_between_chinese_and_digits(self):
         data = payload()
@@ -361,9 +370,6 @@ class CalendarSemanticsTests(unittest.TestCase):
                     parse_group(self.pipe,  data, sources)
 
     def test_metadata_wrap_does_not_join_separate_numbers_or_latin_words(self):
-        from examples.official_document_workflow.application.group_processing import (
-            metadata_text,
-        )
 
         for source, expected in (
             ('111\n0918', '111 0918'),
@@ -372,7 +378,7 @@ class CalendarSemanticsTests(unittest.TestCase):
             ('主旨\n<page>\n文字', '主旨<page>文字'),
         ):
             with self.subTest(source=source):
-                self.assertEqual(metadata_text(self.pipe, source), expected)
+                self.assertEqual(_group_processing_imports.metadata_text(self.pipe, source), expected)
 
     def test_metadata_canonical_cjk_glyphs_in_native_pdf(self):
         data = payload()
@@ -395,12 +401,9 @@ class CalendarSemanticsTests(unittest.TestCase):
             parse_group(self.pipe,  data, sources)
 
     def test_metadata_normalization_preserves_compatibility_distinctions(self):
-        from examples.official_document_workflow.application.group_processing import (
-            metadata_text,
-        )
 
         self.assertEqual(
-            metadata_text(self.pipe, '第①期／Ａ版／２０２６／年路'),
+            _group_processing_imports.metadata_text(self.pipe, '第①期／Ａ版／２０２６／年路'),
             '第①期／Ａ版／２０２６／年路',
         )
 
@@ -424,12 +427,9 @@ class CalendarSemanticsTests(unittest.TestCase):
         self.assertEqual(diagnostics, [])
         self.assertEqual(errors, [])
         self.assertEqual(sources['S1'].text, source)
-        from examples.official_document_workflow.application.group_processing import (
-            metadata_text,
-        )
 
         for text in ('工程」\n\n橋墩', '111年 0918', 'ABC DEF', '1 2', '第①期／Ａ版'):
-            self.assertEqual(metadata_text(self.pipe, text), text)
+            self.assertEqual(_group_processing_imports.metadata_text(self.pipe, text), text)
 
     def test_undated_task_requests_date_instead_of_inventing_one(self):
         for status in ('current', 'needs_review'):
@@ -757,7 +757,6 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(e['evidence_spans']['title'], [])
 
     async def test_rejected_independent_candidate_is_quarantined_not_exported(self):
-        from examples.official_document_workflow.application.multi_agent import DocumentAgent
 
         first = event()
         second = event()
@@ -871,7 +870,6 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         self.review.assert_awaited_once()
 
     def setUp(self):
-        from unittest.mock import AsyncMock, patch
 
         group_tests.GroupTests.setUp(self)
         review = patch(
@@ -938,7 +936,6 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         self.pipe.analyze_text.assert_awaited_once()
 
     async def test_classified_merge_is_revalidated_before_export(self):
-        from unittest.mock import Mock
 
         self.pipe.calendar_csv = Mock(wraps=self.pipe.calendar_csv)
         one = event()
@@ -1107,7 +1104,6 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         }
         self.pipe.semantic_source.side_effect = list(self.sources.values())
         self.pipe.analyze_text.return_value = data
-        from examples.official_document_workflow.domain.validation import ContentValidationError
         with self.assertRaises(ContentValidationError):
             await self.run_group()
         self.assertEqual(self.pipe.analyze_text.await_count, 2)
@@ -1133,8 +1129,6 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
     async def test_incorrect_review_cannot_replace_a_correct_candidate_and_self_approve(
         self,
     ):
-        from copy import deepcopy
-        from examples.official_document_workflow.application.multi_agent import DocumentAgent
 
         good = payload()
         good.update(calendar_contract_version=2, events=[event()])

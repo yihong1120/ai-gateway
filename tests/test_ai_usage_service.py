@@ -2,23 +2,22 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, date, datetime
+from datetime import date
+from datetime import datetime
+from datetime import UTC
 from decimal import Decimal
-from unittest import IsolatedAsyncioTestCase, TestCase
+from unittest import IsolatedAsyncioTestCase
+from unittest import TestCase
 from zoneinfo import ZoneInfo
 
 import httpx
 
-from examples.ai_usage.config import (
-    AiUsageSettings,
-    ConfigurationError,
-    UsageQuerySettings,
-)
-from examples.ai_usage.services.litellm_usage import (
-    IncompleteUsageData,
-    LiteLLMUsageClient,
-    build_daily_usage_response,
-)
+from examples.ai_usage.config import AiUsageSettings
+from examples.ai_usage.config import ConfigurationError
+from examples.ai_usage.config import UsageQuerySettings
+from examples.ai_usage.services.litellm_usage import build_daily_usage_response
+from examples.ai_usage.services.litellm_usage import IncompleteUsageData
+from examples.ai_usage.services.litellm_usage import LiteLLMUsageClient
 
 
 def _settings() -> AiUsageSettings:
@@ -240,12 +239,16 @@ class DailyUsageQueryTests(IsolatedAsyncioTestCase):
             start = datetime.strptime(request.url.params['start_date'], '%Y-%m-%d %H:%M:%S').replace(tzinfo=UTC)
             end = datetime.strptime(request.url.params['end_date'], '%Y-%m-%d %H:%M:%S').replace(tzinfo=UTC)
             # Model the upstream's inclusive bounds, including midnight.
-            rows = [{'startTime': stamp, 'end_user': 'owner', 'spend': '0.1'} for stamp in timestamps
-                    if start <= datetime.fromisoformat(stamp) <= end]
+            rows = [
+                {'startTime': stamp, 'end_user': 'owner', 'spend': '0.1'} for stamp in timestamps
+                if start <= datetime.fromisoformat(stamp) <= end
+            ]
             return httpx.Response(200, json={'data': rows, 'total_pages': 1})
 
-        async with httpx.AsyncClient(base_url=settings.litellm_base_url,
-                                     transport=httpx.MockTransport(handler)) as http:
+        async with httpx.AsyncClient(
+            base_url=settings.litellm_base_url,
+            transport=httpx.MockTransport(handler),
+        ) as http:
             usage = await LiteLLMUsageClient(settings, http).daily_usage(
                 'owner', record_limit=10, now=datetime(2026, 11, 11, 12, tzinfo=settings.timezone),
             )
@@ -255,20 +258,30 @@ class DailyUsageQueryTests(IsolatedAsyncioTestCase):
         self.assertEqual(usage.records[0].started_at.microsecond, 999999)
 
     async def test_daily_operation_filters_owner_and_keeps_complete_totals_without_records(self):
-        settings = UsageQuerySettings(litellm_base_url='http://127.0.0.1:14002', litellm_reader_key='private-reader',
-                                      daily_budget_usd=Decimal(1))
+        settings = UsageQuerySettings(
+            litellm_base_url='http://127.0.0.1:14002', litellm_reader_key='private-reader',
+            daily_budget_usd=Decimal(1),
+        )
         seen = []
 
         def handler(request):
             seen.append(request)
-            return httpx.Response(200, json={'data': [
-                {'end_user': 'owner', 'model': 'cloud', 'spend': '0.1', 'total_tokens': 7,
-                 'startTime': datetime.now(UTC).isoformat()},
-                {'end_user': 'another-user', 'model': 'must-not-appear', 'spend': '100'},
-            ], 'total_pages': 1})
+            return httpx.Response(
+                200, json={
+                    'data': [
+                        {
+                            'end_user': 'owner', 'model': 'cloud', 'spend': '0.1', 'total_tokens': 7,
+                            'startTime': datetime.now(UTC).isoformat(),
+                        },
+                        {'end_user': 'another-user', 'model': 'must-not-appear', 'spend': '100'},
+                    ], 'total_pages': 1,
+                },
+            )
 
-        async with httpx.AsyncClient(base_url=settings.litellm_base_url,
-                                     transport=httpx.MockTransport(handler)) as http:
+        async with httpx.AsyncClient(
+            base_url=settings.litellm_base_url,
+            transport=httpx.MockTransport(handler),
+        ) as http:
             usage = await LiteLLMUsageClient(settings, http).daily_usage('owner')
         self.assertEqual(usage.totals.requests, 1)
         self.assertEqual(usage.budget.used_usd, 0.1)
@@ -293,12 +306,14 @@ class DailyUsageQueryTests(IsolatedAsyncioTestCase):
         now = datetime(2026, 11, 11, tzinfo=UTC)
         async with httpx.AsyncClient() as http:
             window = LiteLLMUsageClient(settings, http).current_window(now)
-        usage = build_daily_usage_response(settings=settings, window=window, record_limit=0, rows=[
-            {'spend': 'NaN', 'total_tokens': float('inf')},
-            {'spend': 'Infinity', 'prompt_tokens': float('nan')},
-            {'spend': '-Infinity', 'completion_tokens': float('-inf')},
-            {'spend': '0.25', 'total_tokens': 5},
-        ])
+        usage = build_daily_usage_response(
+            settings=settings, window=window, record_limit=0, rows=[
+                {'spend': 'NaN', 'total_tokens': float('inf')},
+                {'spend': 'Infinity', 'prompt_tokens': float('nan')},
+                {'spend': '-Infinity', 'completion_tokens': float('-inf')},
+                {'spend': '0.25', 'total_tokens': 5},
+            ],
+        )
         self.assertEqual(usage.totals.spend_usd, 0.25)
         self.assertEqual(usage.totals.total_tokens, 5)
         self.assertEqual(usage.budget.remaining_usd, 3.75)

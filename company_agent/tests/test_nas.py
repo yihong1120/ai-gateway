@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import os
+import threading
+import time
 import unittest
 from http.cookies import SimpleCookie
 from unittest.mock import patch
@@ -11,7 +14,9 @@ from urllib.parse import parse_qs
 import httpx
 from cryptography.exceptions import InvalidTag
 
+import company_agent.runtime.models as _models_imports
 from company_agent.api.service import WorkQueue
+from company_agent.runtime.execution import DocumentAgent
 from company_agent.services.files.nas import file_access
 from company_agent.services.files.nas import NASAccess
 from company_agent.services.files.nas import NASClient
@@ -19,6 +24,9 @@ from company_agent.services.files.nas import NASVault
 from company_agent.services.files.operations import ToolBox
 from company_agent.services.files.schemas import Read
 from company_agent.tests.test_agent import Fixture
+from examples.shared.runtime.modules import ModuleReference
+
+_fixture_test_user_billing = ModuleReference('company_agent.tests.test_user_billing')
 
 
 class FakeDSM:
@@ -159,9 +167,6 @@ class NASTests(NASFixture):
         self.assertFalse(self.dsm.sessions)
 
     def test_parallel_same_account_sessions_are_serialized(self):
-        import concurrent.futures
-        import threading
-        import time
         revision = self.bind()['revision']
         gate = threading.Barrier(4)
 
@@ -177,8 +182,6 @@ class NASTests(NASFixture):
         self.assertFalse(self.dsm.sessions)
 
     def test_account_lock_is_independent_and_released_on_error(self):
-        import concurrent.futures
-        import threading
         gate = threading.Barrier(2)
 
         def operation(account):
@@ -383,9 +386,7 @@ class NASTests(NASFixture):
 
 class NASGraphTests(unittest.IsolatedAsyncioTestCase, NASFixture):
     async def test_official_graph_reads_own_nas_without_credentials_in_model(self):
-        from company_agent.runtime.execution import DocumentAgent
-        from company_agent.runtime.models import gateway_for_verified_user, close_model
-        from company_agent.tests.test_user_billing import verified, response
+        verified, response = _fixture_test_user_billing.attributes('verified', 'response')
         state = self.bind()
         root = self.nas_root(self.remote(), 'home')
         self.config.nas_binding_revision = state['revision']
@@ -404,14 +405,14 @@ class NASGraphTests(unittest.IsolatedAsyncioTestCase, NASFixture):
             requests.append(value)
             name, args = script.pop(0)
             return response(name, args)
-        model = gateway_for_verified_user(
+        model = _models_imports.gateway_for_verified_user(
             verified(), 'https://gateway.example/v1',
             'key', 'model', httpx.MockTransport(model_api),
         )
         try:
             result = await DocumentAgent(self.config, model).run('alice', '閱讀 NAS 本人文件 a.txt')
         finally:
-            await close_model(model)
+            await _models_imports.close_model(model)
         self.assertEqual(result['status'], 'done', result)
         self.assertEqual(result['sources'][0]['root'], root)
         self.assertTrue(all(r['user'] == 'oidc-alice' for r in requests))

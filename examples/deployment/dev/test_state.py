@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import pytest
+
 from examples.deployment.dev.state import ensure_private_key
 
 

@@ -4,15 +4,19 @@ from __future__ import annotations
 import re
 from importlib.resources import files
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter
+from fastapi import Depends
+from fastapi import HTTPException
+from fastapi import Request
 from fastapi.responses import Response
-
 from open_webui.utils.auth import get_verified_user as active
-from examples.shared.runtime.browser import PrivateRoute, data
-from examples.shared.runtime.io import run_sync
-from examples.shared.runtime.usage import verified_subject
+
 from .authentication import Principal
 from .storage import ResourceError
+from examples.shared.runtime.browser import data
+from examples.shared.runtime.browser import PrivateRoute
+from examples.shared.runtime.io import run_sync
+from examples.shared.runtime.usage import verified_subject
 
 
 router = APIRouter(route_class=PrivateRoute)
@@ -55,8 +59,10 @@ async def status(request: Request, user=Depends(active)):
     if not getattr(request.app.state, 'company_mcp', None):
         return {'enabled': False, 'clients': []}
     configuration, resources = configured(request)
-    return {'enabled': True, 'resource_mode': 'all_owned_bindings',
-            'clients': await run_sync(resources.repository.grants, user.id, configuration.clients)}
+    return {
+        'enabled': True, 'resource_mode': 'all_owned_bindings',
+        'clients': await run_sync(resources.repository.grants, user.id, configuration.clients),
+    }
 
 
 @router.post('/agents/mcp/access')
@@ -64,8 +70,10 @@ async def access(request: Request, user=Depends(active)):
     owner(user)
     configuration, resources = configured(request)
     value = await browser_data(request)
-    if (set(value) != {'client_id', 'enabled'} or value['client_id'] not in configuration.clients
-            or type(value['enabled']) is not bool):
+    if (
+        set(value) != {'client_id', 'enabled'} or value['client_id'] not in configuration.clients
+        or type(value['enabled']) is not bool
+    ):
         raise HTTPException(422, '請選擇有效的公司工具及存取狀態。')
     await run_sync(resources.repository.set_grant, user.id, value['client_id'], value['enabled'])
     return {'updated': True}
@@ -76,8 +84,10 @@ async def access(request: Request, user=Depends(active)):
 async def page(request: Request, user=Depends(active)):
     owner(user)
     script = request.url.path.endswith('.js')
-    response = Response(files('company_mcp.ui').joinpath('mcp.js' if script else 'mcp.html').read_bytes(),
-                        media_type='application/javascript' if script else 'text/html')
+    response = Response(
+        files('company_mcp.ui').joinpath('mcp.js' if script else 'mcp.html').read_bytes(),
+        media_type='application/javascript' if script else 'text/html',
+    )
     if not script:
         response.headers['Content-Security-Policy'] = (
             "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
@@ -94,10 +104,12 @@ async def operation(key: str, request: Request, user=Depends(active)):
         value = await run_sync(resources.repository.operation, user.id, identifier(key))
     except ResourceError:
         raise HTTPException(404, '操作不存在或沒有權限。') from None
-    return {'operation': key, 'client_id': value['client'], 'instruction': value['payload']['instruction'],
-            'attachments': len(value['payload']['handles']), 'model_profile': value['payload']['model_profile'],
-            'status': 'submitted' if value['web_job'] else 'awaiting_personal_confirmation',
-            'notice': '確認後會使用本人既有模型額度；相同文件與判讀條件沿用持久分析。尚未寫入行事曆。'}
+    return {
+        'operation': key, 'client_id': value['client'], 'instruction': value['payload']['instruction'],
+        'attachments': len(value['payload']['handles']), 'model_profile': value['payload']['model_profile'],
+        'status': 'submitted' if value['web_job'] else 'awaiting_personal_confirmation',
+        'notice': '確認後會使用本人既有模型額度；相同文件與判讀條件沿用持久分析。尚未寫入行事曆。',
+    }
 
 
 @router.post('/agents/mcp/operations/{key}/start')

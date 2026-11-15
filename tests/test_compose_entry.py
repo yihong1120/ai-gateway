@@ -1,15 +1,16 @@
 """One Compose entry selects configuration before any container can start."""
 from __future__ import annotations
 
-from contextlib import redirect_stderr
-from io import StringIO
 import os
-from pathlib import Path
 import tempfile
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
-from examples.deployment.cli import compose_command, main
+from examples.deployment.cli import compose_command
+from examples.deployment.cli import main
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,9 +36,13 @@ class ComposeEntryTests(unittest.TestCase):
             main(['--config', str(self.config), 'compose', 'local-model', 'up', '-d'])
         executable, argv, env = execute.call_args.args
         self.assertEqual(executable, 'docker')
-        self.assertEqual(argv, ['docker', 'compose', '--env-file', '/dev/null', '-f',
-                                str(ROOT / 'docker-compose.yml'), '-p', 'local-model',
-                                '--profile', 'local-model', 'up', '-d'])
+        self.assertEqual(
+            argv, [
+                'docker', 'compose', '--env-file', '/dev/null', '-f',
+                str(ROOT / 'docker-compose.yml'), '-p', 'local-model',
+                '--profile', 'local-model', 'up', '-d',
+            ],
+        )
         self.assertEqual(env['LOCAL_INFERENCE_MODEL_PATH'], '/synthetic/model with spaces')
         self.assertEqual(env['PYTHON_DOTENV_DISABLED'], '1')
         self.assertNotIn('LITELLM_MASTER_KEY', env)

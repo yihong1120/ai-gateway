@@ -1,20 +1,20 @@
 """Cache cleanup preserves active analysis and all external-write receipts."""
-
 from __future__ import annotations
 
 import time
-from contextlib import contextmanager
-from unittest.mock import Mock, patch
 import unittest
+from contextlib import contextmanager
 from types import SimpleNamespace
+from unittest.mock import Mock
+from unittest.mock import patch
 
-from examples.shared.runtime.retention import Retention
+from .eip_postgres import EIPPostgresTestCase
 from examples.official_document_workflow.infrastructure.storage.processing_cache import (
     ProcessingCache,
 )
 from examples.official_document_workflow.infrastructure.storage.state import Journal
-
-from .eip_postgres import EIPPostgresTestCase
+from examples.shared.runtime import retention
+from examples.shared.runtime.retention import Retention
 
 
 class RetentionTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
@@ -37,7 +37,7 @@ class RetentionTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             self.assertEqual(policy.expired_cache(cutoff, apply=True)['rows'], 1)
         with journal.connect() as db:
             self.assertEqual(
-                db.execute('SELECT key FROM processing_chunks ORDER BY key').fetchall(), [('active',), ('fresh',)]
+                db.execute('SELECT key FROM processing_chunks ORDER BY key').fetchall(), [('active',), ('fresh',)],
             )
             self.assertEqual(db.execute('SELECT status FROM writes').fetchone(), ('unknown',))
         report = {row['table']: row for row in policy.report(exact_tables=['custom_history'])}
@@ -54,7 +54,6 @@ class RetentionTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                 policy.expired_cache(cutoff, limit=limit, apply=True)
 
     def test_default_inventory_uses_catalog_estimates_and_exact_counts_are_opt_in(self):
-        from examples.shared.runtime import retention
         journal = Journal()
         with journal.connect() as db:
             db.execute('CREATE TABLE inventory_probe(value INTEGER)')
@@ -62,6 +61,7 @@ class RetentionTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             db.execute('ANALYZE inventory_probe')
         policy = Retention(journal.dsn, journal.schema)
         original, queries = retention.connection, []
+
         @contextmanager
         def observed(*args, **kwargs):
             with original(*args, **kwargs) as db:

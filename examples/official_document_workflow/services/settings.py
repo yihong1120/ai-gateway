@@ -1,10 +1,10 @@
 """Persisted document settings, shared by every entry point."""
-
 from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from pydantic import Field
 
 
 class DocumentSettings(BaseModel):
@@ -121,7 +121,7 @@ class DocumentSettings(BaseModel):
     )
     document_analysis_cache_enabled: bool = Field(
         default=True,
-            description='Reuse validated document checkpoints and shared OCR, evidence and editable Word content across upload and EIP entries for identical inputs and settings. Disable for fresh analysis and rendering.',
+        description='Reuse validated document checkpoints and shared OCR, evidence and editable Word content across upload and EIP entries for identical inputs and settings. Disable for fresh analysis and rendering.',
     )
     cloud_ocr_text_model: Literal[
         'gemini-3.5-flash-lite',

@@ -1,20 +1,15 @@
 """BFF http operations."""
-
 from __future__ import annotations
 
 import httpx
 from anyio import CancelScope
-
 from fastapi import HTTPException
-
 from fastapi import Request
 
-from examples.identity.deployment_context import DeploymentBinding
-
-from examples.shared.runtime.http_clients import HttpClientPool
-
-from examples.identity.settings.bff import get_bff_options
 from examples.bff.proxy_headers import _proxy_request_headers
+from examples.identity.deployment_context import DeploymentBinding
+from examples.identity.settings.bff import get_bff_options
+from examples.shared.runtime.http_clients import HttpClientPool
 
 
 async def _send_proxy_request(

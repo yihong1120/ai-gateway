@@ -1,13 +1,17 @@
 """Identity database resources are created and closed by the application lifespan."""
-
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
 from fastapi import Request
-
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+
+from examples.shared.runtime.modules import ModuleReference
+
+_identity_config = ModuleReference('examples.identity.config')
 
 
 class Base(DeclarativeBase):
@@ -23,7 +27,7 @@ class Database:
     def start(self):
         if self.engine is not None:
             raise RuntimeError('Identity database is already started.')
-        from .config import Settings
+        Settings = _identity_config.attribute('Settings')
 
         options = (self.settings or Settings()).database
         self.engine = create_async_engine(

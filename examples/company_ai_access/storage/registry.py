@@ -1,19 +1,19 @@
 """Offline registry bootstrap, key validation and migration access. Runtime uses Repository."""
-
 from __future__ import annotations
 
-from contextlib import contextmanager
 import hashlib
 import os
-from pathlib import Path
 import re
+from contextlib import contextmanager
+from pathlib import Path
 
 import psycopg
-from psycopg.conninfo import conninfo_to_dict, make_conninfo
+from psycopg.conninfo import conninfo_to_dict
+from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 
-from examples.shared.runtime.database import connection
 from examples.company_ai_access.storage.migrations import initialize
+from examples.shared.runtime.database import connection
 
 
 def digest(value: str) -> str:

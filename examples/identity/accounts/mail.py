@@ -1,9 +1,12 @@
 """Immutable mail transport; ambiguous delivery never invalidates a live link."""
-
 from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
+from typing import Literal
+
 import httpx
+from fastapi import HTTPException
 
 
 @dataclass(frozen=True)
@@ -18,10 +21,9 @@ class Mailer:
 
     def require_configured(self):
         if not self.settings.brevo_api_key or not self.settings.mail_from:
-            from fastapi import HTTPException
 
             raise HTTPException(
-                status_code=500, detail='Account email is not configured.'
+                status_code=500, detail='Account email is not configured.',
             )
 
     async def send(self, payload):

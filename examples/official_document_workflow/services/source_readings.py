@@ -4,17 +4,22 @@ from __future__ import annotations
 import hashlib
 from copy import copy
 
-from examples.shared.runtime.io import run_sync
+from .ocr import NATIVE_TEXT_REVISION
+from .ocr import native_text_tool_version
+from .ocr import OCR_CONTENT_REVISION
+from .ocr import validate_native_source
 from examples.official_document_workflow.domain.documents import CloudSemanticSource
-from .ocr import OCR_CONTENT_REVISION, NATIVE_TEXT_REVISION, native_text_tool_version, validate_native_source
+from examples.shared.runtime.io import run_sync
 
 
 async def read_source(pipe, prepared):
     async def read(reader):
         pages, response = await reader.ocr.ocr_context(prepared.pdf_path)
         source = await run_sync(reader.semantic_source, prepared.pdf_path, pages, response)
-        return {'text': source.text, 'kind': source.kind, 'structural_lines': sorted(source.structural_lines),
-                'spotting_required': bool(pages)}
+        return {
+            'text': source.text, 'kind': source.kind, 'structural_lines': sorted(source.structural_lines),
+            'spotting_required': bool(pages),
+        }
 
     registry = getattr(pipe, 'analysis_results', None)
     if registry is None:
@@ -28,8 +33,10 @@ async def read_source(pipe, prepared):
             with (prepared.original_path or prepared.pdf_path).open('rb') as source:
                 return hashlib.file_digest(source, 'sha256').hexdigest()
 
-        key = registry.key('source-reading-v1', await run_sync(fingerprint), OCR_CONTENT_REVISION,
-                           NATIVE_TEXT_REVISION, await run_sync(native_text_tool_version), *pipe.ocr.content_identity())
+        key = registry.key(
+            'source-reading-v1', await run_sync(fingerprint), OCR_CONTENT_REVISION,
+            NATIVE_TEXT_REVISION, await run_sync(native_text_tool_version), *pipe.ocr.content_identity(),
+        )
 
         def validate(value):
             validate_native_source(value)

@@ -4,43 +4,60 @@ Uses the existing dev operator's membership and shared budget. Creates, revokes
 and deletes one narrowly scoped dev key. Never changes live service settings,
 registries, model routes or budget limits. Real model requests consume dev quota.
 """
-
 from __future__ import annotations
 
 import argparse
 import asyncio
-from contextlib import asynccontextmanager, contextmanager
-from dataclasses import replace
-from datetime import datetime, timedelta, timezone
-from importlib.metadata import version
 import json
 import os
-from pathlib import Path
 import secrets
 import shutil
 import socket
 import sys
 import tempfile
 import time
+import uuid
+from contextlib import asynccontextmanager
+from contextlib import contextmanager
+from dataclasses import replace
+from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
+from importlib.metadata import version
+from pathlib import Path
 
 import httpx
-import uvicorn
-import uuid
 import psycopg
+import uvicorn
 from psycopg import sql
+
+from examples.shared.runtime.modules import ModuleReference
+
+_examples_company_ai_access_adapters_upstream = ModuleReference('examples.company_ai_access.adapters.upstream')
+_examples_company_ai_access_config = ModuleReference('examples.company_ai_access.config')
+_examples_company_ai_access_protocols_codex_catalog = ModuleReference(
+    'examples.company_ai_access.protocols.codex_catalog',
+)
+_examples_company_ai_access_routers_inference = ModuleReference('examples.company_ai_access.routers.inference')
+_examples_company_ai_access_services_devices = ModuleReference('examples.company_ai_access.services.devices')
+_examples_company_ai_access_services_inference = ModuleReference('examples.company_ai_access.services.inference')
+_examples_company_ai_access_storage_registry = ModuleReference('examples.company_ai_access.storage.registry')
+_examples_company_ai_access_storage_repository = ModuleReference('examples.company_ai_access.storage.repository')
+_examples_deployment_dev_run = ModuleReference('examples.deployment.dev.run')
+_fastapi = ModuleReference('fastapi')
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
-from examples.deployment.dev.run import CONFIG, load_environment
-from examples.company_ai_access.routers.inference import inference_router
-from examples.company_ai_access.services.inference import InferenceProxy
-from examples.company_ai_access.storage.repository import Repository
-from examples.company_ai_access.protocols.codex_catalog import candidate
-from examples.company_ai_access.config import Settings
-from examples.company_ai_access.services.devices import Service, challenge
-from examples.company_ai_access.storage.registry import Store, digest
-from examples.company_ai_access.adapters.upstream import Directory, LiteLLM
-from fastapi import FastAPI
+CONFIG, load_environment = _examples_deployment_dev_run.attributes('CONFIG', 'load_environment')
+inference_router = _examples_company_ai_access_routers_inference.attribute('inference_router')
+InferenceProxy = _examples_company_ai_access_services_inference.attribute('InferenceProxy')
+Repository = _examples_company_ai_access_storage_repository.attribute('Repository')
+candidate = _examples_company_ai_access_protocols_codex_catalog.attribute('candidate')
+Settings = _examples_company_ai_access_config.attribute('Settings')
+Service, challenge = _examples_company_ai_access_services_devices.attributes('Service', 'challenge')
+Store, digest = _examples_company_ai_access_storage_registry.attributes('Store', 'digest')
+Directory, LiteLLM = _examples_company_ai_access_adapters_upstream.attributes('Directory', 'LiteLLM')
+FastAPI = _fastapi.attribute('FastAPI')
 
 
 @contextmanager
@@ -128,7 +145,7 @@ async def qualify(args):
                             'input_items': len(body.get('input', [])),
                             'tools': len(body.get('tools', [])),
                         },
-                    }
+                    },
                 )
                 request.extensions['qualification_call'] = calls[-1]
                 print(
@@ -137,7 +154,7 @@ async def qualify(args):
                             'progress': 'request',
                             'model': args.model,
                             'shape': calls[-1]['request_shape'],
-                        }
+                        },
                     ),
                     flush=True,
                 )
@@ -158,7 +175,7 @@ async def qualify(args):
                             'status': call['status'],
                             'header_seconds': call['header_seconds'],
                             'retries': call['retries'],
-                        }
+                        },
                     ),
                     flush=True,
                 )
@@ -209,7 +226,7 @@ async def qualify(args):
                         access_log=False,
                         ws='none',
                         timeout_graceful_shutdown=5,
-                    )
+                    ),
                 )
                 task = asyncio.create_task(server.serve(sockets=[sock]))
                 home = directory / 'codex-home'
@@ -236,9 +253,9 @@ async def qualify(args):
                             'args = [' + json.dumps(str(helper)) + ']',
                             'timeout_ms = 10000',
                             'refresh_interval_ms = 300000',
-                        ]
+                        ],
                     )
-                    + '\n'
+                    + '\n',
                 )
                 work = directory / 'work'
                 work.mkdir()
@@ -304,7 +321,7 @@ async def qualify(args):
                     report['header_seconds'] = [call.get('header_seconds') for call in calls]
                     report['upstream_statuses'] = [call.get('status') for call in calls]
                     report['gateway_versions'] = sorted(
-                        {call.get('gateway_version') for call in calls if call.get('gateway_version')}
+                        {call.get('gateway_version') for call in calls if call.get('gateway_version')},
                     )
                     if not report['checks']['cli_final_answer']:
                         report['diagnostic_markers'] = [

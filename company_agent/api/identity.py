@@ -14,6 +14,11 @@ from pydantic import BaseModel
 
 from company_agent.api.http import active
 from company_agent.api.http import PrivateRoute
+from examples.shared.runtime.modules import ModuleReference
+
+_webui_auths = ModuleReference('open_webui.models.auths')
+_webui_users = ModuleReference('open_webui.models.users')
+_webui_auth = ModuleReference('open_webui.utils.auth')
 
 router = APIRouter(route_class=PrivateRoute)
 
@@ -64,7 +69,7 @@ async def update_openwebui_password(
     user=Depends(active),
 ) -> bool:
     """Verify the current Keycloak password and replace it at the identity source."""
-    from open_webui.utils.auth import revoke_user_tokens
+    revoke_user_tokens = _webui_auth.attribute('revoke_user_tokens')
 
     subject = user.oauth['oidc']['sub']
     access_token = await oidc_access_token(request, user)
@@ -140,9 +145,9 @@ async def create_openwebui_user(
     request: Request,
     user=Depends(active),
 ):
-    from open_webui.models.auths import Auths
-    from open_webui.models.users import Users
-    from open_webui.utils.auth import get_password_hash
+    Auths = _webui_auths.attribute('Auths')
+    Users = _webui_users.attribute('Users')
+    get_password_hash = _webui_auth.attribute('get_password_hash')
 
     if user.role != 'admin':
         raise HTTPException(403, '只有管理員可以管理使用者。')
@@ -200,8 +205,8 @@ async def update_openwebui_user(
     request: Request,
     user=Depends(active),
 ):
-    from open_webui.models.auths import Auths
-    from open_webui.models.users import Users
+    Auths = _webui_auths.attribute('Auths')
+    Users = _webui_users.attribute('Users')
 
     if user.role != 'admin':
         raise HTTPException(403, '只有管理員可以管理使用者。')
@@ -253,8 +258,8 @@ async def delete_openwebui_user(
     request: Request,
     user=Depends(active),
 ):
-    from open_webui.models.auths import Auths
-    from open_webui.models.users import Users
+    Auths = _webui_auths.attribute('Auths')
+    Users = _webui_users.attribute('Users')
 
     if user.role != 'admin':
         raise HTTPException(403, '只有管理員可以管理使用者。')

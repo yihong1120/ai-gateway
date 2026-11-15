@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 import os
+
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
@@ -13,7 +15,7 @@ class MailSettings(BaseSettings):
     )
 
     mail_from: str = Field(
-        validation_alias='MAIL_FROM', default_factory=lambda: os.getenv('MAIL_FROM', '')
+        validation_alias='MAIL_FROM', default_factory=lambda: os.getenv('MAIL_FROM', ''),
     )
 
     mail_from_name: str = Field(

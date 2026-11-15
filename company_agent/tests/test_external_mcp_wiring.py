@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+import company_agent
 from company_agent.api.service import ServiceConfiguration
 from company_agent.config import Settings
 from company_agent.runtime.results import execution_summary
@@ -48,7 +49,6 @@ class ExternalMCPWiringTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parent['read_results'], summary['read_results'])
 
     def test_domain_implementation_does_not_exist_in_gateway(self):
-        import company_agent
         root = Path(company_agent.__file__).parent
         self.assertFalse((root/'services/construction/client.py').exists())
         self.assertNotIn('construction_api_url', Settings.model_fields)

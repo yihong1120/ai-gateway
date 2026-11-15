@@ -4,20 +4,20 @@ from __future__ import annotations
 from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter
+from fastapi import Depends
+from fastapi import HTTPException
+from fastapi import Query
+from fastapi import status
 
 from examples.ai_usage.config import AiUsageSettings
-from examples.ai_usage.deps import (
-    get_current_subject,
-    get_litellm_http_client,
-    get_settings,
-)
+from examples.ai_usage.deps import get_current_subject
+from examples.ai_usage.deps import get_litellm_http_client
+from examples.ai_usage.deps import get_settings
 from examples.ai_usage.schemas.usage import DailyUsageResponse
-from examples.ai_usage.services.litellm_usage import (
-    IncompleteUsageData,
-    LiteLLMUsageClient,
-    LiteLLMUsageUnavailable,
-)
+from examples.ai_usage.services.litellm_usage import IncompleteUsageData
+from examples.ai_usage.services.litellm_usage import LiteLLMUsageClient
+from examples.ai_usage.services.litellm_usage import LiteLLMUsageUnavailable
 
 router = APIRouter(prefix='/v1/me/usage', tags=['ai-usage'])
 

@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 from langchain.agents.middleware.model_call_limit import ModelCallLimitExceededError
+from langgraph.checkpoint.base import empty_checkpoint
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from company_agent.api.service import WorkQueue
 from company_agent.runtime.storage import Store
@@ -63,8 +65,6 @@ class PostgreSQLTests(Fixture):
 
     def test_official_postgres_checkpoint_and_restart(self):
         async def run():
-            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-            from langgraph.checkpoint.base import empty_checkpoint
             async with checkpointer(self.store) as saver:
                 self.assertIsInstance(saver, AsyncPostgresSaver)
                 cp = empty_checkpoint()

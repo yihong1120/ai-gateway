@@ -1,10 +1,13 @@
 """Two HTTP components, canonical backend identity and restart/failure behavior."""
-from dataclasses import replace
-from contextlib import asynccontextmanager
+from __future__ import annotations
+
 import asyncio
 import os
 import unittest
-from unittest.mock import Mock, patch
+from contextlib import asynccontextmanager
+from dataclasses import replace
+from unittest.mock import Mock
+from unittest.mock import patch
 
 import httpx
 from starlette.applications import Starlette
@@ -13,10 +16,12 @@ from starlette.routing import Route
 from company_agent.tests.test_nas import NASFixture
 from company_mcp.adapters.backend import endpoint
 from company_mcp.app import create_app
-from company_mcp.backend import ASSERTION_HEADER, PROTOCOL
-from company_mcp.config import BACKEND_PATH, PATH
-from company_mcp.settings import Settings
+from company_mcp.backend import ASSERTION_HEADER
+from company_mcp.backend import PROTOCOL
+from company_mcp.config import BACKEND_PATH
+from company_mcp.config import PATH
 from company_mcp.remote import BackendClient
+from company_mcp.settings import Settings
 from tests.company_mcp import test_resources as fixture
 
 
@@ -55,15 +60,29 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase, NASFixture):
         fixture.OIDCTests.setUp(self)
         self.settings = Settings(backend_key=self.configuration.backend_key)
         self.edge_configuration = replace(self.configuration, introspection_client='', introspection_secret='')
-        self.authority = Starlette(routes=[Route(BACKEND_PATH,
-            endpoint(self.configuration, self.verifier, Mock(return_value=self.resources)), methods=['POST'])])
-        self.edge = create_app(self.edge_configuration, self.settings,
-                              transport=httpx.ASGITransport(app=self.authority))
+        self.authority = Starlette(
+            routes=[
+                Route(
+                    BACKEND_PATH,
+                    endpoint(self.configuration, self.verifier, Mock(return_value=self.resources)), methods=['POST'],
+                ),
+            ],
+        )
+        self.edge = create_app(
+            self.edge_configuration, self.settings,
+            transport=httpx.ASGITransport(app=self.authority),
+        )
         await self.enterAsyncContext(running(self.edge))
-        self.client = await self.enterAsyncContext(httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=self.edge), base_url=self.configuration.origin))
-        self.private_client = await self.enterAsyncContext(httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=self.authority), base_url='http://127.0.0.1:8080'))
+        self.client = await self.enterAsyncContext(
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=self.edge), base_url=self.configuration.origin,
+            ),
+        )
+        self.private_client = await self.enterAsyncContext(
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=self.authority), base_url='http://127.0.0.1:8080',
+            ),
+        )
 
     async def asyncTearDown(self):
         await self.http.aclose()
@@ -71,10 +90,14 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase, NASFixture):
     token = fixture.OIDCTests.token
 
     async def rpc(self, name, arguments=None):
-        reply = await self.client.post(PATH,
+        reply = await self.client.post(
+            PATH,
             headers={'accept': 'application/json, text/event-stream', 'authorization': 'Bearer ' + self.token()},
-            json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
-                  'params': {'name': name, 'arguments': arguments or {}}})
+            json={
+                'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+                'params': {'name': name, 'arguments': arguments or {}},
+            },
+        )
         self.assertEqual(reply.status_code, 200, reply.text)
         return reply.json()['result']
 
@@ -82,8 +105,10 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase, NASFixture):
         supplied = {'authorization': 'Bearer ' + self.configuration.backend_key} if key else {}
         if token:
             supplied[ASSERTION_HEADER] = self.token()
-        return await self.private_client.post(BACKEND_PATH, headers={**supplied, **(headers or {})},
-            json={'protocol': PROTOCOL, 'action': action, **values})
+        return await self.private_client.post(
+            BACKEND_PATH, headers={**supplied, **(headers or {})},
+            json={'protocol': PROTOCOL, 'action': action, **values},
+        )
 
     async def test_independent_edge_health_catalog_and_real_owned_nas_read(self):
         self.bind()
@@ -101,17 +126,21 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase, NASFixture):
     async def test_workload_key_alone_and_wrong_resource_audience_never_authorize_a_user(self):
         self.assertEqual((await self.authority_request('execute', token=False, tool='connections_list')).status_code, 401)
         self.assertEqual((await self.authority_request('execute', key=False, tool='connections_list')).status_code, 403)
-        bad = await self.authority_request('execute', headers={ASSERTION_HEADER: self.token(aud='model-device-api')},
-                                 tool='connections_list')
+        bad = await self.authority_request(
+            'execute', headers={ASSERTION_HEADER: self.token(aud='model-device-api')},
+            tool='connections_list',
+        )
         self.assertEqual(bad.status_code, 401)
         self.assertFalse(self.calls)  # Rejected before IdP introspection or resource access.
 
     async def test_no_owner_impersonation_browser_cookie_or_incompatible_protocol(self):
         for value in ({'owner': 'bob'}, {'protocol': 999}, {'subject': 'bob-sub'}):
             payload = {'protocol': PROTOCOL, 'action': 'execute', 'tool': 'connections_list', **value}
-            reply = await self.private_client.post(BACKEND_PATH,
+            reply = await self.private_client.post(
+                BACKEND_PATH,
                 headers={'authorization': 'Bearer ' + self.configuration.backend_key, ASSERTION_HEADER: self.token()},
-                json=payload)
+                json=payload,
+            )
             self.assertEqual(reply.status_code, 409)
         for headers in ({'cookie': 'synthetic-user-session'}, {'origin': self.configuration.origin}):
             self.assertEqual((await self.authority_request('execute', headers=headers, tool='connections_list')).status_code, 403)
@@ -129,14 +158,20 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase, NASFixture):
         self.assertNotIn('synthetic-private-content', reply.text)
 
     async def test_private_endpoint_rejects_non_loopback_and_oversized_arguments(self):
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=self.authority, client=('192.0.2.3', 100)),
-                                     base_url='http://127.0.0.1:8080') as outsider:
-            reply = await outsider.post(BACKEND_PATH,
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=self.authority, client=('192.0.2.3', 100)),
+            base_url='http://127.0.0.1:8080',
+        ) as outsider:
+            reply = await outsider.post(
+                BACKEND_PATH,
                 headers={'authorization': 'Bearer ' + self.configuration.backend_key, ASSERTION_HEADER: self.token()},
-                json={'protocol': PROTOCOL, 'action': 'authorize'})
+                json={'protocol': PROTOCOL, 'action': 'authorize'},
+            )
         self.assertEqual(reply.status_code, 403)
-        reply = await self.private_client.post(BACKEND_PATH,
-            headers={'authorization': 'Bearer ' + self.configuration.backend_key}, content=b'x' * (256 * 1024 + 1))
+        reply = await self.private_client.post(
+            BACKEND_PATH,
+            headers={'authorization': 'Bearer ' + self.configuration.backend_key}, content=b'x' * (256 * 1024 + 1),
+        )
         self.assertEqual(reply.status_code, 413)
         self.assertFalse(self.calls)
 
@@ -155,15 +190,26 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase, NASFixture):
     async def test_restart_reuses_backend_workspace_without_an_edge_database_or_worker(self):
         first = await self.rpc('workspace_prepare', {'request_id': 'restart'})
         workspace = first['structuredContent']['workspace']
-        next_edge = create_app(self.edge_configuration, self.settings,
-                               transport=httpx.ASGITransport(app=self.authority))
+        next_edge = create_app(
+            self.edge_configuration, self.settings,
+            transport=httpx.ASGITransport(app=self.authority),
+        )
         async with next_edge.router.lifespan_context(next_edge):
-            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=next_edge),
-                                         base_url=self.configuration.origin) as next_client:
-                reply = await next_client.post(PATH,
-                    headers={'accept': 'application/json, text/event-stream', 'authorization': 'Bearer ' + self.token()},
-                    json={'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call',
-                          'params': {'name': 'workspace_prepare', 'arguments': {'request_id': 'restart'}}})
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=next_edge),
+                base_url=self.configuration.origin,
+            ) as next_client:
+                reply = await next_client.post(
+                    PATH,
+                    headers={
+                        'accept': 'application/json, text/event-stream',
+                        'authorization': 'Bearer ' + self.token(),
+                    },
+                    json={
+                        'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call',
+                        'params': {'name': 'workspace_prepare', 'arguments': {'request_id': 'restart'}},
+                    },
+                )
         self.assertEqual(reply.json()['result']['structuredContent']['workspace'], workspace)
         self.assertFalse(hasattr(next_edge.state, 'job_service'))
         self.assertFalse(hasattr(next_edge.state, 'workflow'))
@@ -176,13 +222,20 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase, NASFixture):
         self.offline_calls = []
         edge = create_app(self.edge_configuration, self.settings, transport=httpx.MockTransport(self.offline_backend))
         async with edge.router.lifespan_context(edge):
-            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=edge),
-                                         base_url=self.configuration.origin) as client:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=edge),
+                base_url=self.configuration.origin,
+            ) as client:
                 self.assertEqual((await client.get('/healthz')).status_code, 200)
                 self.assertEqual((await client.get('/readyz')).status_code, 503)
-                reply = await client.post(PATH,
-                    headers={'accept': 'application/json, text/event-stream', 'authorization': 'Bearer ' + self.token()},
-                    json={'jsonrpc': '2.0', 'id': 3, 'method': 'tools/list', 'params': {}})
+                reply = await client.post(
+                    PATH,
+                    headers={
+                        'accept': 'application/json, text/event-stream',
+                        'authorization': 'Bearer ' + self.token(),
+                    },
+                    json={'jsonrpc': '2.0', 'id': 3, 'method': 'tools/list', 'params': {}},
+                )
                 self.assertEqual(reply.status_code, 503)
                 self.assertNotIn('synthetic-secret', reply.text)
         self.assertEqual(len(self.offline_calls), 2)  # One readiness probe and one failed request; no retry.
@@ -199,8 +252,10 @@ class StandaloneSettingsTests(unittest.TestCase):
         config = fixture.configuration()
         with self.assertRaises(ValueError):
             create_app(config, Settings(config.backend_key))
-        for url in ('https://other.example/internal/company-mcp',
-                    'http://127.0.0.1:8080/arbitrary', 'http://127.0.0.1:8080/internal/company-mcp?token=x'):
+        for url in (
+            'https://other.example/internal/company-mcp',
+            'http://127.0.0.1:8080/arbitrary', 'http://127.0.0.1:8080/internal/company-mcp?token=x',
+        ):
             with self.assertRaises(ValueError):
                 Settings(config.backend_key, backend_url=url)
         with self.assertRaises(ValueError):

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import logging
@@ -12,6 +13,10 @@ from pathlib import Path
 
 import psycopg
 
+import company_agent.api.progress as _progress_imports
+import examples.official_document_workflow.infrastructure.storage.automation_store as _automation_store_imports
+import examples.shared.config as _config_imports
+import examples.shared.runtime.jobs as _jobs_imports
 from company_agent.api.queue import WorkQueue
 from company_agent.config import Root
 from company_agent.config import Settings
@@ -20,12 +25,26 @@ from company_agent.runtime.models import close_model
 from company_agent.runtime.models import gateway_for_verified_user
 from company_agent.runtime.models import model_failure_message
 from company_agent.runtime.models import WebBilledModel
+from company_agent.runtime.storage import Store
 from company_agent.services.external_tools.client import ExternalToolUnavailable
 from company_agent.services.files.access import FolderAccess
 from company_agent.services.files.nas import NASUnavailable
 from examples.identity.adapters.webui import verified_user
-from examples.official_document_workflow.application.output_receipts import DELETION_REVIEW_NOTICE
+from examples.official_document_workflow.application.output_receipts import (
+    DELETION_REVIEW_NOTICE,
+)
 from examples.shared.runtime.io import run_sync
+from examples.shared.runtime.modules import ModuleReference
+# Explicit deployment mode reuses the ordinary gateway connection,
+# never the official-document exemption key or a master key.
+
+_agent_chat = ModuleReference('company_agent.api.chat')
+_agent_pipe = ModuleReference('company_agent.api.pipe')
+_workflow_background_upload = ModuleReference('examples.official_document_workflow.application.background_upload')
+_shared_concurrency = ModuleReference('examples.shared.runtime.concurrency')
+_webui_env = ModuleReference('open_webui.env')
+_webui_files = ModuleReference('open_webui.models.files')
+_webui_provider = ModuleReference('open_webui.storage.provider')
 
 
 class Service:
@@ -65,7 +84,7 @@ class Service:
 
     @staticmethod
     def render(result):
-        from company_agent.api.pipe import markdown
+        markdown = _agent_pipe.attribute('markdown')
 
         return markdown(result)
 
@@ -146,7 +165,7 @@ class Service:
                                 execution.result()  # Database failure invalidates the lease.
                         elif (await self._io(self.queue.get, *key))['cancel_requested'] and not execution.cancelling():
                             execution.cancel()
-                    from examples.shared.runtime.concurrency import DOCUMENTS
+                    DOCUMENTS = _shared_concurrency.attribute('DOCUMENTS')
                     capacities = {'company': self.max_concurrent, 'document': DOCUMENTS.limit}
                     while True:
                         eligible = [
@@ -212,7 +231,7 @@ class Service:
             if (await self._io(self.queue.get, row['owner'], row['id']))['cancel_requested']:
                 raise asyncio.CancelledError
             if row['kind'] == 'document':
-                from examples.official_document_workflow.application.background_upload import execute
+                execute = _workflow_background_upload.attribute('execute')
                 await execute(self, row)
             else:
                 await self.execute(row)
@@ -231,7 +250,7 @@ class Service:
                 failure, (NASUnavailable, ExternalToolUnavailable),
             ) else model_failure_message(failure) or '執行未完成'
             if row['kind'] == 'document':
-                from examples.official_document_workflow.application.background_upload import DocumentInputError
+                DocumentInputError = _workflow_background_upload.attribute('DocumentInputError')
                 code = 'document_input_changed' if isinstance(failure, DocumentInputError) else 'document_failed'
                 description = str(failure) if isinstance(failure, DocumentInputError) else '公文處理中止；已產生的成果保留，未自動重送。'
             await self._io(self.queue.update, row['id'], status='error', progress=description, error_code=code)
@@ -361,16 +380,12 @@ class ServiceConfiguration:
 
     @staticmethod
     def eip_binding(owner):
-        from examples.official_document_workflow.infrastructure.storage.automation_store import store as workflow_store
 
-        account = workflow_store().account(owner)
+        account = _automation_store_imports.store().account(owner)
         return account['generation'] if account else None
 
     @staticmethod
     def connection():
-        # Explicit deployment mode reuses the ordinary gateway connection,
-        # never the official-document exemption key or a master key.
-        from examples.shared.config import read_service
 
         # Explicit service configuration must win over repository defaults.
         # In particular, dev must never silently reuse the production key/base.
@@ -380,7 +395,7 @@ class ServiceConfiguration:
             if not all(connection.values()):
                 raise ValueError('一般使用者 LiteLLM 的位址與金鑰必須一起設定。')
         else:
-            connection = read_service('webui')
+            connection = _config_imports.read_service('webui')
         bases = (connection.get('OPENAI_API_BASE_URLS') or '').split(';')
         keys = (connection.get('OPENAI_API_KEYS') or '').split(';')
         if len(bases) != 1 or len(keys) != 1:
@@ -449,10 +464,8 @@ class ServiceConfiguration:
 
 def create_service():
     """Build independent app resources without changing process environment."""
-    from open_webui.env import DATA_DIR
-    from company_agent.runtime.storage import Store
-    from company_agent.api.chat import publish_pending
-    from functools import partial
+    DATA_DIR = _webui_env.attribute('DATA_DIR')
+    publish_pending = _agent_chat.attribute('publish_pending')
 
     dsn = os.getenv('COMPANY_AGENT_DATABASE_URL') or os.getenv('DATABASE_URL', '')
     if not dsn.startswith('postgresql://'):
@@ -477,8 +490,7 @@ def create_service():
 
 
 def configured_service():
-    from examples.shared.runtime.jobs import service as current
-    return current()
+    return _jobs_imports.service()
 
 
 def service():
@@ -492,7 +504,6 @@ async def upload_bytes(owner, ids):
     if len(ids) > 20:
         raise ValueError('附件過多，請分批。')
     result = []
-    import base64
 
     seen = set()
     for key in ids:
@@ -517,8 +528,8 @@ async def upload_bytes(owner, ids):
             if key in seen:
                 continue
             seen.add(key)
-            from open_webui.models.files import Files
-            from open_webui.storage.provider import Storage
+            Files = _webui_files.attribute('Files')
+            Storage = _webui_provider.attribute('Storage')
 
             item = await Files.get_file_by_id_and_user_id(str(uuid.UUID(key)), owner)
             if not item or not item.path:
@@ -537,9 +548,8 @@ class QueueProgress:
         self.queue, self.key = queue, key
 
     async def emit(self, event):
-        from company_agent.api.progress import progress_text
 
-        self.queue.update(self.key, engine_job=event['job_id'], progress=progress_text(event))
+        self.queue.update(self.key, engine_job=event['job_id'], progress=_progress_imports.progress_text(event))
 
 
 def read_output_bytes(path):

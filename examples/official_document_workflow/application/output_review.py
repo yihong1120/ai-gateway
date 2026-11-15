@@ -1,11 +1,14 @@
 """Read-only verification of a receipt against the authenticated WebUI file API."""
-
 from __future__ import annotations
 
-import httpx
-from urllib.parse import quote
 from dataclasses import dataclass
-from .output_verification import ContentProof, OutputMismatch, verify_metadata
+from urllib.parse import quote
+
+import httpx
+
+from .output_verification import ContentProof
+from .output_verification import OutputMismatch
+from .output_verification import verify_metadata
 
 
 @dataclass(frozen=True)
@@ -30,7 +33,7 @@ class WebUIOutputVerifier:
             return await self._verify_file(receipt, actor)
         except (httpx.HTTPError, ValueError, TypeError):
             return OutputVerification(
-                'unavailable', actor, {'reason': 'webui_read_failed'}
+                'unavailable', actor, {'reason': 'webui_read_failed'},
             )
 
     async def _verify_file(self, receipt, actor):
@@ -43,7 +46,7 @@ class WebUIOutputVerifier:
             verify_metadata(receipt, response.json())
             proof = ContentProof(receipt)
             async with self.client.stream(
-                'GET', file_path + '/content?attachment=true'
+                'GET', file_path + '/content?attachment=true',
             ) as content:
                 content.raise_for_status()
                 async for block in content.aiter_bytes(64 * 1024):
@@ -51,5 +54,5 @@ class WebUIOutputVerifier:
             return OutputVerification('verified', actor, proof.finish())
         except OutputMismatch as error:
             return OutputVerification(
-                'mismatch', actor, {'reason': error.reason, **error.proof}
+                'mismatch', actor, {'reason': error.reason, **error.proof},
             )

@@ -1,8 +1,10 @@
 """Explicit saved-chat/storage boundaries for unit tests; no host DB initialization."""
 from __future__ import annotations
 
-from types import ModuleType, SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from types import ModuleType
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from unittest.mock import Mock
 
 
 def modules():

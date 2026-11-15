@@ -1,23 +1,26 @@
 """Codex protocol, credential scope and shared-attribution regressions."""
+from __future__ import annotations
 
 import json
+import unittest
 from dataclasses import replace
 from pathlib import Path
-import unittest
 from unittest.mock import patch
 
-from fastapi import FastAPI, HTTPException
 import httpx
+from fastapi import FastAPI
+from fastapi import HTTPException
 
+from examples.company_ai_access.adapters.upstream import LiteLLM
+from examples.company_ai_access.config import Settings
+from examples.company_ai_access.protocols.codex_catalog import candidate
+from examples.company_ai_access.protocols.codex_catalog import COMPANY_MODELS
+from examples.company_ai_access.protocols.responses import envelope
 from examples.company_ai_access.routers.assets import assets_router
 from examples.company_ai_access.routers.control import create_router
 from examples.company_ai_access.routers.inference import inference_router
-from examples.company_ai_access.services.inference import InferenceProxy
 from examples.company_ai_access.schemas import Principal
-from examples.company_ai_access.protocols.codex_catalog import candidate, COMPANY_MODELS
-from examples.company_ai_access.config import Settings
-from examples.company_ai_access.protocols.responses import envelope
-from examples.company_ai_access.adapters.upstream import LiteLLM
+from examples.company_ai_access.services.inference import InferenceProxy
 from tests.test_company_ai_access import Fixture
 
 
@@ -46,7 +49,7 @@ class CodexAPI(Fixture):
                         'error': {
                             'type': 'budget_exceeded',
                             'message': 'private-provider-detail',
-                        }
+                        },
                     },
                 )
             if json.loads(request.content).get('stream'):
@@ -316,18 +319,18 @@ class CodexAPI(Fixture):
                             {
                                 'type': 'input_image',
                                 'image_url': 'http://127.0.0.1/private',
-                            }
+                            },
                         ],
-                    }
-                ]
+                    },
+                ],
             },
             {
                 'input': [
                     {
                         'role': 'user',
                         'content': [{'type': 'input_file', 'file_id': 'other-users-file'}],
-                    }
-                ]
+                    },
+                ],
             },
             {'tools': [{'type': 'namespace', 'tools': [{'type': 'mcp'}]}]},
         ]
@@ -396,7 +399,10 @@ class CodexAPI(Fixture):
         response = await self.client.get(path)
         self.assertEqual(
             response.content,
-            (Path(__file__).resolve().parents[1] / 'examples/company_ai_access/windows/Start-CompanyCodex.ps1').read_bytes(),
+            (
+                Path(__file__).resolve().parents[1] /
+                'examples/company_ai_access/windows/Start-CompanyCodex.ps1'
+            ).read_bytes(),
         )
         self.assertEqual((await self.client.get('/company-ai/downloads/other.ps1')).status_code, 404)
 
@@ -434,7 +440,7 @@ class CodexAPI(Fixture):
             'allowed_routes': ['/v1/models'],
         }
         async with httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={'info': info}))
+            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={'info': info})),
         ) as client:
             with self.assertRaises(HTTPException):
                 await LiteLLM(self.settings, client).ensure_key(device, 'sk-test')
@@ -517,16 +523,16 @@ class Envelope(unittest.TestCase):
                         {
                             'type': 'input_image',
                             'image_url': 'data:image/png;base64,YQ==',
-                        }
+                        },
                     ],
-                }
+                },
             ],
             'tools': [
                 {
                     'type': 'namespace',
                     'name': 'functions',
                     'tools': [{'type': 'function', 'name': 'shell'}],
-                }
+                },
             ],
         }
         self.assertEqual(envelope(value)['input'], value['input'])

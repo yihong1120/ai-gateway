@@ -10,10 +10,8 @@ from __future__ import annotations
 from typing import Any
 
 from examples.ai_usage.presentation import render_daily_usage
-from examples.ai_usage.services.litellm_usage import (
-    IncompleteUsageData,
-    LiteLLMUsageError,
-)
+from examples.ai_usage.services.litellm_usage import IncompleteUsageData
+from examples.ai_usage.services.litellm_usage import LiteLLMUsageError
 from examples.identity.providers.subjects import linked_subject
 
 

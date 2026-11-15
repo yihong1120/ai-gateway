@@ -11,6 +11,8 @@ from pathlib import Path
 from langchain_core.messages import HumanMessage
 from langchain_core.messages import SystemMessage
 
+import company_agent.services.files.nas as _nas_imports
+import company_agent.services.office.sandbox as _sandbox_imports
 from company_agent.runtime.models import billed_analysis
 from company_agent.runtime.models import select_profile
 
@@ -40,8 +42,6 @@ def vision_payload(text):
 
 
 async def understand(ctx, args):
-    from company_agent.services.files.nas import file_access
-    from company_agent.services.office.sandbox import office_worker
 
     if not ctx.settings.enable_vision:
         raise ValueError('此入口尚未啟用圖片語意理解。')
@@ -49,7 +49,7 @@ async def understand(ctx, args):
         raise ValueError('請指定圖片分析問題。')
     if args.model_profile:
         select_profile(ctx.model, args.model_profile, images=True)
-    access = file_access(ctx.settings, ctx.store, ctx.owner)
+    access = _nas_imports.file_access(ctx.settings, ctx.store, ctx.owner)
     raw, sha = await asyncio.to_thread(access.read, args.root, args.path)
     suffix = Path(args.path).suffix.lower()
     if suffix not in {'.pdf', '.png', '.jpg', '.jpeg'}:
@@ -72,7 +72,7 @@ async def understand(ctx, args):
     if cached is not None:
         return cached
     meta, png = await asyncio.to_thread(
-        office_worker, 'ocr_page', data=raw, suffix=suffix, page=args.page, max_edge=1600,
+        _sandbox_imports.office_worker, 'ocr_page', data=raw, suffix=suffix, page=args.page, max_edge=1600,
     )
     if len(png) > 8_000_000:
         raise ValueError('正規化圖片過大，未送出模型。')

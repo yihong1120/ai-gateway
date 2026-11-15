@@ -12,8 +12,12 @@ from datetime import timezone
 
 import httpx2
 from jsonschema import Draft202012Validator
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
+from mcp.types import PaginatedRequestParams
 
 from company_agent.services.external_tools.config import MCPServerConfig
+# SDK imports remain optional when no external server is configured.
 
 MAX_BYTES = 1_048_576
 MAX_SCHEMA_BYTES = 65_536
@@ -127,7 +131,6 @@ class ExternalTools:
             if cursor is None:
                 page = await session.list_tools()
             else:
-                from mcp.types import PaginatedRequestParams
 
                 page = await session.list_tools(params=PaginatedRequestParams(cursor=cursor))
             value = _plain(page)
@@ -236,10 +239,6 @@ class ExternalTools:
 
 @asynccontextmanager
 async def _sdk_session(url, token):
-    # SDK imports remain optional when no external server is configured.
-    import httpx2
-    from mcp import ClientSession
-    from mcp.client.streamable_http import streamable_http_client
 
     async with httpx2.AsyncClient(
         transport=BoundedTransport(), timeout=TIMEOUT_SECONDS,

@@ -9,13 +9,6 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from examples.identity.database import get_db
-from examples.identity.models import StreamConfig
-from examples.identity.models import User
-from examples.identity.dependencies import _site_permission
-from examples.identity.dependencies import get_current_user
-from examples.identity.dependencies import is_super_admin
-from examples.identity.dependencies import require_admin
 from examples.db_management.schemas.stream_config import SiteStreamConfigUpsert
 from examples.db_management.schemas.stream_config import StreamConfigCreate
 from examples.db_management.schemas.stream_config import StreamConfigRead
@@ -39,11 +32,18 @@ from examples.db_management.services.stream_config_services import (
     get_group_stream_limit,
 )
 from examples.db_management.services.stream_config_services import (
-    upsert_site_stream_configs,
-)
-from examples.db_management.services.stream_config_services import (
     update_stream_config,
 )
+from examples.db_management.services.stream_config_services import (
+    upsert_site_stream_configs,
+)
+from examples.identity.database import get_db
+from examples.identity.dependencies import _site_permission
+from examples.identity.dependencies import get_current_user
+from examples.identity.dependencies import is_super_admin
+from examples.identity.dependencies import require_admin
+from examples.identity.models import StreamConfig
+from examples.identity.models import User
 
 router = APIRouter(tags=['stream-config'])
 

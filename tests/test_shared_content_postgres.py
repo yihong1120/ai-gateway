@@ -2,22 +2,33 @@
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import json
 import multiprocessing
 import os
-from pathlib import Path
-from threading import Event, Lock
 import time
 import unittest
-from unittest.mock import Mock, patch
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from threading import Event
+from threading import Lock
+from unittest.mock import Mock
+from unittest.mock import patch
 
 import psycopg
 
-from examples.official_document_workflow.domain.documents import CloudRateLimited, CloudTemporaryFailure, ProcessingError
-from examples.official_document_workflow.infrastructure.storage.automation_store import AutomationStore
-from examples.official_document_workflow.infrastructure.storage.shared_content import SharedContentCache
-from examples.official_document_workflow.runtime import WorkflowResources, WorkflowSettings
+from examples.official_document_workflow.domain.documents import CloudRateLimited
+from examples.official_document_workflow.domain.documents import CloudTemporaryFailure
+from examples.official_document_workflow.domain.documents import ProcessingError
+from examples.official_document_workflow.infrastructure.storage.automation_store import (
+    AutomationStore,
+)
+from examples.official_document_workflow.infrastructure.storage.shared_content import (
+    SharedContentCache,
+)
+from examples.official_document_workflow.runtime import WorkflowResources
+from examples.official_document_workflow.runtime import WorkflowSettings
+from examples.shared.runtime import retention
 from examples.shared.runtime.concurrency import ModelNotStarted
 from examples.shared.runtime.retention import Retention
 from tests.eip_postgres import EIPPostgresTestCase
@@ -26,6 +37,7 @@ from tests.eip_postgres import EIPPostgresTestCase
 def process_compute(dsn, schema, key_path):
     store = AutomationStore(Path(key_path), dsn=dsn, schema=schema)
     cache = SharedContentCache(store, 'trusted-eip', 'process-v1')
+
     def produce():
         with store.db() as db:
             db.execute('INSERT INTO shared_producer_calls DEFAULT VALUES')
@@ -74,7 +86,9 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, ['producer'])
         self.assertTrue(all(value == {'text': 'private document body'} for value in values))
         with self.store.db() as db:
-            row = db.execute('SELECT payload,expires_at-created_at AS ttl FROM shared_content_cache WHERE key=%s', (key,)).fetchone()
+            row = db.execute(
+                'SELECT payload,expires_at-created_at AS ttl FROM shared_content_cache WHERE key=%s', (key,),
+            ).fetchone()
         self.assertNotIn(b'private document body', bytes(row['payload']))
         self.assertEqual(row['ttl'].total_seconds(), 604800)
 
@@ -82,7 +96,12 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         with self.store.db() as db:
             db.execute('CREATE TABLE shared_producer_calls(id BIGSERIAL PRIMARY KEY)')
         with ProcessPoolExecutor(max_workers=2, mp_context=multiprocessing.get_context('spawn')) as pool:
-            futures = [pool.submit(process_compute, self.store.dsn, self.store.schema, str(self._workflow.settings.key)) for _ in range(2)]
+            futures = [
+                pool.submit(
+                    process_compute, self.store.dsn, self.store.schema,
+                    str(self._workflow.settings.key),
+                ) for _ in range(2)
+            ]
             values = await asyncio.gather(*(asyncio.to_thread(future.result, 10) for future in futures))
         self.assertEqual(values, [b'one shared result', b'one shared result'])
         with self.store.db() as db:
@@ -101,6 +120,7 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(factory.call_count, 2)
         key = self.cache.key('validated', 'same')
         self.cache.get_or_compute(key, lambda: {'valid': False})
+
         def validate(value):
             if value.get('valid') is not True:
                 raise ValueError('synthetic invalid evidence')
@@ -108,7 +128,11 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         other = self.cache.key('validated', 'other')
         self.cache.get_or_compute(other, lambda: {'valid': False})
         with self.store.db() as db:
-            db.execute('UPDATE shared_content_cache SET payload=(SELECT payload FROM shared_content_cache WHERE key=%s) WHERE key=%s', (other, key))
+            db.execute(
+                'UPDATE shared_content_cache SET payload=(SELECT payload FROM shared_content_cache WHERE key=%s) WHERE key=%s', (
+                    other, key,
+                ),
+            )
         factory = Mock(return_value={'valid': True})
         self.assertEqual(self.cache.get_or_compute(key, factory, validate), {'valid': True})
         factory.assert_called_once()
@@ -119,10 +143,12 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
     async def test_failed_leader_sets_short_safe_cooldown_for_concurrent_waiters(self):
         key = self.cache.key('failing')
         calls, guard = [], Lock()
+
         def fail():
             with guard:
                 calls.append('attempt')
             raise ValueError('sensitive upstream diagnostics must not persist')
+
         def invoke():
             try:
                 self.cache.get_or_compute(key, fail)
@@ -133,7 +159,9 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, ['attempt'])
         self.assertEqual(sum(isinstance(error, ProcessingError) for error in errors), 3)
         with self.store.db() as db:
-            row = db.execute('SELECT state,payload,expires_at-created_at AS ttl FROM shared_content_cache WHERE key=%s', (key,)).fetchone()
+            row = db.execute(
+                'SELECT state,payload,expires_at-created_at AS ttl FROM shared_content_cache WHERE key=%s', (key,),
+            ).fetchone()
         self.assertEqual(row['state'], 'failed')
         self.assertEqual(row['ttl'].total_seconds(), 30)
         envelope = json.loads(self.store.cipher.decrypt(bytes(row['payload'])))
@@ -148,6 +176,7 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                 with self.subTest(asynchronous=asynchronous, replay_safe=replay_safe):
                     key = self.cache.key('invalid', asynchronous, replay_safe)
                     validate = Mock(side_effect=ValueError('synthetic evidence mismatch'))
+
                     async def compute():
                         return {'invalid': True}
                     with self.assertRaisesRegex(ValueError, 'synthetic evidence mismatch'):
@@ -157,7 +186,10 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                             self.cache.get_or_compute(key, lambda: {'invalid': True}, validate, replay_safe=replay_safe)
                     validate.assert_called_once()
                     with self.store.db() as db:
-                        state = db.execute('SELECT state FROM shared_content_cache WHERE key=%s', (key,)).fetchone()['state']
+                        state = db.execute(
+                            'SELECT state FROM shared_content_cache WHERE key=%s',
+                            (key,),
+                        ).fetchone()['state']
                     self.assertEqual(state, 'failed' if replay_safe else 'unknown')
 
     async def test_ready_encoding_failure_preserves_validated_success_and_paid_unknown(self):
@@ -166,14 +198,20 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                 for failure in ('json_nan', 'cipher'):
                     with self.subTest(asynchronous=asynchronous, replay_safe=replay_safe, failure=failure):
                         key = self.cache.key('encoding-failure', asynchronous, replay_safe, failure)
-                        value = {'verified': True, 'unused_metadata': float('nan')} if failure == 'json_nan' else b'valid bytes'
+                        value = {
+                            'verified': True, 'unused_metadata': float(
+                                'nan',
+                            ),
+                        } if failure == 'json_nan' else b'valid bytes'
                         factory = Mock(return_value=value)
                         validate = Mock()
                         encrypt = self.store.cipher.encrypt
+
                         def reject_ready_bytes(payload):
                             if json.loads(payload)['kind'] == 'bytes':
                                 raise OSError('synthetic ready encryption failure')
                             return encrypt(payload)
+
                         async def compute():
                             return factory()
                         with patch.object(self.store.cipher, 'encrypt', side_effect=reject_ready_bytes):
@@ -192,15 +230,24 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                                     self.cache.get_or_compute(key, factory, validate, replay_safe=False)
                             factory.assert_called_once()
                             with self.store.db() as db:
-                                self.assertEqual(db.execute('SELECT state FROM shared_content_cache WHERE key=%s', (key,)).fetchone()['state'], 'unknown')
+                                self.assertEqual(
+                                    db.execute('SELECT state FROM shared_content_cache WHERE key=%s', (key,)).fetchone()[
+                                        'state'
+                                    ], 'unknown',
+                                )
                         else:
-                            self.assertEqual(self.cache.get_or_compute(key, lambda: {'rebuilt': True}), {'rebuilt': True})
+                            self.assertEqual(
+                                self.cache.get_or_compute(
+                                    key, lambda: {'rebuilt': True},
+                                ), {'rebuilt': True},
+                            )
 
     async def test_unsupported_fresh_values_still_fail_without_a_custom_validator(self):
         for asynchronous in (False, True):
             for replay_safe in (False, True):
                 with self.subTest(asynchronous=asynchronous, replay_safe=replay_safe):
                     key = self.cache.key('unsupported-fresh-value', asynchronous, replay_safe)
+
                     async def compute():
                         return 42
                     with self.assertRaisesRegex(ValueError, 'JSON objects, arrays or bytes'):
@@ -209,7 +256,10 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                         else:
                             self.cache.get_or_compute(key, lambda: 42, replay_safe=replay_safe)
                     with self.store.db() as db:
-                        state = db.execute('SELECT state FROM shared_content_cache WHERE key=%s', (key,)).fetchone()['state']
+                        state = db.execute(
+                            'SELECT state FROM shared_content_cache WHERE key=%s',
+                            (key,),
+                        ).fetchone()['state']
                     self.assertEqual(state, 'failed' if replay_safe else 'unknown')
 
     async def test_publish_failure_preserves_success_without_recomputing(self):
@@ -219,6 +269,7 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.cache.get_or_compute(key, factory), {'complete': True})
         factory.assert_called_once()
         async_factory = Mock()
+
         async def compute():
             async_factory()
             return b'complete'
@@ -230,11 +281,13 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         key = self.cache.key('async-flight')
         entered, release = asyncio.Event(), asyncio.Event()
         calls = []
+
         async def compute():
             calls.append('leader')
             entered.set()
             await release.wait()
             return {'done': True}
+
         async def must_not_compute():
             self.fail('A waiting caller must reuse the leader result.')
         leader = asyncio.create_task(self.cache.aget_or_compute(key, compute))
@@ -269,7 +322,10 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             self.assertEqual(policy.expired_shared_content(apply=True)['rows'], 0)
         self.assertEqual(policy.expired_shared_content(apply=True)['rows'], 1)
         with self.store.db() as db:
-            self.assertEqual(db.execute('SELECT payload FROM processing_chunks').fetchone()['payload'], b'private-ciphertext')
+            self.assertEqual(
+                db.execute('SELECT payload FROM processing_chunks').fetchone()
+                ['payload'], b'private-ciphertext',
+            )
             self.assertEqual(db.execute('SELECT status FROM writes').fetchone()['status'], 'unknown')
 
     async def test_lost_leader_connection_cannot_overwrite_a_new_leaders_result(self):
@@ -277,14 +333,17 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         entered, release = asyncio.Event(), asyncio.Event()
         connections = []
         connect = self.cache._aconnect
+
         async def observe():
             db = await connect()
             connections.append(db)
             return db
+
         async def old_producer():
             entered.set()
             await release.wait()
             return {'producer': 'old'}
+
         async def new_producer():
             return {'producer': 'new'}
         with patch.object(self.cache, '_aconnect', side_effect=observe):
@@ -312,16 +371,19 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                 factory = Mock(return_value={'verified': True})
                 if asynchronous:
                     publish = self.cache._apublish
+
                     async def only_start(db, key, payload, *, state='ready'):
                         if state == 'ready':
                             raise OSError('synthetic ready publication failure')
                         return await publish(db, key, payload, state=state)
+
                     async def compute():
                         return factory()
                     with patch.object(self.cache, '_apublish', side_effect=only_start):
                         self.assertEqual(await self.cache.aget_or_compute(key, compute, replay_safe=False), {'verified': True})
                 else:
                     publish = self.cache._publish
+
                     def only_start(db, key, payload, *, state='ready'):
                         if state == 'ready':
                             raise OSError('synthetic ready publication failure')
@@ -334,7 +396,11 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(row['state'], 'unknown')
                     # Expiration, corruption and accidentally requesting replay-safe
                     # mode must not turn a paid start into a repeatable cache miss.
-                    db.execute("UPDATE shared_content_cache SET payload=%s,expires_at=CURRENT_TIMESTAMP-INTERVAL '1 day' WHERE key=%s", (b'broken-envelope', key))
+                    db.execute(
+                        "UPDATE shared_content_cache SET payload=%s,expires_at=CURRENT_TIMESTAMP-INTERVAL '1 day' WHERE key=%s", (
+                            b'broken-envelope', key,
+                        ),
+                    )
                 with self.assertRaisesRegex(ProcessingError, '尚待核對'):
                     self.cache.get_or_compute(key, factory)
                 factory.assert_called_once()
@@ -344,7 +410,11 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report['shared_content_cache']['category'], 'content_cache_and_paid_receipts')
         self.assertFalse(report['shared_content_cache']['automatic_deletion'])
         with self.store.db() as db:
-            self.assertEqual(db.execute("SELECT count(*) AS n FROM shared_content_cache WHERE state='unknown'").fetchone()['n'], 2)
+            self.assertEqual(
+                db.execute(
+                    "SELECT count(*) AS n FROM shared_content_cache WHERE state='unknown'",
+                ).fetchone()['n'], 2,
+            )
 
     async def test_started_paid_producer_process_death_keeps_durable_unknown(self):
         process = multiprocessing.get_context('spawn').Process(
@@ -369,6 +439,7 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         entered, release = asyncio.Event(), asyncio.Event()
         calls = []
         key = self.cache.key('paid-concurrent')
+
         async def compute():
             calls.append('paid-call')
             entered.set()
@@ -402,6 +473,7 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             with self.subTest(asynchronous=asynchronous):
                 key = self.cache.key('paid-rate-limit', asynchronous)
                 factory = Mock(side_effect=[CloudRateLimited('synthetic confirmed 429'), {'recovered': True}])
+
                 async def compute():
                     return factory()
                 with self.assertRaises(CloudRateLimited):
@@ -433,6 +505,7 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                 key = self.cache.key('paid-preflight-rejected', asynchronous)
                 rejection = ModelNotStarted('synthetic caller preflight rejected before provider execution')
                 factory = Mock(side_effect=[rejection, {'verified_for_next_owner': True}])
+
                 async def compute():
                     return factory()
                 with self.assertRaises(ModelNotStarted) as error:
@@ -442,7 +515,12 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                         self.cache.get_or_compute(key, factory, replay_safe=False)
                 self.assertIs(error.exception, rejection)
                 with self.store.db() as db:
-                    self.assertEqual(db.execute('SELECT state FROM shared_content_cache WHERE key=%s', (key,)).fetchone()['state'], 'failed')
+                    self.assertEqual(
+                        db.execute(
+                            'SELECT state FROM shared_content_cache WHERE key=%s',
+                            (key,),
+                        ).fetchone()['state'], 'failed',
+                    )
                 with self.assertRaises(ProcessingError):
                     self.cache.get_or_compute(key, factory, replay_safe=False)
                 self.assertEqual(factory.call_count, 1)
@@ -450,7 +528,10 @@ class SharedContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                 if asynchronous:
                     self.assertEqual(await self.cache.aget_or_compute(key, compute, replay_safe=False), {'verified_for_next_owner': True})
                 else:
-                    self.assertEqual(self.cache.get_or_compute(key, factory, replay_safe=False), {'verified_for_next_owner': True})
+                    self.assertEqual(
+                        self.cache.get_or_compute(key, factory, replay_safe=False),
+                        {'verified_for_next_owner': True},
+                    )
                 self.assertEqual(factory.call_count, 2)
 
 
@@ -464,15 +545,21 @@ class SharedContentSettingsTests(unittest.TestCase):
 
     def test_invalid_flags_and_ttls_fail_without_echoing_values(self):
         for enabled, ttl in [('misspelled-secret', '604800'), ('true', 'bad-secret'), ('true', '0'), ('true', '2592001')]:
-            with self.subTest(enabled=enabled, ttl=ttl), patch.dict('os.environ', {
-                'EIP_SHARED_CONTENT_CACHE_ENABLED': enabled, 'EIP_SHARED_CONTENT_CACHE_TTL_SECONDS': ttl,
-            }, clear=True):
+            with self.subTest(enabled=enabled, ttl=ttl), patch.dict(
+                'os.environ', {
+                    'EIP_SHARED_CONTENT_CACHE_ENABLED': enabled, 'EIP_SHARED_CONTENT_CACHE_TTL_SECONDS': ttl,
+                }, clear=True,
+            ):
                 with self.assertRaises(ValueError) as error:
                     WorkflowSettings.from_environment()
                 self.assertNotIn('secret', str(error.exception))
 
     def test_database_failure_before_producer_is_safe_and_never_computes(self):
-        cache = SharedContentCache(lambda: (_ for _ in ()).throw(psycopg.OperationalError('sensitive diagnostics')), 'scope', 'v1')
+        cache = SharedContentCache(
+            lambda: (_ for _ in ()).throw(
+                psycopg.OperationalError('sensitive diagnostics'),
+            ), 'scope', 'v1',
+        )
         factory = Mock()
         with self.assertRaises(ProcessingError) as error:
             cache.get_or_compute(cache.key('test'), factory)
@@ -480,7 +567,6 @@ class SharedContentSettingsTests(unittest.TestCase):
         factory.assert_not_called()
 
     def test_shared_cleanup_requires_explicit_scope_and_apply_flags(self):
-        from examples.shared.runtime import retention
         for arguments in [
             ['retention', '--apply-shared-content-cleanup'],
             ['retention', '--scope', 'company', '--shared-content-cache'],

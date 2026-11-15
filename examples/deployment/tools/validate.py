@@ -1,20 +1,25 @@
 """Run offline validation with a disposable PostgreSQL cluster and clean artifacts."""
-
 from __future__ import annotations
 
 import argparse
 import ast
-from contextlib import contextmanager
+import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
 import socket
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import xml.etree.ElementTree as ET
+import zipfile
+from contextlib import contextmanager
+from pathlib import Path
+
+import examples.bff.deployment as _deployment_imports
+import examples.company_ai_access.cli.release as _release_imports
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -84,11 +89,6 @@ def pytest_targets():
 
 
 def artifacts(output, env):
-    import hashlib
-    import zipfile
-    import tarfile
-    from examples.bff.deployment import build as bff_build, read_bundle
-    from examples.company_ai_access.cli.release import build as access_build
 
     source = next((output / 'build').glob('*.tar.gz'))
     with tarfile.open(source) as archive:
@@ -112,7 +112,10 @@ def artifacts(output, env):
     with zipfile.ZipFile(wheel) as archive:
         names = archive.namelist()
         if any(
-            n.startswith(('deploy/', 'gateway_services/', 'gateway_runtime/', 'official_document_workflow/', 'examples/deployment_registry/', 'examples/auth/', 'infra/', 'examples/litellm/', 'examples/openwebui/pipelines/', 'examples/openwebui/deployment/', 'pipelines/', 'company_ai_access/', 'examples/deployment/archive/'))
+            n.startswith((
+                'deploy/', 'gateway_services/', 'gateway_runtime/', 'official_document_workflow/', 'examples/deployment_registry/', 'examples/auth/', 'infra/',
+                'examples/litellm/', 'examples/openwebui/pipelines/', 'examples/openwebui/deployment/', 'pipelines/', 'company_ai_access/', 'examples/deployment/archive/',
+            ))
             or (n.startswith('examples/deployment/') and n not in {'examples/deployment/__init__.py', 'examples/deployment/cli.py'} and not n.startswith('examples/deployment/registry/'))
             or n == 'examples/configuration.py'
             or n == 'examples/openwebui/identity.py'
@@ -227,15 +230,15 @@ assert not any(n in {'deploy','examples.configuration'} or n.startswith(('deploy
         )
     if result.returncode:
         raise RuntimeError('Isolated wheel import failed; see wheel-import.log')
-    access_build(ROOT, output / 'company-ai-source.zip', '1.1.9', 'https://changdar-server.mooo.com')
+    _release_imports.build(ROOT, output / 'company-ai-source.zip', '1.1.9', 'https://changdar-server.mooo.com')
     with zipfile.ZipFile(output / 'company-ai-source.zip') as archive:
         names = set(archive.namelist())
         if not {'examples/shared/config.py', 'examples/deployment/cli.py'} <= names or 'examples/configuration.py' in names:
             raise RuntimeError('Company AI source bundle is missing canonical configuration or CLI modules.')
         if any(name.startswith('examples/deployment/tools/') for name in names):
             raise RuntimeError('Company AI source bundle includes unrelated deployment tools.')
-    bff_build(output / 'identity-bundle')
-    verified = read_bundle(output / 'identity-bundle')
+    _deployment_imports.build(output / 'identity-bundle')
+    verified = _deployment_imports.read_bundle(output / 'identity-bundle')
     manifest, payloads = verified
     if 'examples/identity/adapters/webui.py' not in payloads or 'examples/openwebui/identity.py' in payloads:
         raise RuntimeError('Identity bundle must contain only the canonical WebUI identity adapter.')
@@ -250,16 +253,21 @@ assert not any(n in {'deploy','examples.configuration'} or n.startswith(('deploy
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, help='New private directory for reports and build artifacts.')
-    parser.add_argument('--with-archive', action='store_true', help='Also require and verify local historical archives.')
+    parser.add_argument(
+        '--with-archive', action='store_true',
+        help='Also require and verify local historical archives.',
+    )
     parser.add_argument('--archive-dir', type=Path, help='Verify historical archives restored outside the checkout.')
     args = parser.parse_args()
     output = args.output.resolve() if args.output else Path(tempfile.mkdtemp(prefix='ai-gateway-validation-'))
     if args.output:
         output.mkdir(parents=True, mode=0o700)
     report = {'phases': [], 'output': str(output)}
-    private_prefixes = ('AI_ACCESS_', 'COMPANY_AGENT_', 'EIP_', 'OPENAI_', 'LITELLM_', 'OIDC_',
-                        'BFF_', 'KEYCLOAK_', 'JWT_', 'DATABASE_', 'REDIS_', 'BREVO_', 'GOOGLE_',
-                        'ANTHROPIC_', 'VERTEX_', 'CODEX_', 'PG')
+    private_prefixes = (
+        'AI_ACCESS_', 'COMPANY_AGENT_', 'EIP_', 'OPENAI_', 'LITELLM_', 'OIDC_',
+        'BFF_', 'KEYCLOAK_', 'JWT_', 'DATABASE_', 'REDIS_', 'BREVO_', 'GOOGLE_',
+        'ANTHROPIC_', 'VERTEX_', 'CODEX_', 'PG',
+    )
     env = {key: value for key, value in os.environ.items() if not key.startswith(private_prefixes)}
     env.update(
         PYTHON_DOTENV_DISABLED='1',
@@ -357,7 +365,7 @@ raise SystemExit(not r.wasSuccessful())
             phase(
                 'unittest',
                 lambda: execute(
-                    [sys.executable, '-c', code, str(output / 'unittest.json')], env, output / 'unittest.log'
+                    [sys.executable, '-c', code, str(output / 'unittest.json')], env, output / 'unittest.log',
                 ),
             )
             phase(
@@ -378,7 +386,7 @@ raise SystemExit(not r.wasSuccessful())
         phase(
             'clean sdist and wheel',
             lambda: execute(
-                [sys.executable, '-m', 'build', '--outdir', str(output / 'build')], env, output / 'build.log'
+                [sys.executable, '-m', 'build', '--outdir', str(output / 'build')], env, output / 'build.log',
             ),
         )
         phase('isolated imports and deployment artifacts', lambda: artifacts(output, env))
@@ -392,7 +400,10 @@ raise SystemExit(not r.wasSuccessful())
                     totals[key] += int(suite.get(key, '0'))
             totals['passed'] = totals['tests'] - totals['failures'] - totals['errors'] - totals['skipped']
             totals['skipped_tests'] = [
-                {'id': case.get('classname', '') + '.' + case.get('name', ''), 'reason': case.find('skipped').get('message', '')}
+                {
+                    'id': case.get('classname', '') + '.' + case.get('name', ''),
+                    'reason': case.find('skipped').get('message', ''),
+                }
                 for case in ET.parse(output / 'pytest.xml').getroot().iter('testcase') if case.find('skipped') is not None
             ]
             report['pytest'] = totals

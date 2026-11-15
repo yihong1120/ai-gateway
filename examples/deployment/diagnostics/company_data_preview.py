@@ -7,8 +7,10 @@ import json
 import zipfile
 from pathlib import Path
 
-
 from company_agent.services.sandbox import sandbox_worker
+from examples.shared.runtime.modules import ModuleReference
+
+_pymupdf = ModuleReference('pymupdf')
 
 
 RENDER = r'''
@@ -35,7 +37,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--case', default='W02', choices=('W01','W02','W03','W04'))
+    parser.add_argument('--case', default='W02', choices=('W01', 'W02', 'W03', 'W04'))
     args = parser.parse_args()
     report = json.loads(args.report.read_text())
     if not report.get('completed_at') or report.get('unrun'):
@@ -47,8 +49,12 @@ def main():
     results = []
     for arm in ('flash', 'argon'):
         for filename in (('summary.docx', 'briefing.pptx') if args.case == 'W02' else ('summary.docx',)):
-            selected = next((rows[(args.case, arm, repeat)] for repeat in (1, 2)
-                             if (args.report.parent / rows[(args.case, arm, repeat)]['folder'] / 'downloads' / filename).is_file()), None)
+            selected = next(
+                (
+                    rows[(args.case, arm, repeat)] for repeat in (1, 2)
+                    if (args.report.parent / rows[(args.case, arm, repeat)]['folder'] / 'downloads' / filename).is_file()
+                ), None,
+            )
             if selected is None:
                 results.append({'case': args.case, 'arm': arm, 'file': filename, 'status': 'artifact_missing'})
                 continue
@@ -58,14 +64,18 @@ def main():
             assert hashlib.sha256(original).hexdigest() == row['artifact_sha256'][filename]
             with zipfile.ZipFile(path) as archive:
                 assert not any('vbaproject' in name.lower() for name in archive.namelist())
-            item = {'case': args.case, 'arm': arm, 'repeat': row['repeat'], 'file': filename,
-                    'primary_passed': row['passed'], 'artifact_sha256': row['artifact_sha256'][filename]}
+            item = {
+                'case': args.case, 'arm': arm, 'repeat': row['repeat'], 'file': filename,
+                'primary_passed': row['passed'], 'artifact_sha256': row['artifact_sha256'][filename],
+            }
             try:
-                meta, pdf = sandbox_worker(IMAGE, {'suffix': path.suffix},
-                    data=original, suffix=path.suffix, output='preview.pdf', entrypoint=('python3', '-c', RENDER), tmpfs_mb=256)
+                meta, pdf = sandbox_worker(
+                    IMAGE, {'suffix': path.suffix},
+                    data=original, suffix=path.suffix, output='preview.pdf', entrypoint=('python3', '-c', RENDER), tmpfs_mb=256,
+                )
                 prefix = f"{arm}-{args.case}-r{row['repeat']}-{path.stem}"
                 (args.output / (prefix + '.pdf')).write_bytes(pdf)
-                import pymupdf
+                pymupdf = _pymupdf.load()
                 images = []
                 with pymupdf.open(stream=pdf, filetype='pdf') as doc:
                     meta['pages'] = len(doc)
@@ -78,10 +88,12 @@ def main():
                 item.update(status='render_inconclusive', error_type=type(error).__name__)
             assert path.read_bytes() == original
             results.append(item)
-    value = {'scope': f'{args.case} r1 per arm and format, r2 fallback only when artifact absent; local LibreOffice preview',
-             'image': IMAGE,
-             'script_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-             'human_review_performed': False, 'primary_grades_changed': False, 'runs': results}
+    value = {
+        'scope': f'{args.case} r1 per arm and format, r2 fallback only when artifact absent; local LibreOffice preview',
+        'image': IMAGE,
+        'script_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        'human_review_performed': False, 'primary_grades_changed': False, 'runs': results,
+    }
     (args.output / 'manifest.json').write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
     print(json.dumps(value, ensure_ascii=False))
 

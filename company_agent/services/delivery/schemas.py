@@ -1,9 +1,9 @@
 """Literal requirements and tool-backed statistics; never executable assertions."""
 from __future__ import annotations
 
-from typing import Literal
-from pathlib import Path
 import re
+from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic import model_validator
@@ -42,8 +42,10 @@ class CellExpectation(Strict):
 
 
 class TextExpectation(Strict):
-    text: str = Field(min_length=1, max_length=500,
-        description='統計文字用一個{value}並指定statistic；只有明確要求輸出字面預留符號時，用{{value}}表示字面{value}。')
+    text: str = Field(
+        min_length=1, max_length=500,
+        description='統計文字用一個{value}並指定statistic；只有明確要求輸出字面預留符號時，用{{value}}表示字面{value}。',
+    )
     statistic: Statistic | None = None
 
     @model_validator(mode='after')
@@ -66,8 +68,10 @@ class ExpectedFile(Strict):
     sheet_names: list[str] = Field(default_factory=list, max_length=20)
     cells: list[CellExpectation] = Field(default_factory=list, max_length=100)
     texts: list[TextExpectation] = Field(default_factory=list, max_length=100)
-    base_source: OriginalWorkbook | None = Field(default=None,
-        description='僅用於明確保留原簿的XLSX修改，填實際已讀來源及SHA；單一來源可省略由伺服器綁定。新建報表填null。工作表規格須符合原簿，不猜別名。')
+    base_source: OriginalWorkbook | None = Field(
+        default=None,
+        description='僅用於明確保留原簿的XLSX修改，填實際已讀來源及SHA；單一來源可省略由伺服器綁定。新建報表填null。工作表規格須符合原簿，不猜別名。',
+    )
 
     @model_validator(mode='after')
     def format_rules(self):

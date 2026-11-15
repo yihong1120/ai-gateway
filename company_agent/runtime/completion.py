@@ -6,8 +6,9 @@ import json
 from typing import Annotated
 from typing import Literal
 
-from langchain_core.tools import ToolException
+from langchain_core.messages import HumanMessage
 from langchain_core.messages import ToolMessage
+from langchain_core.tools import ToolException
 from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command
 from pydantic import Field
@@ -15,11 +16,14 @@ from pydantic import field_validator
 from pydantic import model_validator
 from pydantic import StringConstraints
 
+import company_agent.services.delivery.explicit as _explicit_imports
+import company_agent.services.delivery.preservation as _preservation_imports
 from company_agent.runtime.tools import injected_tool
 from company_agent.runtime.tools import tool_receipt
 from company_agent.schemas import Strict
-from company_agent.services.delivery.validation import validate_delivery
+from company_agent.services.delivery.schemas import DeliveryPlan
 from company_agent.services.delivery.validation import statistics_for_plan
+from company_agent.services.delivery.validation import validate_delivery
 from company_agent.services.delivery.validation import verify_evidence_sources
 
 
@@ -33,8 +37,10 @@ def review_evidence(state):
 
 def unresolved_assignments(state):
     reports = state.get('reports', {})
-    pending = [key for report in reports.values() if report['status'] == 'completed'
-               for key in report.get('resolves_assignments', [])]
+    pending = [
+        key for report in reports.values() if report['status'] == 'completed'
+        for key in report.get('resolves_assignments', [])
+    ]
     resolved = set()
     while pending:
         key = pending.pop()
@@ -107,8 +113,10 @@ async def complete(runtime: ToolRuntime, *, role, **kwargs):
         produced = {
             json.loads(m.content).get('id') for m in runtime.state['messages']
             if isinstance(m, ToolMessage) and m.status == 'success'
-            and m.name in {'create_spreadsheet', 'create_spreadsheet_report', 'edit_spreadsheet',
-                           'create_word', 'create_slides', 'create_text', 'edit_text_run', 'edit_artifact_text_run'}
+            and m.name in {
+                'create_spreadsheet', 'create_spreadsheet_report', 'edit_spreadsheet',
+                'create_word', 'create_slides', 'create_text', 'edit_text_run', 'edit_artifact_text_run',
+            }
         }
         names = {f['name'] for f in history if f['id'] in declared}
         if not declared <= produced or not names <= set(ctx.assignment_outputs):
@@ -116,16 +124,12 @@ async def complete(runtime: ToolRuntime, *, role, **kwargs):
         if args.outcome == 'completed' and names != set(ctx.assignment_outputs):
             raise ToolException('本次 outputs 尚未全部產製，不得宣告 completed；補齊或明列 needs_input／blocked。')
     if role == 'coordinator' and args.outcome == 'completed':
-        from langchain_core.messages import HumanMessage
-        from company_agent.services.delivery.explicit import check_explicit_cells
-        from company_agent.services.delivery.schemas import DeliveryPlan
 
         plan = await asyncio.to_thread(ctx.store.delivery_plan, ctx.owner, ctx.job)
         if plan is not None or ctx.settings.require_delivery_plan:
             instruction = next(m.text for m in reversed(runtime.state['messages']) if isinstance(m, HumanMessage))
-            check_explicit_cells(instruction, DeliveryPlan.model_validate(plan or {}))
-        from company_agent.services.delivery.preservation import verify_preservation_sources
-        await asyncio.to_thread(verify_preservation_sources, ctx, DeliveryPlan.model_validate(plan or {}))
+            _explicit_imports.check_explicit_cells(instruction, DeliveryPlan.model_validate(plan or {}))
+        await asyncio.to_thread(_preservation_imports.verify_preservation_sources, ctx, DeliveryPlan.model_validate(plan or {}))
         unresolved = unresolved_assignments(runtime.state)
         if unresolved:
             raise ToolException(

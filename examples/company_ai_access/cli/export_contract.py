@@ -1,11 +1,11 @@
 """Generate a stable, credential-free OpenAPI contract for the Flutter team."""
-
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
+from fastapi import Request
 
 from examples.company_ai_access.routers.control import create_router
 

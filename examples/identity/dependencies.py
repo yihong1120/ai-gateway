@@ -15,12 +15,12 @@ from sqlalchemy.orm import selectinload
 from examples.identity.database import get_db
 from examples.identity.deployment_context import DeploymentBinding
 from examples.identity.deployment_context import resolve_request_deployment
-from examples.identity.sessions.jwt import jwt_access
-from examples.identity.sessions.jwt import JwtAuthorizationCredentials
 from examples.identity.models import Site
 from examples.identity.models import User
 from examples.identity.permissions import is_super_admin as _is_super_admin
 from examples.identity.permissions import SUPER_ADMIN_NAME
+from examples.identity.sessions.jwt import jwt_access
+from examples.identity.sessions.jwt import JwtAuthorizationCredentials
 
 
 class _NamedRoleUser(Protocol):

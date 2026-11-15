@@ -1,28 +1,42 @@
 """Read-only isolation checks; --chat additionally sends one tiny dev model request."""
+from __future__ import annotations
+
 import argparse
 import json
 import os
-from pathlib import Path
 import subprocess
-from datetime import datetime, timedelta, timezone
-from urllib.parse import parse_qs, urlparse
-
 import sys
+from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
+from pathlib import Path
+from urllib.parse import parse_qs
+from urllib.parse import urlparse
+
+from examples.shared.runtime.modules import ModuleReference
+
+_examples_deployment_dev_run = ModuleReference('examples.deployment.dev.run')
+_httpx = ModuleReference('httpx')
+_yaml = ModuleReference('yaml')
 if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from examples.deployment.dev.run import CONFIG
-import httpx
-import yaml
+CONFIG = _examples_deployment_dev_run.attribute('CONFIG')
+httpx = _httpx.load()
+yaml = _yaml.load()
 
 
 def verify_litellm(client, master_key, expected_parallel):
     headers = {'Authorization': 'Bearer ' + master_key}
     response = client.get('http://127.0.0.1:14002/health/readiness', headers=headers)
     assert response.status_code == 200, 'Dev LiteLLM database readiness failed: HTTP ' + str(response.status_code)
-    response = client.get('http://127.0.0.1:14002/config/field/info', headers=headers,
-                          params={'field_name': 'global_max_parallel_requests'})
+    response = client.get(
+        'http://127.0.0.1:14002/config/field/info', headers=headers,
+        params={'field_name': 'global_max_parallel_requests'},
+    )
     assert response.status_code == 200, 'Dev LiteLLM runtime settings failed: HTTP ' + str(response.status_code)
-    assert response.json()['field_value'] == expected_parallel, 'Dev LiteLLM runtime concurrency differs from generated configuration.'
+    assert response.json()[
+        'field_value'
+    ] == expected_parallel, 'Dev LiteLLM runtime concurrency differs from generated configuration.'
 
 
 def main():
@@ -50,17 +64,23 @@ def main():
         subprocess.run(['systemctl', '--user', 'is-active', '--quiet', unit], check=True)
         subprocess.run(['systemctl', '--user', 'is-enabled', '--quiet', unit], check=True)
     with httpx.Client(timeout=30, trust_env=False, follow_redirects=False) as client:
-        verify_litellm(client, llm['LITELLM_MASTER_KEY'],
-                       litellm_config['general_settings']['global_max_parallel_requests'])
+        verify_litellm(
+            client, llm['LITELLM_MASTER_KEY'],
+            litellm_config['general_settings']['global_max_parallel_requests'],
+        )
         r = client.get('http://127.0.0.1:18082/health')
         assert r.status_code == 200 and r.headers['X-AI-Environment'] == 'dev'
         assert client.get('http://127.0.0.1:18082/').status_code == 200
         assert client.get('http://127.0.0.1:18082/api/models').status_code == 401
-        for path, method in [('/api/v1/auths/add', 'POST'), ('/api/v1/users/example/update', 'POST'),
-                             ('/api/v1/users/example', 'DELETE'), ('/api/v1/auths/update/password', 'POST')]:
+        for path, method in [
+            ('/api/v1/auths/add', 'POST'), ('/api/v1/users/example/update', 'POST'),
+            ('/api/v1/users/example', 'DELETE'), ('/api/v1/auths/update/password', 'POST'),
+        ]:
             assert client.request(method, 'http://127.0.0.1:18082' + path).status_code == 403
-        r = client.get('http://127.0.0.1:18082/oauth/oidc/login',
-                       headers={'host': 'ai-dev.changdar-server.mooo.com', 'X-Forwarded-Proto': 'https'})
+        r = client.get(
+            'http://127.0.0.1:18082/oauth/oidc/login',
+            headers={'host': 'ai-dev.changdar-server.mooo.com', 'X-Forwarded-Proto': 'https'},
+        )
         assert r.status_code in (302, 307)
         query = parse_qs(urlparse(r.headers['location']).query)
         assert query['client_id'] == ['open-webui-dev']
@@ -79,14 +99,18 @@ async def main():
  print(json.dumps({'token':create_token({'id':u.id,'typ':'automation','session_stamp':a.session_stamp},timedelta(minutes=2)), 'sub':u.oauth['oidc']['sub']}))
 asyncio.run(main())
 '''
-        output = subprocess.check_output([Path.home() / '.conda/envs/webui_env/bin/python', '-c', script],
-                    cwd=Path(__file__).parent, env={**os.environ, 'PYTHONNOUSERSITE': '1'}, text=True)
+        output = subprocess.check_output(
+            [Path.home() / '.conda/envs/webui_env/bin/python', '-c', script],
+            cwd=Path(__file__).parent, env={**os.environ, 'PYTHONNOUSERSITE': '1'}, text=True,
+        )
         identity = json.loads(output.strip().splitlines()[-1])
         headers = {'Authorization': 'Bearer ' + identity['token']}
         banners = client.get('http://127.0.0.1:18082/api/v1/configs/banners', headers=headers)
         assert banners.status_code == 200
-        expected_banners = {'company-account-connections': '/connections',
-                            'ai-gateway-eip-workspace': '/eip', 'company-agent-workspace': '/agents'}
+        expected_banners = {
+            'company-account-connections': '/connections',
+            'ai-gateway-eip-workspace': '/eip', 'company-agent-workspace': '/agents',
+        }
         for key, path in expected_banners.items():
             matches = [banner for banner in banners.json() if banner['id'] == key]
             assert len(matches) == 1 and matches[0]['type'] == 'info' and path in matches[0]['content']
@@ -95,19 +119,27 @@ asyncio.run(main())
         assert models.status_code == 200
         ids = {row['id'] for row in models.json()['data']}
         assert {'company_work_assistant', 'official_document_processor', 'my_daily_usage'} <= ids
-        r = client.get('http://127.0.0.1:14002/spend/logs/v2',
-            params={'end_user': identity['sub'], 'start_date': str(datetime.now(timezone.utc).date()),
-                    'end_date': str((datetime.now(timezone.utc) + timedelta(days=1)).date())},
-            headers={'Authorization': 'Bearer ' + web['LITELLM_USAGE_READER_KEY']})
+        r = client.get(
+            'http://127.0.0.1:14002/spend/logs/v2',
+            params={
+                'end_user': identity['sub'], 'start_date': str(datetime.now(timezone.utc).date()),
+                'end_date': str((datetime.now(timezone.utc) + timedelta(days=1)).date()),
+            },
+            headers={'Authorization': 'Bearer ' + web['LITELLM_USAGE_READER_KEY']},
+        )
         assert r.status_code == 200, 'Dev usage reader failed: ' + str(r.status_code)
-        r = client.get('http://127.0.0.1:14002/v1/models',
-                       headers={'Authorization': 'Bearer ' + web['OPENAI_API_KEYS']})
+        r = client.get(
+            'http://127.0.0.1:14002/v1/models',
+            headers={'Authorization': 'Bearer ' + web['OPENAI_API_KEYS']},
+        )
         assert r.status_code == 200
         if args.chat:
-            r = client.post('http://127.0.0.1:18082/api/chat/completions', headers=headers, json={
-                'model': 'gemini-3.5-flash-lite', 'messages': [{'role': 'user', 'content': 'Reply only OK.'}],
-                'stream': True, 'max_tokens': 16,
-            })
+            r = client.post(
+                'http://127.0.0.1:18082/api/chat/completions', headers=headers, json={
+                    'model': 'gemini-3.5-flash-lite', 'messages': [{'role': 'user', 'content': 'Reply only OK.'}],
+                    'stream': True, 'max_tokens': 16,
+                },
+            )
             assert r.status_code == 200, 'Dev chat failed: ' + str(r.status_code)
             assert '[DONE]' in r.text and '"content"' in r.text, 'Dev streaming result missing.'
             print('One real dev chat returned streamed content and completion.')

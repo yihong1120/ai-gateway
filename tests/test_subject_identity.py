@@ -1,4 +1,5 @@
 """Provider link extraction is shared while caller authorisation stays explicit."""
+from __future__ import annotations
 
 import importlib.util
 import unittest
@@ -6,6 +7,7 @@ from pathlib import Path
 from types import MappingProxyType
 from unittest.mock import patch
 
+import company_agent.runtime.models as _models_imports
 from examples.identity.providers.subjects import linked_subject
 from examples.shared.runtime.usage import verified_subject
 
@@ -26,13 +28,14 @@ class LinkedSubjectTests(unittest.TestCase):
         self.assertEqual(linked_subject(MappingProxyType({'oidc': {'sub': 'x' * 300}})), 'x' * 300)
 
     def test_absent_or_malformed_provider_claims_have_no_subject(self):
-        for identities in (None, 'forged', {}, {'oidc': None}, {'oidc': []}, {'oidc': {'sub': 7}},
-                           {'oidc': {'sub': ''}}, {'oidc': {'sub': '  '}}):
+        for identities in (
+            None, 'forged', {}, {'oidc': None}, {'oidc': []}, {'oidc': {'sub': 7}},
+            {'oidc': {'sub': ''}}, {'oidc': {'sub': '  '}},
+        ):
             with self.subTest(identities=identities):
                 self.assertIsNone(linked_subject(identities))
 
     def test_document_and_company_policies_remain_stricter_than_link_extraction(self):
-        from company_agent.runtime.models import gateway_for_verified_user
 
         base = {'id': 'owner', 'role': 'user', 'oauth': {'oidc': {'sub': 'subject'}}}
         self.assertEqual(verified_subject(base), 'subject')
@@ -42,18 +45,20 @@ class LinkedSubjectTests(unittest.TestCase):
             with self.subTest(subject=subject), self.assertRaises(ValueError):
                 verified_subject(user)
             with self.subTest(company_subject=subject), self.assertRaises(ValueError):
-                gateway_for_verified_user(user, 'http://127.0.0.1:4000/v1', 'synthetic-key', 'model')
+                _models_imports.gateway_for_verified_user(user, 'http://127.0.0.1:4000/v1', 'synthetic-key', 'model')
         for role in ('pending', 'guest', None):
             user = {**base, 'role': role}
             with self.subTest(role=role), self.assertRaises(ValueError):
                 verified_subject(user)
             with self.subTest(company_role=role), self.assertRaises(ValueError):
-                gateway_for_verified_user(user, 'http://127.0.0.1:4000/v1', 'synthetic-key', 'model')
+                _models_imports.gateway_for_verified_user(user, 'http://127.0.0.1:4000/v1', 'synthetic-key', 'model')
         for owner in (' owner ', '', 'x' * 256, None):
             with self.subTest(owner=owner), self.assertRaises(ValueError):
-                gateway_for_verified_user({**base, 'id': owner}, 'http://127.0.0.1:4000/v1', 'synthetic-key', 'model')
+                _models_imports.gateway_for_verified_user(
+                    {**base, 'id': owner}, 'http://127.0.0.1:4000/v1', 'synthetic-key', 'model',
+                )
         with patch('company_agent.runtime.models.GatewayModel', return_value=object()):
-            model = gateway_for_verified_user(base, 'unused', 'unused', 'unused')
+            model = _models_imports.gateway_for_verified_user(base, 'unused', 'unused', 'unused')
         self.assertEqual((model.owner, model.subject), ('owner', 'subject'))
 
 

@@ -1,5 +1,4 @@
 """Atomic fixed-window counters, including repair of legacy keys without TTL."""
-
 from __future__ import annotations
 
 FIXED_WINDOW_SCRIPT = """

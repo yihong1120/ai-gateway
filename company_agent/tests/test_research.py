@@ -19,6 +19,9 @@ from company_agent.services.research import web as research
 from company_agent.tests.test_agent import call
 from company_agent.tests.test_agent import Fixture
 from company_agent.tests.test_multi_agent import RawRoleModel
+from examples.shared.runtime.modules import ModuleReference
+
+_fixture_test_safe_batches = ModuleReference('company_agent.tests.test_safe_batches')
 
 CONFIG = {'key': 'private-api-canary-829', 'count': 3, 'filters': [], 'fetch_filters': []}
 URL = 'https://docs.tavily.com/documentation/api-reference/endpoint/search'
@@ -82,7 +85,7 @@ class ResearchTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.request.assert_awaited_once()
 
     async def test_parallel_searches_and_fetch_are_accepted(self):
-        from company_agent.tests.test_safe_batches import batch
+        batch = _fixture_test_safe_batches.attribute('batch')
         self.request.return_value = {'results': [{**ROW, 'raw_content': 'Official page content'}]}
         model = RawRoleModel(
             coordinator=[
@@ -104,7 +107,7 @@ class ResearchTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertEqual(result['web_sources'][0]['url'], URL)
 
     async def test_missing_page_does_not_poison_completed_research(self):
-        from company_agent.tests.test_safe_batches import batch
+        batch = _fixture_test_safe_batches.attribute('batch')
 
         async def provider(endpoint, payload, key):
             return {'results': [] if endpoint == 'extract' else [ROW]}
@@ -138,11 +141,13 @@ class ResearchTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.request.assert_awaited_once()
 
     async def test_search_dns_failures_preserve_other_sources_and_cache_paid_result(self):
-        self.request.return_value = {'results': [
-            {**ROW, 'url': 'https://missing.example.com'},
-            ROW,
-            {**ROW, 'url': 'https://slow.example.com'},
-        ], 'usage': {'credits': 1}}
+        self.request.return_value = {
+            'results': [
+                {**ROW, 'url': 'https://missing.example.com'},
+                ROW,
+                {**ROW, 'url': 'https://slow.example.com'},
+            ], 'usage': {'credits': 1},
+        }
 
         async def addresses(url):
             if 'missing.example.com' in url:
@@ -191,11 +196,13 @@ class ResearchTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.request.assert_not_awaited()
 
     async def test_invalid_and_private_result_urls_do_not_discard_valid_results(self):
-        self.request.return_value = {'results': [
-            {**ROW, 'url': 'http://127.0.0.1/private'},
-            {**ROW, 'url': 'https://example.com/?token=private-token-canary'},
-            ROW,
-        ]}
+        self.request.return_value = {
+            'results': [
+                {**ROW, 'url': 'http://127.0.0.1/private'},
+                {**ROW, 'url': 'https://example.com/?token=private-token-canary'},
+                ROW,
+            ],
+        }
         command = await self.invoke()
         value = json.loads(command.update['messages'][0].content)
         self.assertEqual(value['status'], 'ok')

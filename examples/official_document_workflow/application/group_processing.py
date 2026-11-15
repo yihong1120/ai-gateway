@@ -5,7 +5,6 @@ Text and raw model responses are transient; only exports and safe errors survive
 """
 from __future__ import annotations
 
-
 import re
 import unicodedata
 

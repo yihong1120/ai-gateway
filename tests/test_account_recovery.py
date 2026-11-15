@@ -1,28 +1,39 @@
 """Real PostgreSQL rollback, concurrent one-use actions, and mail ambiguity."""
-
 from __future__ import annotations
+
 import asyncio
-from datetime import timedelta
 import os
-from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, patch
-from urllib.parse import parse_qs, urlsplit
+from datetime import timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from unittest.mock import patch
+from urllib.parse import parse_qs
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import psycopg
-from psycopg import sql
 from fastapi import HTTPException
-from sqlalchemy import text, update
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from psycopg import sql
+from sqlalchemy import text
+from sqlalchemy import update
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine
 
-from examples.identity.config import Settings
-from examples.identity.models import Base, Tenant, User, UserProfile, AccountActionToken
-from examples.identity.migrations import upgrade, require_schema
-from examples.identity.runtime import IdentityResources, identity_scope
-from examples.identity.accounts.recovery import token_hash, now
-from examples.identity.accounts.passwords import verify_password
 from examples.identity.accounts.mail import MailResult
+from examples.identity.accounts.passwords import verify_password
+from examples.identity.accounts.recovery import now
+from examples.identity.accounts.recovery import token_hash
+from examples.identity.config import Settings
+from examples.identity.migrations import require_schema
+from examples.identity.migrations import upgrade
+from examples.identity.models import AccountActionToken
+from examples.identity.models import Base
+from examples.identity.models import Tenant
+from examples.identity.models import User
+from examples.identity.models import UserProfile
+from examples.identity.runtime import identity_scope
+from examples.identity.runtime import IdentityResources
 from tests.redis_fixture import RedisFixture
 
 
@@ -31,7 +42,7 @@ class AccountRecoveryTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
         dsn = os.getenv('EIP_TEST_DATABASE_URL')
         if not dsn:
             self.skipTest(
-                'EIP_TEST_DATABASE_URL is required for PostgreSQL account tests'
+                'EIP_TEST_DATABASE_URL is required for PostgreSQL account tests',
             )
         self.redis = await self.start_redis()
         schema = 'identity_test_' + uuid4().hex
@@ -41,7 +52,7 @@ class AccountRecoveryTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
         def drop():
             with psycopg.connect(dsn, autocommit=True) as db:
                 db.execute(
-                    sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(schema))
+                    sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(schema)),
                 )
 
         self.addCleanup(drop)
@@ -64,7 +75,7 @@ class AccountRecoveryTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
                     'JWT_SECRET_KEY': 'synthetic-recovery-key-at-least-32-bytes',
                 },
                 clear=True,
-            )
+            ),
         )
         self.resources = IdentityResources(
             Settings(
@@ -72,7 +83,7 @@ class AccountRecoveryTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
                 brevo_api_key='test-mail-secret',
                 mail_from='test@example.test',
                 app_public_url='https://app.test',
-            )
+            ),
         )
         self.addAsyncCleanup(self.resources.http_clients.close)
         self.enterContext(identity_scope(self.resources))
@@ -97,7 +108,7 @@ class AccountRecoveryTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
                     family_name='Test',
                     given_name='Alice',
                     email='alice@example.test',
-                )
+                ),
             )
             await db.commit()
             self.user_id = user.id
@@ -128,14 +139,14 @@ class AccountRecoveryTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
         self.assertIsNone((await self.record(raw)).consumed_at)
         async with self.sessions() as db:
             self.assertEqual(
-                (await db.get(User, self.user_id)).password_hash, 'old-hash'
+                (await db.get(User, self.user_id)).password_hash, 'old-hash',
             )
             await self.recovery.reset(raw, 'new-password', db)
         async with self.sessions() as db:
             self.assertTrue(
                 await verify_password(
-                    'new-password', (await db.get(User, self.user_id)).password_hash
-                )
+                    'new-password', (await db.get(User, self.user_id)).password_hash,
+                ),
             )
         self.assertTrue((await self.record(raw)).revocation_pending)
 
@@ -143,7 +154,7 @@ class AccountRecoveryTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
         raw = await self.issue('verify_email')
         async with self.sessions() as db:
             with patch.object(
-                db, 'commit', AsyncMock(side_effect=OSError('database down'))
+                db, 'commit', AsyncMock(side_effect=OSError('database down')),
             ):
                 with self.assertRaises(HTTPException):
                     await self.recovery.verify(raw, db)
@@ -164,7 +175,7 @@ class AccountRecoveryTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
                     return error.status_code
 
         results = await asyncio.gather(
-            reset('first-password'), reset('second-password')
+            reset('first-password'), reset('second-password'),
         )
         accepted = [result for result in results if isinstance(result, str)]
         self.assertEqual(len(accepted), 1)
@@ -172,8 +183,8 @@ class AccountRecoveryTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             self.assertTrue(
                 await verify_password(
-                    accepted[0], (await db.get(User, self.user_id)).password_hash
-                )
+                    accepted[0], (await db.get(User, self.user_id)).password_hash,
+                ),
             )
 
     async def test_expired_superseded_wrong_purpose_and_changed_email_cannot_mutate(
@@ -191,7 +202,7 @@ class AccountRecoveryTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
             await db.execute(
                 update(AccountActionToken)
                 .where(AccountActionToken.token_hash == token_hash(latest))
-                .values(expires_at=now() - timedelta(seconds=1))
+                .values(expires_at=now() - timedelta(seconds=1)),
             )
             await db.commit()
         with self.assertRaises(HTTPException):
@@ -202,7 +213,7 @@ class AccountRecoveryTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
             await db.execute(
                 update(UserProfile)
                 .where(UserProfile.user_id == self.user_id)
-                .values(email='changed@example.test')
+                .values(email='changed@example.test'),
             )
             await db.commit()
         with self.assertRaises(HTTPException):
@@ -217,7 +228,7 @@ class AccountRecoveryTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
 
     async def test_unknown_mail_keeps_a_valid_link_and_no_automatic_resend(self):
         self.recovery.mailer.send.return_value = MailResult(
-            'unknown', 'transport_unavailable'
+            'unknown', 'transport_unavailable',
         )
         async with self.sessions() as db:
             result = await self.recovery.request_reset('alice@example.test', db)
@@ -249,7 +260,7 @@ class AccountRecoveryTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
         raw = await self.issue()
         async with self.sessions() as db:
             with patch.object(
-                db, 'commit', AsyncMock(side_effect=OSError('receipt unavailable'))
+                db, 'commit', AsyncMock(side_effect=OSError('receipt unavailable')),
             ):
                 result = await self.recovery.deliver(db, raw, {'template': 'test'})
         self.assertEqual(result.state, 'sent')
@@ -274,7 +285,7 @@ class AccountRecoveryTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
             await self.recovery.reset(raw, 'new-password', db)
         async with self.sessions() as db:
             with patch.object(
-                db, 'commit', AsyncMock(side_effect=OSError('acknowledgement lost'))
+                db, 'commit', AsyncMock(side_effect=OSError('acknowledgement lost')),
             ):
                 with self.assertRaises(OSError):
                     await self.recovery.drain_revocations(db, self.redis)
@@ -293,7 +304,7 @@ class AccountRecoveryTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
         async with self.engine.begin() as db:
             self.assertEqual(
                 await db.scalar(
-                    text('SELECT count(*) FROM identity_schema_migrations')
+                    text('SELECT count(*) FROM identity_schema_migrations'),
                 ),
                 1,
             )
@@ -313,7 +324,7 @@ class AccountRecoveryTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
         self.recovery.mailer.send.side_effect = send
         async with self.sessions() as db:
             task = asyncio.create_task(
-                self.recovery.deliver(db, raw, {'template': 'test'})
+                self.recovery.deliver(db, raw, {'template': 'test'}),
             )
             await started.wait()
             task.cancel()
@@ -329,7 +340,7 @@ class AccountRecoveryTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
         async with self.engine.begin() as db:
             await db.execute(text('DELETE FROM identity_schema_migrations'))
             await db.execute(
-                text('ALTER TABLE users ALTER COLUMN status TYPE VARCHAR(20)')
+                text('ALTER TABLE users ALTER COLUMN status TYPE VARCHAR(20)'),
             )
         await upgrade(self.engine)
         raw = await self.issue('verify_email')

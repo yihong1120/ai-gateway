@@ -1,23 +1,33 @@
 """Account-scoped AI follow-up reminders keep their evidence and status clear."""
+from __future__ import annotations
+
 import copy
 import csv
 import io
 import json
 import os
+from datetime import datetime
 from unittest.mock import patch
 
 from . import test_eip_group_processing as fixtures
 from examples.official_document_workflow.application import calendar_review
-from examples.official_document_workflow.domain.calendar.contracts import CALENDAR_REVIEW_SCHEMA
-from examples.official_document_workflow.domain.calendar.relative_dates import ReceiptContext
-from examples.official_document_workflow.domain.calendar.tracking_reminders import enabled_for, TRACKING_NOTICE
+from examples.official_document_workflow.application.preparation_review import SCHEMA
+from examples.official_document_workflow.domain.calendar.contracts import (
+    CALENDAR_REVIEW_SCHEMA,
+)
+from examples.official_document_workflow.domain.calendar.relative_dates import (
+    ReceiptContext,
+)
+from examples.official_document_workflow.domain.calendar.tracking_reminders import enabled_for
+from examples.official_document_workflow.domain.calendar.tracking_reminders import TRACKING_NOTICE
+from examples.shared.runtime.modules import ModuleReference
+
+_fixture_test_official_preparation = ModuleReference('tests.test_official_preparation')
 
 
 class TrackingReminderTests(fixtures.GroupTests):
     async def test_opted_in_hourly_workflow_exports_independently_reviewed_preparation(self):
-        from datetime import datetime
-        from .test_official_preparation import suggestion
-        from examples.official_document_workflow.application.preparation_review import SCHEMA
+        suggestion = _fixture_test_official_preparation.attribute('suggestion')
 
         class FixedDate(datetime):
             @classmethod
@@ -27,10 +37,15 @@ class TrackingReminderTests(fixtures.GroupTests):
         data = fixtures.payload()
         data['events'][0]['preparation_reminders'] = [suggestion(days=8)]
         self.pipe._eip_tracking_reminders = True
+
         async def model(source, *, schema, **kwargs):
             if schema == SCHEMA:
-                return {'checks': [{'index': 0, 'decision': 'keep', 'reason': '原文要求準備報告',
-                                    'evidence_spans': [{'source_id': 'S1', 'start_line': 8, 'end_line': 8}]}]}
+                return {
+                    'checks': [{
+                        'index': 0, 'decision': 'keep', 'reason': '原文要求準備報告',
+                        'evidence_spans': [{'source_id': 'S1', 'start_line': 8, 'end_line': 8}],
+                    }],
+                }
             return copy.deepcopy(data)
         self.pipe.analyze_text.side_effect = model
         with patch('examples.official_document_workflow.application.multi_agent.datetime', FixedDate):
@@ -43,12 +58,12 @@ class TrackingReminderTests(fixtures.GroupTests):
         self.assertEqual(rows[1]['Start Date'], '2026/09/02')
 
     async def test_preparation_review_failure_keeps_the_verified_anchor(self):
-        from .test_official_preparation import suggestion
-        from examples.official_document_workflow.application.preparation_review import SCHEMA
+        suggestion = _fixture_test_official_preparation.attribute('suggestion')
 
         data = fixtures.payload()
         data['events'][0]['preparation_reminders'] = [suggestion()]
         self.pipe._eip_tracking_reminders = True
+
         async def model(source, *, schema, **kwargs):
             if schema == SCHEMA:
                 raise ValueError('review unavailable')
@@ -60,16 +75,20 @@ class TrackingReminderTests(fixtures.GroupTests):
         self.assertTrue(any('事前準備提醒未通過' in value for value in result['notices']))
 
     async def test_rejected_preparation_is_not_added_and_is_reported(self):
-        from .test_official_preparation import suggestion
-        from examples.official_document_workflow.application.preparation_review import SCHEMA
+        suggestion = _fixture_test_official_preparation.attribute('suggestion')
 
         data = fixtures.payload()
         data['events'][0]['preparation_reminders'] = [suggestion()]
         self.pipe._eip_tracking_reminders = True
+
         async def model(source, *, schema, **kwargs):
             if schema == SCHEMA:
-                return {'checks': [{'index': 0, 'decision': 'reject', 'reason': '原文未支持該準備項目',
-                                    'evidence_spans': [{'source_id': 'S1', 'start_line': 8, 'end_line': 8}]}]}
+                return {
+                    'checks': [{
+                        'index': 0, 'decision': 'reject', 'reason': '原文未支持該準備項目',
+                        'evidence_spans': [{'source_id': 'S1', 'start_line': 8, 'end_line': 8}],
+                    }],
+                }
             return copy.deepcopy(data)
         self.pipe.analyze_text.side_effect = model
         result = await self.run_group()
@@ -88,15 +107,17 @@ class TrackingReminderTests(fixtures.GroupTests):
         data = fixtures.payload()
         event = data['events'][0]
         event.update(status=status, start_date=None, end_date=None, start_time=None, end_time=None)
-        event['assignment'] = {'executor': None, 'date_basis': 'unspecified', 'anchor_date': None,
-                               'tracking_reminder': {'days_after_anchor': days, 'reason': '需儘速追蹤辦理'}}
+        event['assignment'] = {
+            'executor': None, 'date_basis': 'unspecified', 'anchor_date': None,
+            'tracking_reminder': {'days_after_anchor': days, 'reason': '需儘速追蹤辦理'},
+        }
         self.sources['S2'] = fixtures.M.CloudSemanticSource(clause, 'native_pdf_text')
         self.pipe.semantic_source.side_effect = list(self.sources.values())
         self.pipe.analyze_text.return_value = data
         return data
 
     def saved_rows(self):
-        request = next(c.kwargs for c in self.pipe.store_output.await_args_list if c.kwargs['kind']=='calendar_csv')
+        request = next(c.kwargs for c in self.pipe.store_output.await_args_list if c.kwargs['kind'] == 'calendar_csv')
         return list(csv.DictReader(io.StringIO(request['payload'].decode('utf-8-sig'))))
 
     async def test_matching_receipt_date_creates_labeled_reminder_and_audit(self):
@@ -178,12 +199,17 @@ class TrackingReminderTests(fixtures.GroupTests):
     async def test_independent_review_rejects_notice_without_followup(self):
         data = self.prepare_tracking('函送相關資料供貴公司知悉，請查照。')
         self.pipe._eip_tracking_reminders = True
+
         async def model(source, *, schema, **kwargs):
             if schema != CALENDAR_REVIEW_SCHEMA:
                 return copy.deepcopy(data)
-            return {'issues': [], 'checks': [{'index': 0, 'decision': 'reject', 'target': None,
+            return {
+                'issues': [], 'checks': [{
+                    'index': 0, 'decision': 'reject', 'target': None,
                     'reason': '僅供知悉，沒有需追蹤的具體工作。',
-                    'evidence_spans': [{'source_id': 'S2', 'start_line': 1, 'end_line': 1}]}]}
+                    'evidence_spans': [{'source_id': 'S2', 'start_line': 1, 'end_line': 1}],
+                }],
+            }
         self.pipe.analyze_text.side_effect = model
         with patch('examples.official_document_workflow.application.multi_agent.review_calendar', side_effect=calendar_review.review_calendar):
             result = await self.run_group()
@@ -211,14 +237,19 @@ class TrackingReminderTests(fixtures.GroupTests):
         data = self.prepare_tracking()
         self.pipe._eip_tracking_reminders = True
         calls = []
+
         async def model(source, *, schema, **kwargs):
             request = json.loads(source.text)
             if schema != CALENDAR_REVIEW_SCHEMA:
                 return copy.deepcopy(data)
             calls.append(request)
-            return {'issues': [], 'checks': [{'index': 0, 'decision': 'keep', 'target': None,
+            return {
+                'issues': [], 'checks': [{
+                    'index': 0, 'decision': 'keep', 'target': None,
                     'reason': '工作成立，日期為追蹤建議。',
-                    'evidence_spans': [{'source_id': 'S2', 'start_line': 1, 'end_line': 1}]}]}
+                    'evidence_spans': [{'source_id': 'S2', 'start_line': 1, 'end_line': 1}],
+                }],
+            }
         self.pipe.analyze_text.side_effect = model
         with patch('examples.official_document_workflow.application.multi_agent.review_calendar', side_effect=calendar_review.review_calendar):
             result = await self.run_group()
@@ -229,12 +260,17 @@ class TrackingReminderTests(fixtures.GroupTests):
     async def test_independent_review_must_cite_the_same_action_source(self):
         data = self.prepare_tracking('請貴公司儘速提送評估報告。\n其他單位曾提送評估報告。')
         self.pipe._eip_tracking_reminders = True
+
         async def model(source, *, schema, **kwargs):
             if schema != CALENDAR_REVIEW_SCHEMA:
                 return copy.deepcopy(data)
-            return {'issues': [], 'checks': [{'index': 0, 'decision': 'keep', 'target': None,
+            return {
+                'issues': [], 'checks': [{
+                    'index': 0, 'decision': 'keep', 'target': None,
                     'reason': '工作成立，日期為追蹤建議。',
-                    'evidence_spans': [{'source_id': 'S2', 'start_line': 2, 'end_line': 2}]}]}
+                    'evidence_spans': [{'source_id': 'S2', 'start_line': 2, 'end_line': 2}],
+                }],
+            }
         self.pipe.analyze_text.side_effect = model
         with patch('examples.official_document_workflow.application.multi_agent.review_calendar', side_effect=calendar_review.review_calendar):
             result = await self.run_group()
@@ -243,7 +279,7 @@ class TrackingReminderTests(fixtures.GroupTests):
         self.assertEqual(result['tracking_reminders'], [])
 
     def test_owner_allowlist_is_exact_and_off_by_default(self):
-        with patch.dict(os.environ, {'EIP_TRACKING_REMINDER_ACCOUNTS':'owner-a:17, owner-b:42'}):
+        with patch.dict(os.environ, {'EIP_TRACKING_REMINDER_ACCOUNTS': 'owner-a:17, owner-b:42'}):
             self.assertTrue(enabled_for('owner-a', '17'))
             self.assertFalse(enabled_for('owner-a', '18'))
             self.assertFalse(enabled_for('owner', '17'))
@@ -252,10 +288,14 @@ class TrackingReminderTests(fixtures.GroupTests):
             self.assertFalse(enabled_for('owner-a', '17'))
 
     def test_tracking_reminder_is_not_merged_into_an_explicit_event(self):
-        event = {'status': 'current', 'project_name': None, 'start_date': '2026-10-02',
-                 'start_time': None, 'end_date': None, 'end_time': None, 'description_spans': []}
+        event = {
+            'status': 'current', 'project_name': None, 'start_date': '2026-10-02',
+            'start_time': None, 'end_date': None, 'end_time': None, 'description_spans': [],
+        }
         tracking = {**event, '_tracking_reminder_proof': object()}
-        checks = [{'index': 0, 'decision': 'keep', 'target': None},
-                  {'index': 1, 'decision': 'merge', 'target': 0}]
+        checks = [
+            {'index': 0, 'decision': 'keep', 'target': None},
+            {'index': 1, 'decision': 'merge', 'target': 0},
+        ]
         with self.assertRaisesRegex(ValueError, '不可合併'):
             calendar_review.consolidate_events([event, tracking], checks)

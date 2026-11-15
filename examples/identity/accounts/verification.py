@@ -1,11 +1,14 @@
 """HTTP compatibility entries; PostgreSQL recovery service owns account actions."""
-
 from __future__ import annotations
+
 import hashlib
-from redis.asyncio import Redis
-from examples.identity.runtime import get_identity, get_settings
-from examples.identity.redis_counters import increment_window
+
 from fastapi import HTTPException
+from redis.asyncio import Redis
+
+from examples.identity.redis_counters import increment_window
+from examples.identity.runtime import get_identity
+from examples.identity.runtime import get_settings
 
 
 def _hash_identifier(value):
@@ -36,7 +39,7 @@ async def _enforce_resend_rate_limit(
     settings = get_settings()
     key = _resend_rate_key(email)
     current, ttl = await increment_window(
-        redis_pool, key, settings.email_verification_resend_rate_limit_seconds
+        redis_pool, key, settings.email_verification_resend_rate_limit_seconds,
     )
     if current > 1:
         retry_after = (
@@ -53,7 +56,7 @@ async def _enforce_resend_rate_limit(
 
     daily_key = _resend_daily_rate_key(email)
     daily_count, ttl = await increment_window(
-        redis_pool, daily_key, settings.email_verification_daily_limit_window_seconds
+        redis_pool, daily_key, settings.email_verification_daily_limit_window_seconds,
     )
     if daily_count > settings.email_verification_daily_limit:
         retry_after = (

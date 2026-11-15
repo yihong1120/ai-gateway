@@ -1,5 +1,4 @@
 """Password hashing policy, shared by account services and ORM compatibility methods."""
-
 from __future__ import annotations
 
 import asyncio

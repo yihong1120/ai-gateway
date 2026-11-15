@@ -1,13 +1,17 @@
 """Explicit environment configuration; disabled until an operator configures it."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from ipaddress import ip_network
-import os
 import json
+import os
 import re
+from dataclasses import dataclass
+from dataclasses import field
+from ipaddress import ip_network
 from pathlib import Path
 from urllib.parse import urlsplit
+
+import examples.company_ai_access.storage.registry as _registry_imports
+import examples.shared.config as _config_imports
 
 
 @dataclass(frozen=True)
@@ -78,26 +82,36 @@ class Settings:
     def __post_init__(self):
         if self.mcp_url or self.mcp_codex_client or self.mcp_claude_client:
             endpoint = urlsplit(self.mcp_url)
-            if (endpoint.scheme != 'https' or not endpoint.hostname or endpoint.path != '/company-mcp'
-                    or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment
-                    or not self.issuer or not self.mcp_codex_client or not self.mcp_claude_client
-                    or self.mcp_codex_client == self.mcp_claude_client
-                    or any(not re.fullmatch(r'[A-Za-z0-9._-]{1,100}', item)
-                           for item in (self.mcp_codex_client, self.mcp_claude_client))):
+            if (
+                endpoint.scheme != 'https' or not endpoint.hostname or endpoint.path != '/company-mcp'
+                or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment
+                or not self.issuer or not self.mcp_codex_client or not self.mcp_claude_client
+                or self.mcp_codex_client == self.mcp_claude_client
+                or any(
+                    not re.fullmatch(r'[A-Za-z0-9._-]{1,100}', item)
+                    for item in (self.mcp_codex_client, self.mcp_claude_client)
+                )
+            ):
                 raise ValueError('MCP policy needs a fixed HTTPS resource and two distinct public OAuth client IDs.')
         for origin in (self.origin, *self.control_origins):
             parsed = urlsplit(origin)
-            if (parsed.scheme != 'https' or not parsed.hostname or parsed.path or parsed.query or parsed.fragment
-                    or '*' in parsed.netloc or parsed.username is not None or parsed.password is not None):
+            if (
+                parsed.scheme != 'https' or not parsed.hostname or parsed.path or parsed.query or parsed.fragment
+                or '*' in parsed.netloc or parsed.username is not None or parsed.password is not None
+            ):
                 raise ValueError('AI access origin must be an exact HTTPS origin without a path.')
         upstream = urlsplit(self.litellm_url)
-        if (upstream.scheme != 'http' or upstream.hostname not in {'127.0.0.1', '::1', 'localhost'} or upstream.path
-                or upstream.query or upstream.fragment or upstream.username is not None or upstream.password is not None):
+        if (
+            upstream.scheme != 'http' or upstream.hostname not in {'127.0.0.1', '::1', 'localhost'} or upstream.path
+            or upstream.query or upstream.fragment or upstream.username is not None or upstream.password is not None
+        ):
             raise ValueError('LiteLLM management and inference must remain on loopback.')
         if not self.master_key or not self.models or len(set(self.models)) != len(self.models):
             raise ValueError('An explicit master key and unique model allowlist are required.')
-        if any(not isinstance(model, str) or not re.fullmatch(r'[A-Za-z0-9._/-]{1,200}', model)
-               for model in self.all_models):
+        if any(
+            not isinstance(model, str) or not re.fullmatch(r'[A-Za-z0-9._/-]{1,200}', model)
+            for model in self.all_models
+        ):
             raise ValueError('Invalid company model identifier.')
         if self.codex_models or self.codex_release or self.codex_catalog_path:
             if self.codex_models and self.codex_models != self.models:
@@ -112,15 +126,21 @@ class Settings:
                 raise ValueError('Codex catalog exceeds 1 MiB.')
             catalog = json.loads(path.read_text())
             entries = catalog.get('models', []) if isinstance(catalog, dict) else []
-            if (not isinstance(entries, list) or len(entries) != len(self.codex_models)
-                    or any(not isinstance(entry, dict) for entry in entries)
-                    or tuple(entry.get('slug') for entry in entries) != self.codex_models):
+            if (
+                not isinstance(entries, list) or len(entries) != len(self.codex_models)
+                or any(not isinstance(entry, dict) for entry in entries)
+                or tuple(entry.get('slug') for entry in entries) != self.codex_models
+            ):
                 raise ValueError('Codex catalog must contain the same ordered model aliases as Claude.')
             for entry in entries:
-                if (entry.get('upgrade') is not None or not entry.get('base_instructions')
-                        or not isinstance(entry.get('context_window'), int) or entry['context_window'] < 4096
-                        or entry.get('supported_in_api') is not True):
-                    raise ValueError('Codex catalog needs instructions, context limits, API support and no upgrade route.')
+                if (
+                    entry.get('upgrade') is not None or not entry.get('base_instructions')
+                    or not isinstance(entry.get('context_window'), int) or entry['context_window'] < 4096
+                    or entry.get('supported_in_api') is not True
+                ):
+                    raise ValueError(
+                        'Codex catalog needs instructions, context limits, API support and no upgrade route.',
+                    )
             object.__setattr__(self, 'codex_catalog', catalog)
         if not 60 <= self.lease_seconds <= self.confirmation_seconds <= 90 * 86400:
             raise ValueError('Lease must fit within a confirmation window of at most 90 days.')
@@ -132,8 +152,18 @@ class Settings:
             raise ValueError('Enrollment and delivery must be short lived.')
         if not 1 <= self.rpm <= 1000 or not 1 <= self.tpm <= 10000000 or not 10 <= self.maintenance_seconds <= 3600:
             raise ValueError('Invalid rate or maintenance limits.')
-        object.__setattr__(self, 'inference_networks', tuple(ip_network(value, strict=True) for value in self.inference_cidrs))
-        object.__setattr__(self, 'inference_denied_networks', tuple(ip_network(value, strict=True) for value in self.inference_deny_cidrs))
+        object.__setattr__(
+            self, 'inference_networks', tuple(
+                ip_network(value, strict=True)
+                for value in self.inference_cidrs
+            ),
+        )
+        object.__setattr__(
+            self, 'inference_denied_networks', tuple(
+                ip_network(value, strict=True)
+                for value in self.inference_deny_cidrs
+            ),
+        )
         if self.environment not in {'dev', 'production', 'test'}:
             raise ValueError('Unknown AI access environment.')
         if not self.state_dir.is_absolute():
@@ -142,16 +172,16 @@ class Settings:
             raise ValueError('Approval must use a fixed same-origin company UI.')
         if self.issuer:
             identity = urlsplit(self.issuer)
-            if (identity.scheme != 'https' or not identity.hostname or '/realms/' not in identity.path
-                    or identity.username is not None or identity.password is not None or identity.query or identity.fragment):
+            if (
+                identity.scheme != 'https' or not identity.hostname or '/realms/' not in identity.path
+                or identity.username is not None or identity.password is not None or identity.query or identity.fragment
+            ):
                 raise ValueError('Keycloak issuer must use a fixed HTTPS realm URL.')
 
     @classmethod
     def from_env(cls):
-        from examples.shared.config import load_service
-        from examples.company_ai_access.storage.registry import database_config
-        load_service('company_ai_access')
-        database_config()
+        _config_imports.load_service('company_ai_access')
+        _registry_imports.database_config()
 
         def csv(name, default=''):
             return tuple(value.strip() for value in os.getenv(name, default).split(',') if value.strip())
@@ -163,7 +193,9 @@ class Settings:
             models=csv('AI_ACCESS_MODELS'),
             codex_models=csv('AI_ACCESS_CODEX_MODELS'),
             codex_release=os.getenv('AI_ACCESS_CODEX_RELEASE', ''),
-            codex_catalog_path=Path(os.environ['AI_ACCESS_CODEX_CATALOG']) if os.getenv('AI_ACCESS_CODEX_CATALOG') else None,
+            codex_catalog_path=Path(
+                os.environ['AI_ACCESS_CODEX_CATALOG'],
+            ) if os.getenv('AI_ACCESS_CODEX_CATALOG') else None,
             inference_cidrs=csv('AI_ACCESS_INFERENCE_CIDRS'),
             inference_deny_cidrs=csv('AI_ACCESS_INFERENCE_DENY_CIDRS'),
             environment=os.getenv('AI_ACCESS_ENVIRONMENT', 'dev'),

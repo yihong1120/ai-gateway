@@ -1,17 +1,20 @@
 """Exercise the anonymous browser path and explicit approval, without browser packages."""
+from __future__ import annotations
 
 import asyncio
-from html import unescape
-from pathlib import Path
 import re
 import shutil
 import subprocess
-from urllib.parse import parse_qs, urlsplit
+from html import unescape
+from pathlib import Path
+from urllib.parse import parse_qs
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI
 import httpx
 import pytest
+from fastapi import FastAPI
 
+import examples.company_ai_access.routers.assets as api
 from examples.company_ai_access.routers.assets import assets_router
 
 
@@ -22,7 +25,7 @@ def test_login_link_preserves_request_and_escapes_html():
             assets_router(
                 browser_api_prefix='/bff/ai_access/api/company-ai',
                 login_path='/bff/auth/oidc/login?return_to=/company-ai/setup',
-            )
+            ),
         )
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='https://test') as client:
             target = (
@@ -43,7 +46,6 @@ def test_login_link_preserves_request_and_escapes_html():
 
 
 def test_installer_download_exact_bytes_headers_and_filename_allowlist(tmp_path, monkeypatch):
-    import examples.company_ai_access.routers.assets as api
 
     monkeypatch.setattr(api, '__file__', str(tmp_path / 'routers/assets.py'))
     (tmp_path / 'windows').mkdir()

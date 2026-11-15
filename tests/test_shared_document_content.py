@@ -12,19 +12,26 @@ import zipfile
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
+from unittest.mock import MagicMock
+from unittest.mock import patch
 
-from docx import Document
 import pymupdf
-from PIL import Image, ImageDraw
+from docx import Document
+from PIL import Image
+from PIL import ImageDraw
 
 from .eip_postgres import EIPPostgresTestCase
 from .test_eip_large_sources import answer_for
 from .test_official_document_processor_pipe import PIPE_MODULE as M
 from examples.official_document_workflow.application.long_source import group_text
 from examples.official_document_workflow.application.multi_agent import GroupExporter
-from examples.official_document_workflow.application.outcomes import DocumentResult, CalendarResult, GroupResult
-from examples.official_document_workflow.application.upload_batch import UploadBatch, DocumentGroup, group_pdf
+from examples.official_document_workflow.application.outcomes import CalendarResult
+from examples.official_document_workflow.application.outcomes import DocumentResult
+from examples.official_document_workflow.application.outcomes import GroupResult
+from examples.official_document_workflow.application.upload_batch import DocumentGroup
+from examples.official_document_workflow.application.upload_batch import group_pdf
+from examples.official_document_workflow.application.upload_batch import UploadBatch
 from examples.official_document_workflow.domain.documents import OutputUncertain
 from examples.official_document_workflow.domain.validation import ContentValidationError
 from examples.official_document_workflow.domain.workflow import JobPlan
@@ -42,9 +49,11 @@ class SharedDocumentContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTe
         self.shared = SharedContentCache(self.db, 'eip', 'consumer-tests-v1')
         self.source = self.root / 'source.pdf'
         self.source.write_bytes(b'%PDF-synthetic-owned-content')
-        self.response = {'errorCode': 0, 'result': {
-            'layoutParsingResults': [{'prunedResult': {'page_index': 0}}],
-        }}
+        self.response = {
+            'errorCode': 0, 'result': {
+                'layoutParsingResults': [{'prunedResult': {'page_index': 0}}],
+            },
+        }
         document = Document()
         document.add_paragraph('Synthetic shared document')
         stream = io.BytesIO()
@@ -250,10 +259,12 @@ class SharedDocumentContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTe
                 batch = UploadBatch(alice, 'alice', (prepared,), origins, self.root)
                 batch.members = {'S1': prepared}
                 batch.spotting_required = {'S1': spotting_required}
-                batch.groups = [DocumentGroup(
-                    reference_number='SYNTHETIC', main_pages=['S1:P1'], attachments=[],
-                    related_reference_numbers=[], unread_source_ids=[],
-                )]
+                batch.groups = [
+                    DocumentGroup(
+                        reference_number='SYNTHETIC', main_pages=['S1:P1'], attachments=[],
+                        related_reference_numbers=[], unread_source_ids=[],
+                    ),
+                ]
                 batch.results = [GroupResult(pipe_exporter.document, CalendarResult((), (), False), ())]
                 await batch.export_documents()
                 self.assertFalse(batch.export_failed)
@@ -272,17 +283,23 @@ class SharedDocumentContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTe
             page.insert_text((50, 50), 'Native header')
             page.insert_image(pymupdf.Rect(50, 140, 500, 590), stream=image_stream.getvalue())
             self.source.write_bytes(document.tobytes())
-        response = {'errorCode': 0, 'result': {'layoutParsingResults': [{'prunedResult': {
-            'page_index': 0, 'width': 595, 'height': 842,
-            'parsing_res_list': [{'block_content': 'Native header\nScanned body editable', 'block_bbox': [50, 30, 500, 200]}],
-            'spotting_res': {
-                'rec_texts': ['Native header', 'Scanned body editable'],
-                'rec_polys': [
-                    [[50, 30], [300, 30], [300, 55], [50, 55]],
-                    [[50, 140], [400, 140], [400, 170], [50, 170]],
-                ],
+        response = {
+            'errorCode': 0, 'result': {
+                'layoutParsingResults': [{
+                    'prunedResult': {
+                        'page_index': 0, 'width': 595, 'height': 842,
+                        'parsing_res_list': [{'block_content': 'Native header\nScanned body editable', 'block_bbox': [50, 30, 500, 200]}],
+                        'spotting_res': {
+                            'rec_texts': ['Native header', 'Scanned body editable'],
+                            'rec_polys': [
+                                [[50, 30], [300, 30], [300, 55], [50, 55]],
+                                [[50, 140], [400, 140], [400, 170], [50, 170]],
+                            ],
+                        },
+                    },
+                }],
             },
-        }}]}}
+        }
         alice, bob = self.pipe('alice'), self.pipe('bob')
         request = MagicMock(return_value=response)
         render = MagicMock(wraps=alice.exports.render_word)
@@ -309,10 +326,12 @@ class SharedDocumentContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTe
         origins = {'S1:P1': [{'source_file_id': prepared.source_file.id, 'page_number': 1}]}
         batch = UploadBatch(alice, 'alice', (prepared,), origins, self.root)
         batch.members, batch.spotting_required = {'S1': prepared}, {'S1': True}
-        batch.groups = [DocumentGroup(
-            reference_number='SYNTHETIC', main_pages=['S1:P1'], attachments=[],
-            related_reference_numbers=[], unread_source_ids=[],
-        )]
+        batch.groups = [
+            DocumentGroup(
+                reference_number='SYNTHETIC', main_pages=['S1:P1'], attachments=[],
+                related_reference_numbers=[], unread_source_ids=[],
+            ),
+        ]
         batch.results = [GroupResult(exporter.document, CalendarResult((), (), False), ())]
         await batch.export_documents()
         self.assertFalse(batch.export_failed)
@@ -325,7 +344,9 @@ class SharedDocumentContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTe
         self.assertEqual(request.call_count, 2)
         self.assertEqual([call.kwargs['use_layout_detection'] for call in request.call_args_list], [True, False])
         render.assert_called_once()
-        self.assertTrue(all(block.label == 'ocr_line' for page in render.call_args.kwargs['layout_pages'] for block in page.blocks))
+        self.assertTrue(
+            all(block.label == 'ocr_line' for page in render.call_args.kwargs['layout_pages'] for block in page.blocks),
+        )
         words = [item['payload'] for item in saved if item['kind'] == 'document_docx']
         self.assertEqual(len(words), 2)
         self.assertEqual(words[0], words[1])
@@ -337,7 +358,11 @@ class SharedDocumentContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTe
             for text in ('Original first page', 'Original second page'):
                 document.new_page().insert_text((72, 72), text)
             self.source.write_bytes(document.tobytes())
-        prepared = M.PreparedDocument(kind='pdf', source_files=(SimpleNamespace(id='source', filename='source.pdf'),), pdf_path=self.source)
+        prepared = M.PreparedDocument(
+            kind='pdf', source_files=(
+                SimpleNamespace(id='source', filename='source.pdf'),
+            ), pdf_path=self.source,
+        )
         members = {'S1': prepared}
         first = group_pdf(members, ['S1:P1'], self.root / 'first.pdf')
         second = group_pdf(members, ['S1:P1'], self.root / 'second.pdf')
@@ -461,7 +486,10 @@ class SharedDocumentContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTe
     async def test_evidence_semantic_settings_invalidate_without_sharing_group_analysis(self):
         pipe = self.pipe('alice')
         pipe.valves.cloud_ocr_text_max_input_characters = 3000
-        pipe.analyze_text = AsyncMock(side_effect=lambda source, **kwargs: answer_for(source, lambda item: item['line'] == 1))
+        pipe.analyze_text = AsyncMock(
+            side_effect=lambda source, **
+            kwargs: answer_for(source, lambda item: item['line'] == 1),
+        )
         members, sources = self.long_input()
         await group_text(pipe, members, sources)
         calls = pipe.analyze_text.await_count
@@ -492,7 +520,10 @@ class SharedDocumentContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTe
     async def test_invalid_shared_evidence_acknowledgement_is_rebuilt(self):
         pipe = self.pipe('alice')
         pipe.valves.cloud_ocr_text_max_input_characters = 3000
-        pipe.analyze_text = AsyncMock(side_effect=lambda source, **kwargs: answer_for(source, lambda item: item['line'] == 1))
+        pipe.analyze_text = AsyncMock(
+            side_effect=lambda source, **
+            kwargs: answer_for(source, lambda item: item['line'] == 1),
+        )
         members, sources = self.long_input()
         with patch.object(self.shared, 'key', wraps=self.shared.key) as keys:
             first = await group_text(pipe, members, sources)
@@ -513,7 +544,11 @@ class SharedDocumentContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTe
             await group_text(pipe, members, sources)
         pipe.analyze_text.assert_awaited_once()
         with self.db.db() as db:
-            self.assertEqual(db.execute("SELECT count(*) AS n FROM shared_content_cache WHERE state='ready'").fetchone()['n'], 0)
+            self.assertEqual(
+                db.execute(
+                    "SELECT count(*) AS n FROM shared_content_cache WHERE state='ready'",
+                ).fetchone()['n'], 0,
+            )
 
     async def test_paid_evidence_publish_failure_returns_content_once_and_blocks_replay(self):
         alice, bob = self.pipe('alice'), self.pipe('bob')
@@ -604,4 +639,3 @@ class SharedDocumentContentTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTe
         self.assertEqual(spotting.call_count, 2)
         self.assertEqual(request.call_count, 2)
         self.assertEqual(scan.await_count, sum(windows))
-

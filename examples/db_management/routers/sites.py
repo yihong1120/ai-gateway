@@ -9,17 +9,6 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from examples.identity.database import get_db
-from examples.identity.models import Site
-from examples.identity.models import User
-from examples.identity.redis_pool import get_redis_pool
-from examples.identity.accounts.access import invalidate_effective_site_cache
-from examples.identity.dependencies import _site_permission
-from examples.identity.dependencies import ensure_admin_with_group
-from examples.identity.dependencies import get_current_user
-from examples.identity.dependencies import is_super_admin
-from examples.identity.dependencies import require_admin
-from examples.identity.dependencies import SUPER_ADMIN_NAME
 from examples.db_management.schemas.site import SiteCreate
 from examples.db_management.schemas.site import SiteDelete
 from examples.db_management.schemas.site import SiteGroupOp
@@ -37,6 +26,17 @@ from examples.db_management.services.site_services import (
 from examples.db_management.services.site_services import remove_user_from_site
 from examples.db_management.services.site_services import site_to_read
 from examples.db_management.services.site_services import update_site
+from examples.identity.accounts.access import invalidate_effective_site_cache
+from examples.identity.database import get_db
+from examples.identity.dependencies import _site_permission
+from examples.identity.dependencies import ensure_admin_with_group
+from examples.identity.dependencies import get_current_user
+from examples.identity.dependencies import is_super_admin
+from examples.identity.dependencies import require_admin
+from examples.identity.dependencies import SUPER_ADMIN_NAME
+from examples.identity.models import Site
+from examples.identity.models import User
+from examples.identity.redis_pool import get_redis_pool
 from examples.shared.host import integrations
 
 router: APIRouter = APIRouter(tags=['site-mgmt'], dependencies=[Depends(integrations.require_sites)])

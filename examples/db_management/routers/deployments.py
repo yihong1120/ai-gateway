@@ -9,7 +9,14 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from examples.db_management.schemas.deployment import DeploymentCreate
+from examples.db_management.schemas.deployment import DeploymentRead
+from examples.db_management.schemas.deployment import DeploymentUpdate
+from examples.db_management.schemas.deployment import TenantCreate
+from examples.db_management.schemas.deployment import TenantRead
+from examples.db_management.schemas.deployment import TenantUpdate
 from examples.identity.database import get_db
+from examples.identity.dependencies import require_super_admin
 from examples.identity.deployment_context import canonical_api_base_url
 from examples.identity.models import Deployment
 from examples.identity.models import DEPLOYMENT_STATUS_ACTIVE
@@ -17,13 +24,6 @@ from examples.identity.models import DEPLOYMENT_STATUS_REVOKED
 from examples.identity.models import Tenant
 from examples.identity.models import TENANT_STATUS_ACTIVE
 from examples.identity.models import TENANT_STATUS_DISABLED
-from examples.identity.dependencies import require_super_admin
-from examples.db_management.schemas.deployment import DeploymentCreate
-from examples.db_management.schemas.deployment import DeploymentRead
-from examples.db_management.schemas.deployment import DeploymentUpdate
-from examples.db_management.schemas.deployment import TenantCreate
-from examples.db_management.schemas.deployment import TenantRead
-from examples.db_management.schemas.deployment import TenantUpdate
 
 router = APIRouter(prefix='/admin', tags=['tenant-deployment-mgmt'])
 

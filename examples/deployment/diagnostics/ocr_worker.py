@@ -3,13 +3,22 @@ from __future__ import annotations
 
 import argparse
 import base64
-from concurrent.futures import ThreadPoolExecutor
 import json
-from pathlib import Path
 import subprocess
 import threading
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+from examples.shared.runtime.modules import ModuleReference
+
+_torch = ModuleReference('torch')
+_glmocr = ModuleReference('glmocr')
+_paddlex = ModuleReference('paddlex')
+_paddlex_inference_models_runners_paddle_static_config_pp_option = ModuleReference(
+    'paddlex.inference.models.runners.paddle_static.config.pp_option',
+)
 
 
 class GPU:
@@ -21,12 +30,17 @@ class GPU:
     def sample(self):
         while not self.stop.is_set():
             try:
-                output = subprocess.check_output([
-                    'nvidia-smi', '--query-gpu=memory.used,memory.free,utilization.gpu',
-                    '--format=csv,noheader,nounits'], text=True, timeout=5)
+                output = subprocess.check_output(
+                    [
+                        'nvidia-smi', '--query-gpu=memory.used,memory.free,utilization.gpu',
+                        '--format=csv,noheader,nounits',
+                    ], text=True, timeout=5,
+                )
                 used, free, gpu = map(int, output.strip().split(','))
-                self.samples.append({'time': time.monotonic(), 'used_MiB': used,
-                                     'free_MiB': free, 'utilization': gpu})
+                self.samples.append({
+                    'time': time.monotonic(), 'used_MiB': used,
+                    'free_MiB': free, 'utilization': gpu,
+                })
             except Exception:
                 pass
             self.stop.wait(.5)
@@ -41,27 +55,33 @@ class GPU:
 
 
 def production(image):
-    data = {'file': base64.b64encode(image.read_bytes()).decode(), 'fileType': 1,
-            'useLayoutDetection': True, 'restructurePages': False,
-            'visualize': False, 'maxNewTokens': 4096}
-    req = urllib.request.Request('http://127.0.0.1:8113/layout-parsing',
-                                 data=json.dumps(data).encode(),
-                                 headers={'Content-Type': 'application/json'})
+    data = {
+        'file': base64.b64encode(image.read_bytes()).decode(), 'fileType': 1,
+        'useLayoutDetection': True, 'restructurePages': False,
+        'visualize': False, 'maxNewTokens': 4096,
+    }
+    req = urllib.request.Request(
+        'http://127.0.0.1:8113/layout-parsing',
+        data=json.dumps(data).encode(),
+        headers={'Content-Type': 'application/json'},
+    )
     with urllib.request.urlopen(req, timeout=180) as response:
         result = json.load(response)
     if result.get('errorCode') != 0:
         raise RuntimeError(str(result.get('errorMsg')))
     entries = result['result']['layoutParsingResults']
-    text = '\n'.join(block.get('block_content', '') for entry in entries
-                     for block in entry['prunedResult'].get('parsing_res_list', []))
+    text = '\n'.join(
+        block.get('block_content', '') for entry in entries
+        for block in entry['prunedResult'].get('parsing_res_list', [])
+    )
     markdown = '\n'.join(entry.get('markdown', {}).get('text', '') for entry in entries)
     return text, markdown, result
 
 
 def pipeline_backend(backend, root):
     if backend == 'glm':
-        import torch
-        from glmocr import GlmOcr
+        torch = _torch.load()
+        GlmOcr = _glmocr.attribute('GlmOcr')
         torch.set_num_threads(4)
         pipeline = GlmOcr(config_path=str(root / 'glm.yaml'), layout_device='cpu', mode='selfhosted')
         assert not pipeline.config_model.pipeline.maas.enabled
@@ -80,11 +100,13 @@ def pipeline_backend(backend, root):
 
         return infer
 
-    from paddlex import create_pipeline
+    create_pipeline = _paddlex.attribute('create_pipeline')
     if backend.startswith('paddle'):
         pipeline = create_pipeline(str(root / (backend + '.yaml')), device='gpu:0')
     else:
-        from paddlex.inference.models.runners.paddle_static.config.pp_option import PaddlePredictorOption
+        PaddlePredictorOption = _paddlex_inference_models_runners_paddle_static_config_pp_option.attribute(
+            'PaddlePredictorOption',
+        )
         # Paddle 3.3's oneDNN PIR path fails on PP-OCRv6 on this host.
         option = PaddlePredictorOption(run_mode='paddle', cpu_threads=4)
         pipeline = create_pipeline('OCR', device='cpu' if backend == 'ppocr-cpu' else 'gpu:0', pp_option=option)
@@ -93,11 +115,19 @@ def pipeline_backend(backend, root):
     def infer(image):
         with lock:
             if backend.startswith('paddle'):
-                predictions = list(pipeline.predict(str(image), use_doc_orientation_classify=False,
-                                                    use_doc_unwarping=False, max_new_tokens=4096))
+                predictions = list(
+                    pipeline.predict(
+                        str(image), use_doc_orientation_classify=False,
+                        use_doc_unwarping=False, max_new_tokens=4096,
+                    ),
+                )
             else:
-                predictions = list(pipeline.predict(str(image), use_doc_orientation_classify=False,
-                                                    use_doc_unwarping=False, use_textline_orientation=False))
+                predictions = list(
+                    pipeline.predict(
+                        str(image), use_doc_orientation_classify=False,
+                        use_doc_unwarping=False, use_textline_orientation=False,
+                    ),
+                )
         raw = [p.json['res'] for p in predictions]
         if backend.startswith('paddle'):
             text = '\n'.join(b.get('block_content', '') for p in raw for b in p.get('parsing_res_list', []))
@@ -134,9 +164,11 @@ def run(args):
                     raise TimeoutError('Benchmark start signal did not arrive')
                 time.sleep(.05)
         results = []
-        report = {'backend': args.backend, 'label': args.label,
-                  'startup_seconds': round(startup, 3), 'warmup_seconds': round(warmup, 3),
-                  'concurrency': args.concurrency, 'results': results}
+        report = {
+            'backend': args.backend, 'label': args.label,
+            'startup_seconds': round(startup, 3), 'warmup_seconds': round(warmup, 3),
+            'concurrency': args.concurrency, 'results': results,
+        }
 
         def one(case, repeat):
             started = time.monotonic()
@@ -147,7 +179,8 @@ def run(args):
                     raise RuntimeError('OCR returned no text')
                 result.update(success=True, text=text, markdown=markdown)
                 (output / f'{case["id"]}-{repeat}.raw.json').write_text(
-                    json.dumps(raw, ensure_ascii=False, default=str))
+                    json.dumps(raw, ensure_ascii=False, default=str),
+                )
             except Exception as error:
                 result.update(success=False, error=repr(error)[:1500], text='', markdown='')
             result['seconds'] = round(time.monotonic() - started, 4)
@@ -164,8 +197,12 @@ def run(args):
                     result = future.result()
                     results.append(result)
                     (output / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2))
-                    print(json.dumps({k: result.get(k) for k in ('case', 'repeat', 'success', 'seconds', 'error')},
-                                     ensure_ascii=False), flush=True)
+                    print(
+                        json.dumps(
+                            {k: result.get(k) for k in ('case', 'repeat', 'success', 'seconds', 'error')},
+                            ensure_ascii=False,
+                        ), flush=True,
+                    )
             report.setdefault('round_seconds', []).append(round(time.monotonic() - begin, 4))
             (output / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2))
         report['gpu_peak_MiB'] = max((s['used_MiB'] for s in gpu.samples), default=None)
@@ -176,7 +213,12 @@ def run(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--backend', choices=['production', 'paddle15', 'paddle16', 'glm', 'ppocr-cpu', 'ppocr-gpu'], required=True)
+    parser.add_argument(
+        '--backend', choices=[
+            'production', 'paddle15',
+            'paddle16', 'glm', 'ppocr-cpu', 'ppocr-gpu',
+        ], required=True,
+    )
     parser.add_argument('--label', required=True)
     parser.add_argument('--root', type=Path, default=Path('/home/changdar/opt/ocr-comparison-20261014'))
     parser.add_argument('--repeat', type=int, default=2)

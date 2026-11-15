@@ -27,6 +27,10 @@ from company_agent.services.eip.processing import BilledPipeAdapter
 from company_agent.tests.test_agent import Fixture
 from company_agent.tests.test_user_billing import response
 from company_agent.tests.test_user_billing import verified
+from examples.official_document_workflow.domain.calendar.contracts import (
+    GROUP_ANALYSIS_SCHEMA,
+)
+
 """Fixed role models and agent-selected auxiliary analysis profiles."""
 
 
@@ -132,7 +136,6 @@ class DynamicModelTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertEqual({r['user'] for r in requests}, {'oidc-alice'})
 
     async def test_eip_native_schema_and_output_budget_reach_billed_gateway(self):
-        from examples.official_document_workflow.domain.calendar.contracts import GROUP_ANALYSIS_SCHEMA
         requests = []
         base = self.model(lambda request: (requests.append(json.loads(request.content)), response(content='{}'))[1])
         ctx = Context('alice', self.job, self.config, self.store, routed_model(base, self.config))

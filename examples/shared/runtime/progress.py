@@ -1,5 +1,4 @@
 """User-facing progress never exposes raw model/tool payloads."""
-
 from __future__ import annotations
 
 ROLES = {

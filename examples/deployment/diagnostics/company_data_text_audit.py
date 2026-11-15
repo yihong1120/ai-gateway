@@ -9,7 +9,6 @@ import re
 import unicodedata
 from pathlib import Path
 
-
 from company_agent.services.office.documents import extract
 
 
@@ -29,8 +28,10 @@ def check_text(text, statistics):
             continue
         value = float(match[2].replace(',', ''))
         expected = statistics[METRICS[match[1]]]
-        item = {'label': match[1], 'actual': value, 'expected': expected,
-                'matches': math.isclose(value, expected, rel_tol=1e-10, abs_tol=1e-8)}
+        item = {
+            'label': match[1], 'actual': value, 'expected': expected,
+            'matches': math.isclose(value, expected, rel_tol=1e-10, abs_tol=1e-8),
+        }
         observed.append(item)
         if not item['matches']:
             review.append({**item, 'context': text[max(0, match.start() - 60):match.end() + 80]})
@@ -59,16 +60,20 @@ def main():
             data = path.read_bytes()
             assert hashlib.sha256(data).hexdigest() == sha
             text = '\n'.join(block['text'] for block in extract(data, path.suffix))
-            results.append({'case': row['case'], 'arm': row['arm'], 'repeat': row['repeat'],
-                            'file': name, 'primary_passed': row['passed'], 'artifact_sha256': sha,
-                            **check_text(text, expected)})
+            results.append({
+                'case': row['case'], 'arm': row['arm'], 'repeat': row['repeat'],
+                'file': name, 'primary_passed': row['passed'], 'artifact_sha256': sha,
+                **check_text(text, expected),
+            })
             assert path.read_bytes() == data
-    value = {'version': 'company-data-text-audit-v1',
-             'scope': 'labelled sum/count scalar checks; flags require semantic review; primary scores unchanged',
-             'self_test': 'correct decimal representation accepted; decimal-extension errors detected',
-             'script_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-             'files_inspected': len(results), 'runs': results,
-             'candidate_mismatch_count': sum(len(item['needs_semantic_review']) for item in results)}
+    value = {
+        'version': 'company-data-text-audit-v1',
+        'scope': 'labelled sum/count scalar checks; flags require semantic review; primary scores unchanged',
+        'self_test': 'correct decimal representation accepted; decimal-extension errors detected',
+        'script_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        'files_inspected': len(results), 'runs': results,
+        'candidate_mismatch_count': sum(len(item['needs_semantic_review']) for item in results),
+    }
     args.output.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
     print(json.dumps({key: value[key] for key in ('files_inspected', 'candidate_mismatch_count', 'self_test')}))
 

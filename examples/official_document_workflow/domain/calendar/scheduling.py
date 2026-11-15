@@ -15,9 +15,11 @@ EIP_REVIEW_NOTICE = '匯入後請至 EIP 行事曆核對並修改實際起訖時
 
 def apply_tentative_schedule(row, suggestion):
     """Fill missing clocks/end date only; a missing source date stays pending."""
-    if not suggestion or all(row.get(k) for k in (
-        'Start Time(24hr)', 'End Date', 'End Time(24hr)',
-    )):
+    if not suggestion or all(
+        row.get(k) for k in (
+            'Start Time(24hr)', 'End Date', 'End Time(24hr)',
+        )
+    ):
         return row
     proposed = TypeAdapter(TentativeSchedule).validate_python(suggestion)
     start_day = datetime.strptime(row['Start Date'], '%Y/%m/%d')
@@ -33,9 +35,11 @@ def apply_tentative_schedule(row, suggestion):
     reason = proposed['reason'].strip()
     if not reason:
         raise ValueError('AI 暫排缺少估算理由。')
-    missing = [label for field, label in (
-        ('Start Time(24hr)', '開始時間'), ('End Date', '結束日期'), ('End Time(24hr)', '結束時間'),
-    ) if not row[field]]
+    missing = [
+        label for field, label in (
+            ('Start Time(24hr)', '開始時間'), ('End Date', '結束日期'), ('End Time(24hr)', '結束時間'),
+        ) if not row[field]
+    ]
     return {
         **row,
         'Start Time': start.strftime('%H:%M:00'),

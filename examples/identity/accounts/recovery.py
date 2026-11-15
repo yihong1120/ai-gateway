@@ -1,19 +1,27 @@
 """PostgreSQL owns both one-time actions and the account mutations they permit."""
-
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
 import secrets
+from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
 
 from fastapi import HTTPException
-from sqlalchemy import select, update
+from sqlalchemy import select
+from sqlalchemy import update
 from sqlalchemy.orm import selectinload
-from examples.identity.models import AccountActionToken, User, UserProfile
-from examples.identity.accounts.passwords import hash_password_async
+
 from examples.identity.accounts.password_policy import validate_password_minimum
+from examples.identity.accounts.passwords import hash_password_async
+from examples.identity.models import AccountActionToken
+from examples.identity.models import User
+from examples.identity.models import UserProfile
+from examples.shared.runtime.modules import ModuleReference
+
+_identity_login_guard = ModuleReference('examples.identity.sessions.login_guard')
 
 RESET_SENT = 'If the email exists, a reset link has been sent.'
 VERIFICATION_SENT = (
@@ -43,7 +51,7 @@ class AccountRecovery:
             select(User)
             .options(selectinload(User.profile))
             .join(UserProfile)
-            .where(UserProfile.email == email.strip().lower())
+            .where(UserProfile.email == email.strip().lower()),
         )
 
     async def issue(self, db, user, purpose, email):
@@ -52,17 +60,17 @@ class AccountRecovery:
             select(User)
             .where(User.id == user.id)
             .with_for_update(of=User)
-            .execution_options(populate_existing=True)
+            .execution_options(populate_existing=True),
         )
         profile = await db.scalar(
             select(UserProfile)
             .where(UserProfile.user_id == user.id)
             .with_for_update(of=UserProfile)
-            .execution_options(populate_existing=True)
+            .execution_options(populate_existing=True),
         )
         if profile is None or profile.email != email:
             raise HTTPException(
-                status_code=409, detail='Account email changed; request a new link.'
+                status_code=409, detail='Account email changed; request a new link.',
             )
         instant = now()
         await db.execute(
@@ -72,7 +80,7 @@ class AccountRecovery:
                 AccountActionToken.purpose == purpose,
                 AccountActionToken.consumed_at.is_(None),
             )
-            .values(consumed_at=instant)
+            .values(consumed_at=instant),
         )
         raw = secrets.token_urlsafe(48)
         ttl = (
@@ -88,7 +96,7 @@ class AccountRecovery:
                 email=email,
                 expires_at=instant + timedelta(seconds=ttl),
                 delivery='prepared',
-            )
+            ),
         )
         await db.commit()
         return raw
@@ -110,17 +118,17 @@ class AccountRecovery:
             await db.execute(
                 update(AccountActionToken)
                 .where(AccountActionToken.token_hash == token_hash(raw))
-                .values(**values)
+                .values(**values),
             )
             await db.commit()
         except Exception:
             await db.rollback()
             logging.getLogger(__name__).warning(
-                'Account email result could not be persisted'
+                'Account email result could not be persisted',
             )
         if result.state == 'rejected':
             raise HTTPException(
-                status_code=502, detail='Account email was rejected by the provider.'
+                status_code=502, detail='Account email was rejected by the provider.',
             )
         return result
 
@@ -134,7 +142,7 @@ class AccountRecovery:
                 db,
                 raw,
                 self.mailer.password_reset(
-                    address, f'{self.public_url}/reset_password?token={raw}'
+                    address, f'{self.public_url}/reset_password?token={raw}',
                 ),
             )
         return {'message': RESET_SENT}
@@ -144,14 +152,14 @@ class AccountRecovery:
         email = str(user.profile.email if user.profile else '').strip().lower()
         if not email:
             raise HTTPException(
-                status_code=400, detail='User email is required for verification.'
+                status_code=400, detail='User email is required for verification.',
             )
         raw = await self.issue(db, user, 'verify_email', email)
         result = await self.deliver(
             db,
             raw,
             self.mailer.verification(
-                email, user.username, f'{self.public_url}/verify-email?token={raw}'
+                email, user.username, f'{self.public_url}/verify-email?token={raw}',
             ),
         )
         return {
@@ -201,19 +209,19 @@ class AccountRecovery:
             .options(selectinload(User.profile))
             .where(User.id == candidate.user_id)
             .with_for_update(of=User)
-            .execution_options(populate_existing=True)
+            .execution_options(populate_existing=True),
         )
         profile = await db.scalar(
             select(UserProfile)
             .where(UserProfile.user_id == candidate.user_id)
             .with_for_update(of=UserProfile)
-            .execution_options(populate_existing=True)
+            .execution_options(populate_existing=True),
         )
         record = await db.scalar(
             select(AccountActionToken)
             .where(AccountActionToken.token_hash == digest)
             .with_for_update()
-            .execution_options(populate_existing=True)
+            .execution_options(populate_existing=True),
         )
         if (
             record is None
@@ -225,7 +233,7 @@ class AccountRecovery:
             or profile.email != record.email
         ):
             raise self.invalid(
-                purpose, used=record is not None and record.consumed_at is not None
+                purpose, used=record is not None and record.consumed_at is not None,
             )
         return record, user
 
@@ -294,17 +302,19 @@ class AccountRecovery:
                 )
                 .order_by(AccountActionToken.created_at)
                 .limit(limit)
-                .with_for_update(of=AccountActionToken, skip_locked=True)
+                .with_for_update(of=AccountActionToken, skip_locked=True),
             )
         ).all()
         try:
             for record, username in rows:
                 async with asyncio.timeout(10):
                     await self.sessions.revoke_once(redis, username, record.token_hash)
-                    from examples.identity.sessions.login_guard import clear_login_guard_for_identifiers
+                    clear_login_guard_for_identifiers = _identity_login_guard.attribute(
+                        'clear_login_guard_for_identifiers',
+                    )
 
                     await clear_login_guard_for_identifiers(
-                        redis, [username, record.email]
+                        redis, [username, record.email],
                     )
                 record.revocation_pending = False
             await db.commit()

@@ -6,21 +6,27 @@ import json
 import os
 from datetime import timedelta
 
+import httpx
+
+import company_agent.api.service as _service_imports
+import company_agent.runtime.models as _models_imports
+from company_agent.ops.deploy_webui import ENTRIES
 from examples.shared.config import load_service
+from examples.shared.runtime.modules import ModuleReference
+
+_webui_config = ModuleReference('open_webui.models.config')
+_webui_users = ModuleReference('open_webui.models.users')
+_webui_auth = ModuleReference('open_webui.utils.auth')
 
 
 async def main():
     load_service('webui')
     os.environ['PYTHON_DOTENV_DISABLED'] = '1'
     os.environ['FROM_INIT_PY'] = 'true'
-    from open_webui.models.users import Users
-    from open_webui.models.config import Config
-    from open_webui.utils.auth import create_token
-    from company_agent.api.service import service
-    from company_agent.runtime.models import close_model
-    import httpx
+    Users = _webui_users.attribute('Users')
+    Config = _webui_config.attribute('Config')
+    create_token = _webui_auth.attribute('create_token')
     users = (await Users.get_users(limit=100))['users']
-    from company_agent.ops.deploy_webui import ENTRIES
     banners = await Config.get('ui.banners') or []
     assert set(ENTRIES).issubset({b.get('id') for b in banners})
     checks = []
@@ -45,11 +51,11 @@ async def main():
                     assert response.json()['read_only'] is True
                 if path == '/api/models':
                     assert any(m['id'] == 'company_work_assistant' for m in response.json()['data']), role
-            model = service().model_factory(user.model_dump())
+            model = _service_imports.service().model_factory(user.model_dump())
             try:
                 assert model.subject == user.oauth['oidc']['sub']
             finally:
-                await close_model(model)
+                await _models_imports.close_model(model)
             # Invalid preview/confirm requests raise native ValueError before
             # EIP I/O; the host returns 500, matching the route regression tests.
             # These never stage or commit requests.

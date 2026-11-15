@@ -1,14 +1,31 @@
 """Application-owned workflow resources, bound to requests and child tasks."""
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-import os
 from pathlib import Path
 from threading import RLock
 
+import examples.official_document_workflow.infrastructure.storage.database as _database_imports
+import examples.official_document_workflow.services.version as _version_imports
+from .infrastructure.storage.analysis_results import AnalysisResults
+from .infrastructure.storage.output_receipts import PostgresOutputReceipts
+from .infrastructure.storage.shared_content import SharedContentCache
+from .services.file_access import FileAccess
+from .services.output_repair import OutputRepair
+from examples.shared.runtime.modules import ModuleReference
 from examples.shared.runtime.workers import WorkerHealth
+
+_workflow_automation = ModuleReference('examples.official_document_workflow.application.automation')
+_workflow_netask = ModuleReference('examples.official_document_workflow.infrastructure.eip.netask')
+_workflow_automation_store = ModuleReference(
+    'examples.official_document_workflow.infrastructure.storage.automation_store',
+)
+_workflow_state = ModuleReference('examples.official_document_workflow.infrastructure.storage.state')
+_webui_files = ModuleReference('open_webui.models.files')
+_webui_provider = ModuleReference('open_webui.storage.provider')
 
 _current = ContextVar('document_workflow_resources', default=None)
 
@@ -29,8 +46,7 @@ class WorkflowSettings:
 
     @classmethod
     def from_environment(cls):
-        from .infrastructure.storage.database import configuration
-        from .infrastructure.storage.automation_store import key_file
+        key_file = _workflow_automation_store.attribute('key_file')
         enabled = os.getenv('EIP_SHARED_CONTENT_CACHE_ENABLED', 'true').strip().lower()
         if enabled not in {'true', '1', 'yes', 'on', 'false', '0', 'no', 'off'}:
             raise ValueError('EIP shared content cache enabled setting must be boolean.')
@@ -38,12 +54,12 @@ class WorkflowSettings:
             ttl = int(os.getenv('EIP_SHARED_CONTENT_CACHE_TTL_SECONDS', '604800'))
         except ValueError:
             raise ValueError('EIP shared content cache TTL must be 60–2592000 seconds.') from None
-        return cls(*configuration(), key_file(), enabled in {'true', '1', 'yes', 'on'}, ttl)
+        return cls(*_database_imports.configuration(), key_file(), enabled in {'true', '1', 'yes', 'on'}, ttl)
 
 
 class WorkflowResources:
     def __init__(self, settings):
-        from .infrastructure.storage.state import State
+        State = _workflow_state.attribute('State')
         self.settings = settings
         self.state = State()
         self._store, self._journal = None, None
@@ -52,7 +68,7 @@ class WorkflowResources:
 
     @property
     def store(self):
-        from .infrastructure.storage.automation_store import AutomationStore
+        AutomationStore = _workflow_automation_store.attribute('AutomationStore')
         with self._lock:
             if self._store is None:
                 self._store = AutomationStore(self.settings.key, dsn=self.settings.dsn, schema=self.settings.schema)
@@ -60,7 +76,7 @@ class WorkflowResources:
 
     @property
     def journal(self):
-        from .infrastructure.storage.state import Journal
+        Journal = _workflow_state.attribute('Journal')
         with self._lock:
             if self._journal is None:
                 self._journal = Journal(dsn=self.settings.dsn, schema=self.settings.schema)
@@ -70,13 +86,11 @@ class WorkflowResources:
     def shared_content(self):
         if not self.settings.shared_content_cache_enabled:
             return None
-        from .infrastructure.storage.shared_content import SharedContentCache
-        from .infrastructure.eip.netask import ORIGIN
-        from .services.version import implementation_revision
+        ORIGIN = _workflow_netask.attribute('ORIGIN')
         with self._lock:
             if not hasattr(self, '_shared_content'):
                 self._shared_content = SharedContentCache(
-                    lambda: self.store, f'{ORIGIN}:{self.settings.schema}', implementation_revision(),
+                    lambda: self.store, f'{ORIGIN}:{self.settings.schema}', _version_imports.implementation_revision(),
                     self.settings.shared_content_cache_ttl_seconds,
                 )
             return self._shared_content
@@ -90,8 +104,7 @@ class WorkflowResources:
 
     @property
     def analysis_results(self):
-        from .infrastructure.storage.analysis_results import AnalysisResults
-        from .infrastructure.eip.netask import ORIGIN
+        ORIGIN = _workflow_netask.attribute('ORIGIN')
         with self._lock:
             if not hasattr(self, '_analysis_results'):
                 self._analysis_results = AnalysisResults(lambda: self.store, f'{ORIGIN}:{self.settings.schema}')
@@ -99,26 +112,23 @@ class WorkflowResources:
 
     @property
     def outputs(self):
-        from .infrastructure.storage.output_receipts import PostgresOutputReceipts
         with self._lock:
-            if not hasattr(self,'_outputs'):
+            if not hasattr(self, '_outputs'):
                 self._outputs = PostgresOutputReceipts(lambda: self.store)
             return self._outputs
 
     def output_repair(self, publish=None):
-        from .services.file_access import FileAccess
-        from .services.output_repair import OutputRepair
-        from open_webui.models.files import Files
-        from open_webui.storage.provider import Storage
-        if not hasattr(self,'_repair'):
-            self._repair = OutputRepair(self.outputs,FileAccess(Files,Storage),publish)
+        Files = _webui_files.attribute('Files')
+        Storage = _webui_provider.attribute('Storage')
+        if not hasattr(self, '_repair'):
+            self._repair = OutputRepair(self.outputs, FileAccess(Files, Storage), publish)
         return self._repair
 
     @property
     def scheduler(self):
-        from .application.automation import AutomaticScheduler
-        if not hasattr(self,'_scheduler'):
-            self._scheduler = AutomaticScheduler(self.store,self.journal,self.state,self.health['scheduler'])
+        AutomaticScheduler = _workflow_automation.attribute('AutomaticScheduler')
+        if not hasattr(self, '_scheduler'):
+            self._scheduler = AutomaticScheduler(self.store, self.journal, self.state, self.health['scheduler'])
         return self._scheduler
 
     def initialize(self):

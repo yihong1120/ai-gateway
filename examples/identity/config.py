@@ -1,24 +1,27 @@
 """Application settings facade with one validated instance of each domain."""
-
 from __future__ import annotations
+
 from typing import ClassVar
-from pydantic import Field, model_validator
+
+from pydantic import Field
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
-from .settings.tokens import TokensSettings
-from .settings.oidc import OidcSettings
-from .settings.native import NativeSettings
-from .settings.migration import MigrationSettings
-from .settings.keycloak import KeycloakSettings
-from .settings.captcha import CaptchaSettings
-from .settings.sessions import SessionsSettings
-from .settings.mail import MailSettings
-from .settings.web import WebSettings
-from .settings.login import LoginSettings
-from .settings.social import SocialSettings
-from .settings.deployment import DeploymentSettings
-from .settings.database import DatabaseSettings
-from .settings.resources import ResourcesSettings
+
 from .settings.bff import BffSettings
+from .settings.captcha import CaptchaSettings
+from .settings.database import DatabaseSettings
+from .settings.deployment import DeploymentSettings
+from .settings.keycloak import KeycloakSettings
+from .settings.login import LoginSettings
+from .settings.mail import MailSettings
+from .settings.migration import MigrationSettings
+from .settings.native import NativeSettings
+from .settings.oidc import OidcSettings
+from .settings.resources import ResourcesSettings
+from .settings.sessions import SessionsSettings
+from .settings.social import SocialSettings
+from .settings.tokens import TokensSettings
+from .settings.web import WebSettings
 
 
 class Settings(BaseSettings):
@@ -196,21 +199,21 @@ class Settings(BaseSettings):
         if self.native.exchange_enabled:
             if not self.oidc.enabled:
                 raise RuntimeError(
-                    'OIDC_ENABLED is required for native social exchange'
+                    'OIDC_ENABLED is required for native social exchange',
                 )
             if not self.keycloak.user_linker_client_secret or not self.keycloak.realm:
                 raise RuntimeError(
-                    'Native social exchange requires KEYCLOAK_USER_LINKER_CLIENT_SECRET and KEYCLOAK_REALM'
+                    'Native social exchange requires KEYCLOAK_USER_LINKER_CLIENT_SECRET and KEYCLOAK_REALM',
                 )
             _ = self.resolved_keycloak_admin_base_url
         if self.migration.enabled:
             if not self.oidc.passwords_managed_externally:
                 raise RuntimeError(
-                    'OIDC_PASSWORDS_MANAGED_EXTERNALLY is required for legacy password migration'
+                    'OIDC_PASSWORDS_MANAGED_EXTERNALLY is required for legacy password migration',
                 )
             if len(self.native.exchange_shared_secret) < 32:
                 raise RuntimeError(
-                    'NATIVE_SOCIAL_EXCHANGE_SHARED_SECRET must be at least 32 characters when legacy password migration is enabled'
+                    'NATIVE_SOCIAL_EXCHANGE_SHARED_SECRET must be at least 32 characters when legacy password migration is enabled',
                 )
         return self
 

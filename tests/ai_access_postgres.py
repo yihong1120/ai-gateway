@@ -1,4 +1,6 @@
 """Disposable PostgreSQL schemas for access-registry tests."""
+from __future__ import annotations
+
 import os
 import unittest
 import uuid

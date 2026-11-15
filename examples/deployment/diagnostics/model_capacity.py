@@ -16,7 +16,11 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from examples.shared.config import config_path, read_service
+import jwt
+import psycopg
+
+from examples.shared.config import config_path
+from examples.shared.config import read_service
 
 
 def percentile(values, fraction):
@@ -37,8 +41,6 @@ def run(workload, root):
     base = config['OPENAI_API_BASE_URLS'].split(';')[0]
     scope = 'Independent synthetic user IDs through LiteLLM; not distinct browser sessions.'
     if target == 'webui':
-        import jwt
-        import psycopg
         with psycopg.connect(config['DATABASE_URL']) as conn, conn.cursor() as cursor:
             cursor.execute('SELECT id FROM "user" WHERE role=%s ORDER BY created_at LIMIT 1', ('admin',))
             user_id = cursor.fetchone()[0]
@@ -70,9 +72,11 @@ def run(workload, root):
             base + '/chat/completions', data=json.dumps(body).encode(),
             headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'},
         )
-        result = {'index': index, 'label': item['label'],
-                  'input_tokens_tokenizer': item['input_tokens_tokenizer'],
-                  'max_tokens': item['max_tokens']}
+        result = {
+            'index': index, 'label': item['label'],
+            'input_tokens_tokenizer': item['input_tokens_tokenizer'],
+            'max_tokens': item['max_tokens'],
+        }
         barrier.wait()
         time.sleep(item.get('delay_seconds', 0))
         started = time.monotonic()

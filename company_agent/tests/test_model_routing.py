@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from company_agent.config import ModelRoute
 from company_agent.config import Settings
+from company_agent.runtime.context import Context
 from company_agent.runtime.execution import DocumentAgent
 from company_agent.runtime.gemini import gemini_schema
 from company_agent.runtime.gemini import provider_tools
@@ -28,6 +29,7 @@ from company_agent.runtime.models import model_policy
 from company_agent.runtime.models import routed_model
 from company_agent.runtime.models import select_model
 from company_agent.runtime.models import WebBilledModel
+from company_agent.services.eip.processing import BilledPipeAdapter
 from company_agent.services.files.tools import file_tools
 from company_agent.tests.test_agent import Fixture
 from company_agent.tests.test_user_billing import response
@@ -210,8 +212,6 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
 
 class RoutingGraphTests(unittest.IsolatedAsyncioTestCase, Fixture):
     async def test_attachment_adapter_selects_parse_and_plan_routes_and_counts_both(self):
-        from company_agent.runtime.context import Context
-        from company_agent.services.eip.processing import BilledPipeAdapter
 
         requests = []
 

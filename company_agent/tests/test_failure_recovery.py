@@ -194,8 +194,15 @@ class FailureRecoveryTests(unittest.IsolatedAsyncioTestCase, Fixture):
         ]:
             with self.subTest(root=root):
                 model = RawRoleModel(
-                    coordinator=[call('delegate_reviewer', {'task': '讀取草稿'}, 'r'), finish(outcome='blocked', summary='必要來源未提供。')],
-                    reviewer=[call('read_file', {'root': root, 'path': path}, 'read'), finish('complete_assignment', outcome='blocked', summary='必要來源未提供。')],
+                    coordinator=[
+                        call('delegate_reviewer', {'task': '讀取草稿'}, 'r'),
+                        finish(outcome='blocked', summary='必要來源未提供。'),
+                    ],
+                    reviewer=[
+                        call('read_file', {'root': root, 'path': path}, 'read'), finish(
+                            'complete_assignment', outcome='blocked', summary='必要來源未提供。',
+                        ),
+                    ],
                 )
                 operation = DocumentAgent(self.config, model).run('alice', '讀取資料')
                 if error:

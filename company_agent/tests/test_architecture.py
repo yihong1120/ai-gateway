@@ -1,8 +1,11 @@
 """Graph behavior and role boundaries (no services required)."""
 from __future__ import annotations
 
+import subprocess
+import sys
 import unittest
 from importlib.resources import files
+from pathlib import Path
 from unittest.mock import patch
 
 from langgraph.checkpoint.memory import InMemorySaver
@@ -21,6 +24,15 @@ from company_agent.state import State
 
 
 class ArchitectureTests(unittest.TestCase):
+    def test_importing_model_definitions_does_not_initialize_application_limits(self):
+        root = Path(__file__).resolve().parents[2]
+        code = (
+            'import sys; sys.path.insert(0, ' + repr(str(root)) + '); '
+            'import company_agent.runtime.models; '
+            'assert "examples.shared.runtime.concurrency" not in sys.modules'
+        )
+        subprocess.run([sys.executable, '-I', '-c', code], cwd='/tmp', check=True, capture_output=True)
+
     def test_runtime_and_graph_have_one_canonical_implementation(self):
         self.assertEqual(DocumentAgent.__module__, 'company_agent.runtime.execution')
         self.assertEqual(build_graph.__module__, 'company_agent.graph')
@@ -62,7 +74,11 @@ class ArchitectureTests(unittest.TestCase):
             self.assertEqual(agent.name, role)
             self.assertIn('tools', agent.get_graph().nodes)
         self.assertEqual({tool.name for tool in delegation_tools(specialists)}, expected)
-        self.assertEqual(ROLE_TOOLS['coordinator'], expected | {'plan_delivery', 'supersede_artifact', 'validate_delivery'})
+        self.assertEqual(
+            ROLE_TOOLS['coordinator'], expected | {
+                'plan_delivery', 'supersede_artifact', 'validate_delivery',
+            },
+        )
 
     def test_unregistered_tool_in_role_definition_fails_at_graph_construction(self):
         with patch('company_agent.graph.ROLE_TOOLS', {'document': {'misspelled_tool'}}):

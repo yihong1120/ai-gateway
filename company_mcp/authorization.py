@@ -1,7 +1,8 @@
 """Owner/client policy with injected identity and source-account lookups."""
-from examples.shared.runtime.io import run_sync
+from __future__ import annotations
 
 from .storage import ResourceError
+from examples.shared.runtime.io import run_sync
 
 
 class AccessPolicy:
@@ -21,7 +22,9 @@ class AccessPolicy:
             if not account or not generation or account['generation'] != generation:
                 raise ResourceError('binding_changed', 'EIP 尚未保存憑證或綁定已變更，請確認後建立新工作。')
         user = await self.identity(person.owner)
-        if (user.get('id') != person.owner or user.get('role') not in {'user', 'admin'}
-                or (user.get('oauth') or {}).get('oidc', {}).get('sub') != person.subject):
+        if (
+            user.get('id') != person.owner or user.get('role') not in {'user', 'admin'}
+            or (user.get('oauth') or {}).get('oidc', {}).get('sub') != person.subject
+        ):
             raise ResourceError('authentication_required', '本人公司身分已變更，未繼續操作。')
         return snapshot

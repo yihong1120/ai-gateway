@@ -1,28 +1,39 @@
 """Security and lifecycle regressions without production services or credentials."""
-
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
 import json
-from pathlib import Path
 import tempfile
 import types
 import unittest
+from dataclasses import replace
+from pathlib import Path
 from unittest.mock import patch
 
-from fastapi import FastAPI, Request, HTTPException
 import httpx
+from fastapi import FastAPI
+from fastapi import HTTPException
+from fastapi import Request
 
-from examples.company_ai_access.schemas import Principal
+import examples.company_ai_access.adapters.webui as _webui_imports
+import examples.company_ai_access.app as _app_imports
+import examples.company_ai_access.cli.export_contract as _export_contract_imports
+import examples.company_ai_access.routers.dependencies as _dependencies_imports
+import examples.company_ai_access.runtime as _runtime_imports
+from examples.company_ai_access.adapters.bridge import BridgeClient
+from examples.company_ai_access.adapters.bridge import BridgeSettings
+from examples.company_ai_access.adapters.upstream import Directory
+from examples.company_ai_access.adapters.upstream import LiteLLM
+from examples.company_ai_access.config import Settings
 from examples.company_ai_access.routers.control import create_router
 from examples.company_ai_access.routers.inference import inference_router
+from examples.company_ai_access.schemas import Principal
+from examples.company_ai_access.services.devices import challenge
+from examples.company_ai_access.services.devices import Service
 from examples.company_ai_access.services.inference import InferenceProxy
+from examples.company_ai_access.storage.registry import digest
+from examples.company_ai_access.storage.registry import Store
 from examples.company_ai_access.storage.repository import Repository
-from examples.company_ai_access.config import Settings
-from examples.company_ai_access.services.devices import Service, challenge
-from examples.company_ai_access.storage.registry import Store, digest
-from examples.company_ai_access.adapters.upstream import Directory, LiteLLM
 from tests.ai_access_postgres import access_database
 
 
@@ -179,10 +190,10 @@ class Lifecycle(Fixture):
 
     async def test_secrets_encrypted_and_not_in_device_list_or_audit(self):
         ready = await self.enroll()
-        listing = json.dumps((await self.service.devices('alice')))
+        listing = json.dumps(await self.service.devices('alice'))
         self.assertNotIn(ready['key'], listing)
         self.assertNotIn('key_box', listing)
-        self.assertNotIn(ready['key'], json.dumps((await self.store.list('device'))))
+        self.assertNotIn(ready['key'], json.dumps(await self.store.list('device')))
         async with self.store.db() as db:
             self.assertNotIn(
                 ready['key'],
@@ -579,7 +590,7 @@ class API(Fixture):
                     'error': {
                         'type': 'budget_exceeded',
                         'message': 'sensitive-provider-message',
-                    }
+                    },
                 },
             )
 
@@ -713,7 +724,6 @@ class Upstreams(unittest.IsolatedAsyncioTestCase):
 
 class WebUIBridge(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        from examples.company_ai_access.adapters.webui import install_webui
 
         self.forwarded = []
 
@@ -729,7 +739,7 @@ class WebUIBridge(unittest.IsolatedAsyncioTestCase):
         module.get_optional_verified_user_from_request = verified
         self.app = FastAPI()
         with patch.dict('sys.modules', {'open_webui.utils.auth': module}):
-            install_webui(self.app)
+            _webui_imports.install_webui(self.app)
 
         def upstream(request):
             if request.url.path == '/company-ai/network-access':
@@ -739,7 +749,6 @@ class WebUIBridge(unittest.IsolatedAsyncioTestCase):
 
         self.upstream = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
         self.addAsyncCleanup(self.upstream.aclose)
-        from examples.company_ai_access.adapters.bridge import BridgeClient, BridgeSettings
         self.app.state.company_ai_bridge = BridgeClient(
             BridgeSettings('http://127.0.0.1:18083', 'private-bridge-key-for-tests-only-1234'), self.upstream,
         )
@@ -842,7 +851,6 @@ class WebUIBridge(unittest.IsolatedAsyncioTestCase):
 
 class RequestPolicySnapshot(unittest.TestCase):
     def test_proxy_proof_and_network_policy_do_not_follow_environment_changes(self):
-        from examples.company_ai_access.routers.dependencies import client_ip, require_inference_network
 
         settings = Settings(
             origin='https://example.com', state_dir=Path('/tmp/unused-policy-test'),
@@ -858,19 +866,27 @@ class RequestPolicySnapshot(unittest.TestCase):
                 'type': 'http', 'app': app, 'method': 'GET', 'scheme': 'https',
                 'path': '/api/company-ai/devices', 'query_string': b'',
                 'client': ('127.0.0.1', 1), 'server': ('example.com', 443),
-                'headers': [(b'x-company-ai-network-proxy', proof.encode()),
-                            (b'x-company-ai-client-ip', address.encode())],
+                'headers': [
+                    (b'x-company-ai-network-proxy', proof.encode()),
+                    (b'x-company-ai-client-ip', address.encode()),
+                ],
             })
 
-        with patch.dict('os.environ', {'AI_ACCESS_NETWORK_PROXY_KEY': 'changed-proxy',
-                                     'AI_ACCESS_BRIDGE_KEY': 'changed-bridge'}):
-            self.assertEqual(client_ip(request('original-proxy', '203.0.113.8')), '203.0.113.8')
-            require_inference_network(request('original-proxy', '203.0.113.8'))
-            for proof, address in [('changed-proxy', '203.0.113.8'),
-                                   ('original-proxy', '203.0.113.9'),
-                                   ('original-proxy', '192.0.2.1')]:
+        with patch.dict(
+            'os.environ', {
+                'AI_ACCESS_NETWORK_PROXY_KEY': 'changed-proxy',
+                'AI_ACCESS_BRIDGE_KEY': 'changed-bridge',
+            },
+        ):
+            self.assertEqual(_dependencies_imports.client_ip(request('original-proxy', '203.0.113.8')), '203.0.113.8')
+            _dependencies_imports.require_inference_network(request('original-proxy', '203.0.113.8'))
+            for proof, address in [
+                ('changed-proxy', '203.0.113.8'),
+                ('original-proxy', '203.0.113.9'),
+                ('original-proxy', '192.0.2.1'),
+            ]:
                 with self.subTest(proof=proof, address=address), self.assertRaises(HTTPException) as failure:
-                    require_inference_network(request(proof, address))
+                    _dependencies_imports.require_inference_network(request(proof, address))
                 self.assertEqual(failure.exception.status_code, 403)
         self.assertNotIn('original-bridge', repr(settings))
         self.assertNotIn('original-proxy', repr(settings))
@@ -879,7 +895,6 @@ class RequestPolicySnapshot(unittest.TestCase):
 class WorkerLease(unittest.IsolatedAsyncioTestCase):
     async def test_second_worker_cannot_race_revocation(self):
         access_database(self)
-        from examples.company_ai_access.runtime import runtime
 
         with tempfile.TemporaryDirectory() as folder:
             settings = Settings(
@@ -888,15 +903,14 @@ class WorkerLease(unittest.IsolatedAsyncioTestCase):
                 litellm_url='http://127.0.0.1:4000',
                 master_key='test',
             )
-            async with runtime(FastAPI(), settings):
+            async with _runtime_imports.runtime(FastAPI(), settings):
                 with self.assertRaises(RuntimeError):
-                    async with runtime(FastAPI(), settings):
+                    async with _runtime_imports.runtime(FastAPI(), settings):
                         self.fail('A second process acquired the same registry.')
 
 
 class StandaloneSecurity(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        from examples.company_ai_access.app import create_app
 
         settings = Settings(
             origin='https://example.com',
@@ -911,7 +925,7 @@ class StandaloneSecurity(unittest.IsolatedAsyncioTestCase):
             patch('examples.company_ai_access.app.Settings.from_env', return_value=settings),
             patch.dict('os.environ', {'AI_ACCESS_BRIDGE_KEY': self.bridge_key}),
         ):
-            self.app = create_app()
+            self.app = _app_imports.create_app()
         self.app.state.company_ai_access = types.SimpleNamespace(settings=settings)
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=self.app, client=('203.0.113.1', 3)),
@@ -953,10 +967,9 @@ class StandaloneSecurity(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 413)
 
     async def test_checked_in_flutter_contract_is_current(self):
-        from examples.company_ai_access.cli.export_contract import contract
 
         path = Path(__file__).resolve().parents[1] / 'docs/company-ai-access-openapi.json'
-        self.assertEqual(json.loads(path.read_text()), contract())
+        self.assertEqual(json.loads(path.read_text()), _export_contract_imports.contract())
 
 
 if __name__ == '__main__':

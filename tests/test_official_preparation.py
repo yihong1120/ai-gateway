@@ -2,16 +2,26 @@
 from __future__ import annotations
 
 import copy
+import csv
+import io
 import unittest
+from dataclasses import replace
 from datetime import date
 
+import examples.official_document_workflow.infrastructure.eip.calendar_csv as _calendar_csv_imports
 from .test_eip_group_processing import payload
 from .test_official_document_processor_pipe import PIPE_MODULE as M
 from .test_official_document_processor_pipe import SOURCE
-from examples.official_document_workflow.application.calendar_review import consolidate_events
+from examples.official_document_workflow.application.calendar_review import (
+    consolidate_events,
+)
 from examples.official_document_workflow.application.group_processing import parse_group
-from examples.official_document_workflow.domain.calendar.preparation import preparation_rows
-from examples.official_document_workflow.infrastructure.eip.calendar_csv import parse_csv
+from examples.official_document_workflow.domain.calendar.preparation import (
+    preparation_rows,
+)
+from examples.official_document_workflow.infrastructure.eip.calendar_csv import (
+    parse_csv,
+)
 
 
 def suggestion(days=3, action='彙整評估報告資料並核對附件完整性', start='09:30', end='11:00'):
@@ -74,16 +84,13 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(set(row), set(M.CALENDAR_HEADERS))
         self.assertEqual(self.analysis['rows'], original)
         exported, _ = parse_csv(self.pipe.calendar_csv([*original, row]), csv_format=M.CALENDAR_CSV_FORMAT)
-        from examples.official_document_workflow.infrastructure.eip.calendar_csv import canonical_time
         expected = [{
-            **value, 'Start Time': canonical_time(value, 'Start'),
-            'End Time': canonical_time(value, 'End'),
+            **value, 'Start Time': _calendar_csv_imports.canonical_time(value, 'Start'),
+            'End Time': _calendar_csv_imports.canonical_time(value, 'End'),
         } for value in [*original, row]]
         self.assertEqual(exported, expected)
 
     def test_model_selected_afternoon_time_and_duration_survive_eip_transport(self):
-        import csv
-        import io
         self.analysis['accepted_events'][0]['preparation_reminders'] = [
             suggestion(start='13:15', end='15:45'),
         ]
@@ -161,7 +168,6 @@ class PreparationTests(unittest.TestCase):
 
     def test_before_issue_date_is_not_scheduled(self):
         self.analysis['accepted_events'][0]['preparation_reminders'] = [suggestion(7)]
-        from dataclasses import replace
         issued = replace(self.analysis['document'].issued, gregorian='2026/09/05')
         self.analysis['document'] = replace(self.analysis['document'], issued=issued)
         self.assertEqual(self.render()[0], [])
@@ -201,13 +207,13 @@ class PreparationTests(unittest.TestCase):
 
     def test_shared_project_reminder_is_not_duplicated_across_letters(self):
         # Exact same reviewed event/action in related letters shares a reminder.
-        from dataclasses import replace
         event = self.analysis['accepted_events'][0]
         event['project_name'] = '代辦國道3號古坑交流道平面側車道工程'
         event['evidence_spans']['project_name'] = [{'source_id': 'S1', 'start_line': 6, 'end_line': 6}]
 
         def refresh_rows():
-            _, self.analysis['rows'] = self.pipe.calendar.events(  {'events': [event]},
+            _, self.analysis['rows'] = self.pipe.calendar.events(
+                {'events': [event]},
                 self.sources, self.analysis['document'],
             )
         refresh_rows()
@@ -222,7 +228,8 @@ class PreparationTests(unittest.TestCase):
         event['start_date'] = '2027-01-03'
         self.sources['S1'] = M.CloudSemanticSource(SOURCE.replace('115年9月10日', '116年1月3日'), 'native_pdf_text')
         event['preparation_reminders'] = [suggestion(7)]
-        _, self.analysis['rows'] = self.pipe.calendar.events(  {'events': [event]},
+        _, self.analysis['rows'] = self.pipe.calendar.events(
+            {'events': [event]},
             self.sources, self.analysis['document'],
         )
         rows, notices = self.render(today=date(2026, 12, 20))

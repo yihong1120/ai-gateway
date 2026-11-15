@@ -11,9 +11,9 @@ from __future__ import annotations
 import json
 from typing import TypedDict
 
+from . import calendar_repair
+from . import calendar_verification
 from examples.official_document_workflow.domain.limits import MAX_EIP_ATTACHMENTS
-
-from . import calendar_repair, calendar_verification
 
 
 class UploadedAttachment(TypedDict):

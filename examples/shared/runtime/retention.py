@@ -1,5 +1,4 @@
 """Inspect retention classes and explicitly prune expired, rebuildable document caches."""
-
 from __future__ import annotations
 
 import argparse
@@ -10,7 +9,9 @@ import time
 
 from psycopg import sql
 
-from .database import cache_owner_lock_key, connection, shared_content_lock_namespace
+from .database import cache_owner_lock_key
+from .database import connection
+from .database import shared_content_lock_namespace
 
 POLICY = {
     'jobs': 'user_result',
@@ -64,8 +65,10 @@ class Retention:
                 raise ValueError('Exact counts must name existing tables in this schema.')
             for table, estimated, size in tables:
                 exact = table in requested
-                count = (db.execute(sql.SQL('SELECT count(*) FROM {}').format(sql.Identifier(table))).fetchone()[0]
-                         if exact else max(0, round(estimated)) if estimated >= 0 else None)
+                count = (
+                    db.execute(sql.SQL('SELECT count(*) FROM {}').format(sql.Identifier(table))).fetchone()[0]
+                    if exact else max(0, round(estimated)) if estimated >= 0 else None
+                )
                 result.append({
                     'table': table, 'category': POLICY.get(table, 'protected_unclassified'),
                     'rows': count, 'rows_kind': 'exact' if exact else 'estimate' if count is not None else 'unknown',
@@ -111,11 +114,14 @@ class Retention:
             raise ValueError('Shared content cache batch size must be 1–1000.')
         with connection(self.dsn, self.schema) as db:
             if not apply:
-                count, size = db.execute("""SELECT count(*),COALESCE(sum(octet_length(payload)),0)
+                count, size = db.execute(
+                    """SELECT count(*),COALESCE(sum(octet_length(payload)),0)
                     FROM (SELECT payload FROM shared_content_cache WHERE state IN ('ready','failed') AND expires_at<CURRENT_TIMESTAMP
-                        ORDER BY expires_at,scope,key LIMIT %s) selected""", (limit,)).fetchone()
+                        ORDER BY expires_at,scope,key LIMIT %s) selected""", (limit,),
+                ).fetchone()
                 return {'mode': 'preview', 'rows': count, 'payload_bytes': size}
-            deleted = db.execute("""WITH candidates AS MATERIALIZED (
+            deleted = db.execute(
+                """WITH candidates AS MATERIALIZED (
                     SELECT scope,key FROM shared_content_cache WHERE state IN ('ready','failed') AND expires_at<CURRENT_TIMESTAMP
                     ORDER BY expires_at,scope,key LIMIT %s FOR UPDATE SKIP LOCKED
                 ), available AS MATERIALIZED (
@@ -132,10 +138,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--scope', choices=['documents', 'company'], default='documents')
     parser.add_argument('--cache-older-than-days', type=int)
-    parser.add_argument('--exact-table', action='append', default=[],
-                        help='Explicitly scan this table for an exact count; may be repeated.')
+    parser.add_argument(
+        '--exact-table', action='append', default=[],
+        help='Explicitly scan this table for an exact count; may be repeated.',
+    )
     parser.add_argument('--apply-cache-cleanup', action='store_true')
-    parser.add_argument('--shared-content-cache', action='store_true', help='Preview expired shared pure-content results.')
+    parser.add_argument(
+        '--shared-content-cache', action='store_true',
+        help='Preview expired shared pure-content results.',
+    )
     parser.add_argument('--apply-shared-content-cleanup', action='store_true')
     parser.add_argument('--batch-size', type=int, default=100)
     args = parser.parse_args()
@@ -161,7 +172,7 @@ def main():
     }
     if args.cache_older_than_days is not None:
         result['cache'] = policy.expired_cache(
-            time.time() - args.cache_older_than_days * 86400, limit=args.batch_size, apply=args.apply_cache_cleanup
+            time.time() - args.cache_older_than_days * 86400, limit=args.batch_size, apply=args.apply_cache_cleanup,
         )
     if args.shared_content_cache:
         result['shared_content_cache'] = policy.expired_shared_content(

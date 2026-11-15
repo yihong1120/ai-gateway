@@ -10,10 +10,10 @@ from fastapi import Security
 from redis.asyncio import Redis
 from redis.exceptions import NoScriptError
 
-from examples.identity.sessions.local import LocalSessions
 from examples.identity.redis_counters import FIXED_WINDOW_SCRIPT
 from examples.identity.sessions.jwt import jwt_access
 from examples.identity.sessions.jwt import JwtAuthorizationCredentials
+from examples.identity.sessions.local import LocalSessions
 
 
 class RateLimiterService:
@@ -93,7 +93,8 @@ class RateLimiterService:
             The cached user dictionary, or ``None`` when no entry exists.
         """
         key: str = self._user_key(username)
-        raw_data = await redis_pool.eval("""
+        raw_data = await redis_pool.eval(
+            """
 local raw = redis.call('GET',KEYS[1])
 if not raw then return false end
 local profile = cjson.decode(raw)
@@ -104,15 +105,18 @@ if profile.jti_list or profile.refresh_tokens or profile.refresh_token_hashes or
     return cleaned
 end
 return raw
-""",1,key)
+""", 1, key,
+        )
         if not raw_data:
             return None
         snapshot = json.loads(raw_data)
         if snapshot.get('feature_names') == {}:
             snapshot['feature_names'] = []
-        metadata = await self.sessions.snapshot(redis_pool,username)
-        return {**snapshot,'jti_list':list(metadata),'jti_meta':metadata,
-                'refresh_tokens':[],'refresh_token_hashes':[],'refresh_token_families':{}}
+        metadata = await self.sessions.snapshot(redis_pool, username)
+        return {
+            **snapshot, 'jti_list': list(metadata), 'jti_meta': metadata,
+            'refresh_tokens': [], 'refresh_token_hashes': [], 'refresh_token_families': {},
+        }
 
     async def set_user_data(
         self,
@@ -129,7 +133,7 @@ return raw
         """
         key: str = self._user_key(username)
         # Compact JSON to avoid unnecessary whitespace.
-        await redis_pool.set(key,json.dumps({key:data[key] for key in ('db_user','feature_names')}).encode('utf-8'),ex=2592000)
+        await redis_pool.set(key, json.dumps({key: data[key] for key in ('db_user', 'feature_names')}).encode('utf-8'), ex=2592000)
 
     async def _ensure_rate_limit_script(self, redis_pool: Redis) -> str:
         """Ensure the rate-limit Lua script is loaded and return its SHA.

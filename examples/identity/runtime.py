@@ -1,31 +1,47 @@
 """One immutable configuration and explicit resources for each identity application."""
-
 from __future__ import annotations
 
-from contextlib import contextmanager
-from contextvars import ContextVar
 import base64
 import hashlib
-from cryptography.fernet import Fernet
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 import httpx
+from cryptography.fernet import Fernet
 
-from examples.shared.runtime.http_clients import HttpClientPool, application_http_clients
+from examples.identity.accounts.mail import Mailer
+from examples.identity.providers.keycloak import KeycloakClient
+from examples.identity.providers.native_transactions import NativeTransactions
+from examples.identity.providers.verifiers import ProviderVerifier
+from examples.identity.sessions.local import LocalSessions
+from examples.shared.runtime.http_clients import application_http_clients
+from examples.shared.runtime.http_clients import HttpClientPool
+from examples.shared.runtime.modules import ModuleReference
+
+_identity_recovery = ModuleReference('examples.identity.accounts.recovery')
+_identity_cache = ModuleReference('examples.identity.cache')
+_identity_database = ModuleReference('examples.identity.database')
+_identity_accounts = ModuleReference('examples.identity.providers.accounts')
+_identity_native_exchange = ModuleReference('examples.identity.providers.native_exchange')
+_identity_oidc = ModuleReference('examples.identity.providers.oidc')
+_identity_jwt = ModuleReference('examples.identity.sessions.jwt')
+_identity_tokens = ModuleReference('examples.identity.sessions.tokens')
+_identity_bff = ModuleReference('examples.identity.settings.bff')
 
 _current = ContextVar('identity_application', default=None)
 
 
 class IdentityResources:
     def __init__(self, settings):
-        from examples.identity.database import Database
-        from examples.identity.sessions.jwt import PyJWTBearer
-        from examples.identity.providers.oidc import OidcTokenVerifier
-        from examples.identity.settings.bff import load_bff_options
+        Database = _identity_database.attribute('Database')
+        PyJWTBearer = _identity_jwt.attribute('PyJWTBearer')
+        OidcTokenVerifier = _identity_oidc.attribute('OidcTokenVerifier')
+        load_bff_options = _identity_bff.attribute('load_bff_options')
 
         self.settings = settings
         secret = settings.sessions.encryption_key.strip() or settings.authjwt_secret_key
         self.session_cipher = Fernet(
-            base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest())
+            base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest()),
         )
         self.session_ttl_seconds = settings.sessions.ttl_seconds
         self.media_ttl_seconds = settings.sessions.media_ttl_seconds
@@ -41,7 +57,7 @@ class IdentityResources:
             passwords_managed_externally=settings.oidc_passwords_managed_externally,
         )
         self.jwt_refresh = PyJWTBearer(
-            settings.authjwt_secret_key, settings.ALGORITHM, token_use='refresh'
+            settings.authjwt_secret_key, settings.ALGORITHM, token_use='refresh',
         )
         self.bff = load_bff_options(settings.bff)
         self.http_clients = HttpClientPool(
@@ -63,16 +79,12 @@ class IdentityResources:
                     'follow_redirects': False,
                 },
                 'streaming-playback': {
-                    'timeout': settings.resources.playback_timeout_seconds
+                    'timeout': settings.resources.playback_timeout_seconds,
                 },
-            }
+            },
         )
-
-        from examples.identity.providers.verifiers import ProviderVerifier
-        from examples.identity.providers.accounts import ProviderAccounts
-        from examples.identity.providers.keycloak import KeycloakClient
-        from examples.identity.providers.native_transactions import NativeTransactions
-        from examples.identity.providers.native_exchange import NativeSocialService
+        ProviderAccounts = _identity_accounts.attribute('ProviderAccounts')
+        NativeSocialService = _identity_native_exchange.attribute('NativeSocialService')
 
         self.providers = ProviderVerifier(settings.social, self.http_clients)
         self.provider_accounts = ProviderAccounts(self.providers)
@@ -90,23 +102,20 @@ class IdentityResources:
             NativeTransactions(settings.native),
             self.keycloak,
         )
-
-        from examples.identity.accounts.mail import Mailer
-        from examples.identity.accounts.recovery import AccountRecovery
-        from examples.identity.sessions.local import LocalSessions
-        from examples.identity.sessions.tokens import LocalTokens
-        from examples.identity.cache import rate_limiter_service
-        self.mailer = Mailer(settings.mail,self.http_clients)
+        AccountRecovery = _identity_recovery.attribute('AccountRecovery')
+        LocalTokens = _identity_tokens.attribute('LocalTokens')
+        rate_limiter_service = _identity_cache.attribute('rate_limiter_service')
+        self.mailer = Mailer(settings.mail, self.http_clients)
         self.local_sessions = LocalSessions(rate_limiter_service.project_prefix)
-        self.recovery = AccountRecovery(settings.mail,settings.app_public_url,self.mailer,self.local_sessions)
-        self.local_tokens = LocalTokens(self.jwt_access,self.jwt_refresh,self.local_sessions,rate_limiter_service)
+        self.recovery = AccountRecovery(settings.mail, settings.app_public_url, self.mailer, self.local_sessions)
+        self.local_tokens = LocalTokens(self.jwt_access, self.jwt_refresh, self.local_sessions, rate_limiter_service)
 
 
 def get_identity():
     resources = _current.get()
     if resources is None:
         raise RuntimeError(
-            'Identity application resources are not bound; use the application lifespan/request scope.'
+            'Identity application resources are not bound; use the application lifespan/request scope.',
         )
     return resources
 

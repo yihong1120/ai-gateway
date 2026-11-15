@@ -1,5 +1,4 @@
 """Transactional, versioned EIP schema upgrades shared by all storage clients."""
-
 from __future__ import annotations
 
 import psycopg
@@ -21,32 +20,32 @@ def migrate(dsn: str, schema: str) -> None:
             ('examples.official_document_workflow:' + schema,),
         )
         db.execute(
-            sql.SQL('SET LOCAL search_path TO {}').format(sql.Identifier(schema))
+            sql.SQL('SET LOCAL search_path TO {}').format(sql.Identifier(schema)),
         )
         exists = db.execute(
-            'SELECT to_regclass(%s)', (f'{schema}.schema_migrations',)
+            'SELECT to_regclass(%s)', (f'{schema}.schema_migrations',),
         ).fetchone()[0]
         version = 0
         if exists:
             version = db.execute(
-                'SELECT COALESCE(MAX(version),0) FROM schema_migrations'
+                'SELECT COALESCE(MAX(version),0) FROM schema_migrations',
             ).fetchone()[0]
             if version > VERSION:
                 raise ValueError('EIP 資料庫版本較新，請更新服務後再啟動。')
             if version == VERSION:
                 return
         db.execute(
-            sql.SQL('CREATE SCHEMA IF NOT EXISTS {}').format(sql.Identifier(schema))
+            sql.SQL('CREATE SCHEMA IF NOT EXISTS {}').format(sql.Identifier(schema)),
         )
         db.execute(
-            'CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)'
+            'CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)',
         )
         if version < 2:
             _initial_schema(db, schema)
             db.execute('INSERT INTO schema_migrations(version) VALUES (2)')
         if version < 3:
             db.execute(
-                'CREATE INDEX IF NOT EXISTS processing_chunks_expiration ON processing_chunks(updated,owner,key)'
+                'CREATE INDEX IF NOT EXISTS processing_chunks_expiration ON processing_chunks(updated,owner,key)',
             )
             db.execute('INSERT INTO schema_migrations(version) VALUES (3)')
         if version < 4:
@@ -179,10 +178,6 @@ def _version_nine(db):
         """)
 
 
-
-
-
-
 def _initial_schema(db, schema):
     # Adopt unversioned installations without replacing ciphertext or receipts.
     db.execute("""
@@ -221,9 +216,9 @@ def _initial_schema(db, schema):
     ).fetchone()[0]
     if enabled_type != 'boolean':
         db.execute(
-            "ALTER TABLE accounts ALTER COLUMN enabled TYPE BOOLEAN USING CASE WHEN enabled::text IN ('1','t','true') THEN TRUE ELSE FALSE END"
+            "ALTER TABLE accounts ALTER COLUMN enabled TYPE BOOLEAN USING CASE WHEN enabled::text IN ('1','t','true') THEN TRUE ELSE FALSE END",
         )
     # Old tasks have no provable first-observation time; preserve unknown as NULL.
     db.execute(
-        'INSERT INTO task_timeline(task_id) SELECT id FROM tasks ON CONFLICT DO NOTHING'
+        'INSERT INTO task_timeline(task_id) SELECT id FROM tasks ON CONFLICT DO NOTHING',
     )

@@ -1,4 +1,6 @@
 """Bound JSON input before FastAPI parses credential-bearing request bodies."""
+from __future__ import annotations
+
 from fastapi import HTTPException
 
 
@@ -12,6 +14,7 @@ class BodyLimit:
         path = scope.get('path', '')
         maximum = 8 * 1024 * 1024 if path.startswith('/company-ai/v1/') else 16000
         total = 0
+
         async def limited_receive():
             nonlocal total
             message = await receive()

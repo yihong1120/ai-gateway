@@ -9,12 +9,13 @@ import logging
 import math
 import time
 
-from anyio import CancelScope
 import psycopg
+from anyio import CancelScope
 from psycopg import sql
 from psycopg.rows import dict_row
 
-from examples.official_document_workflow.domain.documents import CloudRateLimited, ProcessingError
+from examples.official_document_workflow.domain.documents import CloudRateLimited
+from examples.official_document_workflow.domain.documents import ProcessingError
 from examples.shared.runtime.concurrency import ModelNotStarted
 from examples.shared.runtime.database import shared_content_lock_namespace
 from examples.shared.runtime.io import run_sync
@@ -63,8 +64,10 @@ class SharedContentCache:
             kind = 'json'
         else:
             raise ValueError('Shared content results must be JSON objects, arrays or bytes.')
-        envelope = {'purpose': 'shared-content-v1', 'scope': self.scope, 'key': key,
-                    'revision': self.revision, 'kind': kind, 'value': value}
+        envelope = {
+            'purpose': 'shared-content-v1', 'scope': self.scope, 'key': key,
+            'revision': self.revision, 'kind': kind, 'value': value,
+        }
         return self.store.cipher.encrypt(json.dumps(envelope, ensure_ascii=False, allow_nan=False).encode())
 
     def _decode(self, key, row, validate):
@@ -78,9 +81,11 @@ class SharedContentCache:
             return _MISS
         try:
             envelope = json.loads(self.store.cipher.decrypt(bytes(row['payload'])))
-            if any(envelope.get(name) != expected for name, expected in (
-                ('purpose', 'shared-content-v1'), ('scope', self.scope), ('key', key), ('revision', self.revision),
-            )):
+            if any(
+                envelope.get(name) != expected for name, expected in (
+                    ('purpose', 'shared-content-v1'), ('scope', self.scope), ('key', key), ('revision', self.revision),
+                )
+            ):
                 return _MISS
             if row['state'] == 'failed':
                 if envelope.get('kind') == 'failure' and envelope.get('value') == 'producer_failed':
@@ -123,8 +128,10 @@ class SharedContentCache:
     def _connect(self):
         db = None
         try:
-            db = psycopg.connect(self.store.dsn, autocommit=True, connect_timeout=5,
-                                 options='-c statement_timeout=5000', row_factory=dict_row)
+            db = psycopg.connect(
+                self.store.dsn, autocommit=True, connect_timeout=5,
+                options='-c statement_timeout=5000', row_factory=dict_row,
+            )
             db.execute(sql.SQL('SET search_path TO {}').format(sql.Identifier(self.store.schema)))
             return db
         except Exception:
@@ -190,8 +197,10 @@ class SharedContentCache:
         db = None
         try:
             store = await run_sync(lambda: self.store)
-            db = await psycopg.AsyncConnection.connect(store.dsn, autocommit=True, connect_timeout=5,
-                                                      options='-c statement_timeout=5000', row_factory=dict_row)
+            db = await psycopg.AsyncConnection.connect(
+                store.dsn, autocommit=True, connect_timeout=5,
+                options='-c statement_timeout=5000', row_factory=dict_row,
+            )
             await db.execute(sql.SQL('SET search_path TO {}').format(sql.Identifier(store.schema)))
             return db
         except BaseException as error:

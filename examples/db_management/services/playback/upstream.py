@@ -1,7 +1,10 @@
 from __future__ import annotations
+
 import httpx
 from fastapi import HTTPException
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
+from pydantic import ValidationError
+
 from examples.db_management.schemas.playback import StreamingPlaybackErrorResponse
 
 _STREAMING_RESPONSE = TypeAdapter(dict[str, object])
@@ -40,17 +43,17 @@ class PlaybackUpstream:
             )
         except (httpx.TimeoutException, httpx.NetworkError) as exc:
             raise HTTPException(
-                status_code=502, detail='streaming_upstream_unavailable'
+                status_code=502, detail='streaming_upstream_unavailable',
             ) from exc
         if response.status_code >= 400:
             raise HTTPException(
-                status_code=response.status_code, detail=_streaming_detail(response)
+                status_code=response.status_code, detail=_streaming_detail(response),
             )
         try:
             return _STREAMING_RESPONSE.validate_python(
-                response.json()
+                response.json(),
             ), response.status_code
         except (ValueError, ValidationError) as exc:
             raise HTTPException(
-                status_code=502, detail='invalid_streaming_upstream_response'
+                status_code=502, detail='invalid_streaming_upstream_response',
             ) from exc

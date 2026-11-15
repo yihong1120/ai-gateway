@@ -1,19 +1,16 @@
 """BFF headers operations."""
-
 from __future__ import annotations
 
 from urllib.parse import urlsplit
 
 import httpx
-
 from fastapi import HTTPException
-
 from fastapi import Request
 
+from examples.bff.proxy_config import _DROP_REQUEST_HEADERS
+from examples.bff.proxy_config import _PASS_RESPONSE_HEADERS
 from examples.identity.deployment_context import DeploymentBinding
-
 from examples.identity.settings.bff import get_bff_options
-from examples.bff.proxy_config import _DROP_REQUEST_HEADERS, _PASS_RESPONSE_HEADERS
 
 
 def _proxy_request_headers(

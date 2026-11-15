@@ -5,11 +5,13 @@ import argparse
 import hashlib
 import io
 import json
-from pathlib import Path, PurePosixPath
-import zipfile
 import tempfile
+import zipfile
+from collections.abc import Mapping
+from pathlib import Path
+from pathlib import PurePosixPath
 from types import MappingProxyType
-from typing import NamedTuple, Mapping
+from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGES = ('identity', 'bff', 'db_management', 'deployment/registry', 'shared')
@@ -64,14 +66,16 @@ def allowed(name):
     path = PurePosixPath(name)
     return (
         name != 'examples/identity/models.py' and not path.is_absolute() and '..' not in path.parts and '\\' not in name
-        and (name in ENTRY_FILES or (
-            path.suffix == '.py' and '__pycache__' not in path.parts
-            and any(
-                path.is_relative_to(PurePosixPath('examples') / package)
-                and 'deployment' not in path.relative_to(PurePosixPath('examples') / package).parts
-                for package in PACKAGES
+        and (
+            name in ENTRY_FILES or (
+                path.suffix == '.py' and '__pycache__' not in path.parts
+                and any(
+                    path.is_relative_to(PurePosixPath('examples') / package)
+                    and 'deployment' not in path.relative_to(PurePosixPath('examples') / package).parts
+                    for package in PACKAGES
+                )
             )
-        ))
+        )
     )
 
 
@@ -100,8 +104,10 @@ def build(destination):
         'format': 2, 'source': 'examples/bff/proxy.py',
         'entrypoint': 'examples.db_management.app:app',
         'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data),
-        'files': [{'name': name, 'sha256': hashlib.sha256(value).hexdigest(), 'bytes': len(value)}
-                  for name, value in sorted(payloads.items())],
+        'files': [
+            {'name': name, 'sha256': hashlib.sha256(value).hexdigest(), 'bytes': len(value)}
+            for name, value in sorted(payloads.items())
+        ],
         'obsolete_files': list(OBSOLETE_FILES),
     }
     (destination / BUNDLE).write_bytes(data)
@@ -113,11 +119,13 @@ def read_bundle(destination):
     destination = Path(destination)
     manifest = json.loads((destination / MANIFEST).read_text())
     data = (destination / BUNDLE).read_bytes()
-    if (manifest.get('format') != 2 or manifest.get('source') != 'examples/bff/proxy.py'
-            or manifest.get('entrypoint') != 'examples.db_management.app:app'
-            or manifest.get('obsolete_files') != list(OBSOLETE_FILES)
-            or len(data) != manifest.get('bytes')
-            or hashlib.sha256(data).hexdigest() != manifest.get('sha256')):
+    if (
+        manifest.get('format') != 2 or manifest.get('source') != 'examples/bff/proxy.py'
+        or manifest.get('entrypoint') != 'examples.db_management.app:app'
+        or manifest.get('obsolete_files') != list(OBSOLETE_FILES)
+        or len(data) != manifest.get('bytes')
+        or hashlib.sha256(data).hexdigest() != manifest.get('sha256')
+    ):
         raise ValueError('Identity/BFF bundle does not match its manifest.')
     entries = manifest.get('files', [])
     expected = {row['name']: row for row in entries}

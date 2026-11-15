@@ -15,8 +15,10 @@ import psycopg
 from langchain.agents.middleware.model_call_limit import ModelCallLimitExceededError
 from langchain_core.tools import ToolException
 from psycopg.conninfo import make_conninfo
-from examples.shared.runtime.database import connection
+
 from company_agent.runtime.migrations import migrate
+from company_agent.services.files.errors import RecoverableToolError
+from examples.shared.runtime.database import connection
 
 
 class Store:
@@ -61,9 +63,11 @@ class Store:
         finally:
             elapsed = time.monotonic() - started
             with self._lock_metrics_guard:
-                metrics = self._lock_metrics.setdefault(category, {
-                    'acquisitions': 0, 'failures': 0, 'seconds': 0.0, 'max_seconds': 0.0,
-                })
+                metrics = self._lock_metrics.setdefault(
+                    category, {
+                        'acquisitions': 0, 'failures': 0, 'seconds': 0.0, 'max_seconds': 0.0,
+                    },
+                )
                 metrics['acquisitions'] += int(not failed)
                 metrics['failures'] += int(failed)
                 metrics['seconds'] += elapsed
@@ -73,7 +77,6 @@ class Store:
         """Bounded per-process timings without owner/job labels or private data."""
         with self._lock_metrics_guard:
             return {category: dict(values) for category, values in self._lock_metrics.items()}
-
 
     @contextmanager
     def mutex(self, key):
@@ -172,43 +175,58 @@ class Store:
 
     def revise_artifact(self, owner, job, old_id, old_sha, data, call_id):
         """Commit a new immutable version, supersession and receipt together."""
-        from company_agent.services.files.errors import RecoverableToolError
 
         if len(data) > 20_000_000:
             raise ValueError('產出超過 20 MB 上限。')
         with self.db() as db:
             self.lock(db, owner=owner, job=job)
             self.require_job(db, owner, job)
-            receipt = db.execute('SELECT name,result FROM tool_receipts WHERE owner=%s AND job=%s AND call_id=%s',
-                                 (owner, job, call_id)).fetchone()
+            receipt = db.execute(
+                'SELECT name,result FROM tool_receipts WHERE owner=%s AND job=%s AND call_id=%s',
+                (owner, job, call_id),
+            ).fetchone()
             if not receipt or receipt[0] != 'edit_artifact_text_run':
                 raise ValueError('缺少本次修訂工具的執行紀錄。')
             if receipt[1] is not None:
                 return json.loads(receipt[1])
-            old = db.execute('SELECT name,sha,data,lifecycle FROM artifacts WHERE owner=%s AND job=%s AND id=%s FOR UPDATE',
-                             (owner, job, old_id)).fetchone()
+            old = db.execute(
+                'SELECT name,sha,data,lifecycle FROM artifacts WHERE owner=%s AND job=%s AND id=%s FOR UPDATE',
+                (owner, job, old_id),
+            ).fetchone()
             if not old or old[1] != old_sha or hashlib.sha256(old[2]).hexdigest() != old_sha:
                 raise ValueError('修訂來源不屬於本工作或版本校驗失敗。')
             if db.execute('SELECT delivery_finalized FROM jobs WHERE owner=%s AND id=%s', (owner, job)).fetchone()[0]:
                 raise ValueError('本工作已完成交付驗收，不可再修訂成果。')
             if old[3] != 'draft':
                 raise RecoverableToolError('revision_source_inactive', '只能修訂有效草稿，請重新讀取真正最新版；不從舊版本建立分支。')
-            active = db.execute("SELECT id FROM artifacts WHERE owner=%s AND job=%s AND lower(name)=lower(%s) AND lifecycle!='superseded'",
-                                (owner, job, old[0])).fetchall()
+            active = db.execute(
+                "SELECT id FROM artifacts WHERE owner=%s AND job=%s AND lower(name)=lower(%s) AND lifecycle!='superseded'",
+                (owner, job, old[0]),
+            ).fetchall()
             if {row[0] for row in active} != {old_id}:
                 raise RecoverableToolError('ambiguous_revision_source', '同名有效草稿不唯一，請由主協調明確處理版本關係後再修訂。')
             key, sha = str(uuid.uuid4()), hashlib.sha256(data).hexdigest()
-            result = {'id': key, 'name': old[0], 'sha256': sha,
-                      'revises': {'artifact_id': old_id, 'sha256': old_sha}, 'supersedes': old_id,
-                      'notice': '已建立同一交付名稱的新版本；舊版保留稽核但不交付。新版須重新驗收與獨立審核，未寫入 NAS。'}
-            db.execute('INSERT INTO artifacts(id,job,owner,name,sha,data) VALUES(%s,%s,%s,%s,%s,%s)',
-                       (key, job, owner, old[0], sha, data))
-            db.execute("UPDATE artifacts SET lifecycle='superseded',superseded_by=%s WHERE owner=%s AND job=%s AND id=%s",
-                       (key, owner, job, old_id))
-            db.execute('UPDATE tool_receipts SET result=%s WHERE owner=%s AND job=%s AND call_id=%s',
-                       (json.dumps(result, ensure_ascii=False), owner, job, call_id))
-            db.execute('INSERT INTO audit VALUES(%s,%s,%s,%s,%s)',
-                       (job, owner, 'revise_artifact', old_id+'->'+key, time.time()))
+            result = {
+                'id': key, 'name': old[0], 'sha256': sha,
+                'revises': {'artifact_id': old_id, 'sha256': old_sha}, 'supersedes': old_id,
+                'notice': '已建立同一交付名稱的新版本；舊版保留稽核但不交付。新版須重新驗收與獨立審核，未寫入 NAS。',
+            }
+            db.execute(
+                'INSERT INTO artifacts(id,job,owner,name,sha,data) VALUES(%s,%s,%s,%s,%s,%s)',
+                (key, job, owner, old[0], sha, data),
+            )
+            db.execute(
+                "UPDATE artifacts SET lifecycle='superseded',superseded_by=%s WHERE owner=%s AND job=%s AND id=%s",
+                (key, owner, job, old_id),
+            )
+            db.execute(
+                'UPDATE tool_receipts SET result=%s WHERE owner=%s AND job=%s AND call_id=%s',
+                (json.dumps(result, ensure_ascii=False), owner, job, call_id),
+            )
+            db.execute(
+                'INSERT INTO audit VALUES(%s,%s,%s,%s,%s)',
+                (job, owner, 'revise_artifact', old_id+'->'+key, time.time()),
+            )
         return result
 
     def verify_artifacts(self, owner, job, artifacts):
@@ -275,8 +293,10 @@ class Store:
                 "UPDATE artifacts SET lifecycle='superseded',superseded_by=%s WHERE owner=%s AND job=%s AND id=%s",
                 (new_id, owner, job, old_id),
             )
-            db.execute('INSERT INTO audit VALUES(%s,%s,%s,%s,%s)',
-                       (job, owner, 'supersede_artifact', old_id + '->' + new_id, time.time()))
+            db.execute(
+                'INSERT INTO audit VALUES(%s,%s,%s,%s,%s)',
+                (job, owner, 'supersede_artifact', old_id + '->' + new_id, time.time()),
+            )
         return {'superseded': old_id, 'replacement': new_id}
 
     def finalize_artifacts(self, owner, job, expected):
@@ -286,8 +306,10 @@ class Store:
             files = [f for f in self._files(db, owner, job) if f['lifecycle'] != 'superseded']
             if {f['id'] for f in files} != set(expected):
                 raise ValueError('產出清單已變更，請重新驗收。')
-            db.execute("UPDATE artifacts SET lifecycle='final' WHERE owner=%s AND job=%s AND lifecycle='draft'",
-                       (owner, job))
+            db.execute(
+                "UPDATE artifacts SET lifecycle='final' WHERE owner=%s AND job=%s AND lifecycle='draft'",
+                (owner, job),
+            )
             db.execute('UPDATE jobs SET delivery_finalized=TRUE WHERE owner=%s AND id=%s', (owner, job))
 
     def save_evidence(self, owner, job, key, payload):
@@ -295,12 +317,16 @@ class Store:
         with self.db() as db:
             self.lock(db, owner=owner, job=job)
             self.require_job(db, owner, job)
-            row = db.execute('SELECT payload FROM analysis_evidence WHERE owner=%s AND job=%s AND id=%s',
-                             (owner, job, key)).fetchone()
+            row = db.execute(
+                'SELECT payload FROM analysis_evidence WHERE owner=%s AND job=%s AND id=%s',
+                (owner, job, key),
+            ).fetchone()
             if row and row[0] != value:
                 raise ValueError('統計憑據不可改寫。')
-            db.execute('INSERT INTO analysis_evidence VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING',
-                       (owner, job, key, value))
+            db.execute(
+                'INSERT INTO analysis_evidence VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING',
+                (owner, job, key, value),
+            )
         return {'evidence_id': key, **payload}
 
     def delivery_plan(self, owner, job, payload=None):
@@ -316,14 +342,18 @@ class Store:
                 return current
             if current is not None or self._files(db, owner, job):
                 raise ValueError('交付規格須在產檔前固定；不可修改已登記規格。請另開工作處理規格變更。')
-            db.execute('INSERT INTO delivery_plans VALUES(%s,%s,%s)',
-                       (owner, job, json.dumps(payload, ensure_ascii=False, allow_nan=False)))
+            db.execute(
+                'INSERT INTO delivery_plans VALUES(%s,%s,%s)',
+                (owner, job, json.dumps(payload, ensure_ascii=False, allow_nan=False)),
+            )
         return payload
 
     def evidence(self, owner, job, keys=None):
         with self.db() as db:
-            rows = db.execute('SELECT id,payload FROM analysis_evidence WHERE owner=%s AND job=%s ORDER BY id',
-                              (owner, job)).fetchall()
+            rows = db.execute(
+                'SELECT id,payload FROM analysis_evidence WHERE owner=%s AND job=%s ORDER BY id',
+                (owner, job),
+            ).fetchall()
         values = {r[0]: {'evidence_id': r[0], **json.loads(r[1])} for r in rows}
         if keys is not None:
             if not set(keys) <= values.keys():
@@ -335,9 +365,11 @@ class Store:
         if self.read_artifact(owner, artifact, job)[1] != sha:
             raise ValueError('驗收版本不符。')
         with self.db() as db:
-            db.execute('INSERT INTO artifact_validations VALUES(%s,%s,%s,%s,%s) '
-                       'ON CONFLICT(owner,job,artifact,sha) DO UPDATE SET payload=EXCLUDED.payload',
-                       (owner, job, artifact, sha, json.dumps(payload, ensure_ascii=False)))
+            db.execute(
+                'INSERT INTO artifact_validations VALUES(%s,%s,%s,%s,%s) '
+                'ON CONFLICT(owner,job,artifact,sha) DO UPDATE SET payload=EXCLUDED.payload',
+                (owner, job, artifact, sha, json.dumps(payload, ensure_ascii=False)),
+            )
 
     def validations(self, owner, job):
         with self.db() as db:
@@ -349,7 +381,9 @@ class Store:
     @staticmethod
     def _files(db, owner, job):
         rows = db.execute(
-            'SELECT id,name,sha,lifecycle,superseded_by FROM artifacts WHERE owner=%s AND job=%s ORDER BY id', (owner, job),
+            'SELECT id,name,sha,lifecycle,superseded_by FROM artifacts WHERE owner=%s AND job=%s ORDER BY id', (
+                owner, job,
+            ),
         ).fetchall()
         return [{'id': r[0], 'name': r[1], 'sha256': r[2], 'lifecycle': r[3], 'superseded_by': r[4]} for r in rows]
 
@@ -462,7 +496,6 @@ class Store:
         a different call cannot repeat a key or claim the same active outputs.
         Caller verifies explicit revision/recovery references against reports.
         """
-        from company_agent.services.files.errors import RecoverableToolError
 
         with self.db() as db:
             self.lock(db, owner=owner, job=job)
@@ -478,8 +511,10 @@ class Store:
                         raise ValueError('委派恢復參數已改變，停止重送。')
                     return
                 if key == work_key or value == payload:
-                    raise RecoverableToolError('duplicate_assignment', '此工作已派發；請使用既有結果或等待原工作，不重複呼叫子角色。修訂／補做須使用新 work_key 並明列前次委派 ID。',
-                                               assignment_id=call, work_key=key)
+                    raise RecoverableToolError(
+                        'duplicate_assignment', '此工作已派發；請使用既有結果或等待原工作，不重複呼叫子角色。修訂／補做須使用新 work_key 並明列前次委派 ID。',
+                        assignment_id=call, work_key=key,
+                    )
             latest = {}
             for _, call, value in claims:
                 for name in value['outputs']:
@@ -487,8 +522,10 @@ class Store:
             for name in payload['outputs']:
                 previous = latest.get(name.casefold())
                 if previous and (previous[0] not in replaces or previous[1] != payload['role']):
-                    raise RecoverableToolError('output_already_assigned', '此檔案已有負責子任務；不可另派工作重做。修訂或補做須明確引用前次委派。',
-                                               name=name, assignment_id=previous[0])
+                    raise RecoverableToolError(
+                        'output_already_assigned', '此檔案已有負責子任務；不可另派工作重做。修訂或補做須明確引用前次委派。',
+                        name=name, assignment_id=previous[0],
+                    )
             db.execute(
                 'INSERT INTO assignment_claims(owner,job,work_key,call_id,payload) VALUES(%s,%s,%s,%s,%s)',
                 (owner, job, work_key, call_id, json.dumps(payload, ensure_ascii=False)),

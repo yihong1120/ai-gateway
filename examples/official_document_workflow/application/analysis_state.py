@@ -1,15 +1,12 @@
 """In-memory document analysis state; never a persistent credential container."""
-
 from __future__ import annotations
 
 from typing import TypedDict
 
-from examples.official_document_workflow.domain.documents import (
-    CloudSemanticSource,
-    Deadline,
-    OfficialDocument,
-    PreparedDocument,
-)
+from examples.official_document_workflow.domain.documents import CloudSemanticSource
+from examples.official_document_workflow.domain.documents import Deadline
+from examples.official_document_workflow.domain.documents import OfficialDocument
+from examples.official_document_workflow.domain.documents import PreparedDocument
 
 
 class AnalysisState(TypedDict, total=False):

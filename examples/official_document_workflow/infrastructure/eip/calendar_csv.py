@@ -12,10 +12,10 @@ from urllib.parse import unquote_plus
 
 from .netask import csv_minutes
 from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT
-from examples.official_document_workflow.domain.calendar.identity import csv_key
 from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_HEADERS
 from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_TRANSLATION_ROW
 from examples.official_document_workflow.domain.calendar.csv_schema import protect_eip_csv
+from examples.official_document_workflow.domain.calendar.identity import csv_key
 from examples.official_document_workflow.domain.calendar.presentation import format_ai_title
 from examples.official_document_workflow.domain.calendar.presentation import split_ai_title
 from examples.official_document_workflow.domain.calendar.scheduling import EIP_REVIEW_NOTICE
@@ -218,9 +218,11 @@ def restore_source_intervals(rows):
             end = datetime.strptime(all_day_match['end'], '%Y/%m/%d')
             if start >= end:
                 raise ValueError('跨日分段的完整區間無效，未匯入。')
-            source = {**row, 'Start Date': start.strftime('%Y/%m/%d'),
-                      'End Date': end.strftime('%Y/%m/%d'),
-                      'Description': row['Description'][:all_day_match.start()]}
+            source = {
+                **row, 'Start Date': start.strftime('%Y/%m/%d'),
+                'End Date': end.strftime('%Y/%m/%d'),
+                'Description': row['Description'][:all_day_match.start()],
+            }
             key = tuple(source[k] for k in CALENDAR_HEADERS)
             groups.setdefault(key, (source, []))[1].append(row)
             continue

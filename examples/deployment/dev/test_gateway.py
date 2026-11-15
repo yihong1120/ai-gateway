@@ -1,8 +1,11 @@
 """Regression coverage for TLS checks racing the asynchronous Nginx reload."""
+from __future__ import annotations
+
 from subprocess import CompletedProcess
 from unittest.mock import patch
 
 import pytest
+
 from examples.deployment.dev import gateway
 
 READY = 'HTTP/2 200\nX-AI-Gateway: dev-b\nX-AI-Environment: dev\n\n{"status":true}'

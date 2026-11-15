@@ -1,5 +1,4 @@
 """Durable delivery fairness, retry revisions and execution isolation."""
-
 from __future__ import annotations
 
 import asyncio

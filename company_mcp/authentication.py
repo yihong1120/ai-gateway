@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 import time
+from dataclasses import dataclass
 
 import httpx
 import jwt
@@ -41,12 +41,14 @@ class Verifier:
                 issuer=config.issuer, options={'require': ['iss', 'aud', 'sub', 'iat', 'exp', 'azp']},
             )
             subject, authorized_party = claims['sub'], claims['azp']
-            if (not isinstance(subject, str) or not subject or subject != subject.strip() or len(subject) > 255
-                    or authorized_party not in config.clients
-                    or not isinstance(claims.get('scope'), str) or SCOPE not in claims['scope'].split()
-                    or claims.get('typ') not in (None, 'Bearer')
-                    or type(claims['exp']) is not int or type(claims['iat']) is not int
-                    or not 0 < claims['exp'] - claims['iat'] <= 300):
+            if (
+                not isinstance(subject, str) or not subject or subject != subject.strip() or len(subject) > 255
+                or authorized_party not in config.clients
+                or not isinstance(claims.get('scope'), str) or SCOPE not in claims['scope'].split()
+                or claims.get('typ') not in (None, 'Bearer')
+                or type(claims['exp']) is not int or type(claims['iat']) is not int
+                or not 0 < claims['exp'] - claims['iat'] <= 300
+            ):
                 return None
         except jwt.PyJWKClientConnectionError:
             raise AuthorizationUnavailable('Company authorization is unavailable.') from None
@@ -67,8 +69,10 @@ class Verifier:
             current = response.json()
             if not isinstance(current, dict):
                 raise AuthorizationUnavailable('Company authorization is unavailable.')
-            if (current.get('active') is not True or current.get('sub') != subject
-                    or current.get('client_id', current.get('azp')) != authorized_party):
+            if (
+                current.get('active') is not True or current.get('sub') != subject
+                or current.get('client_id', current.get('azp')) != authorized_party
+            ):
                 return None
             owner = await self.resolve_owner(subject)
         except AuthorizationUnavailable:

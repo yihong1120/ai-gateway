@@ -13,8 +13,6 @@ not a credential.
 """
 from __future__ import annotations
 
-from examples.identity.runtime import get_settings
-
 import hashlib
 import hmac
 import ipaddress
@@ -34,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from examples.identity.models import User
 from examples.identity.models import USER_STATUS_ACTIVE
 from examples.identity.models import UserIdentity
+from examples.identity.runtime import get_settings
 
 logger = logging.getLogger(__name__)
 

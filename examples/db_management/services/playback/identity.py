@@ -1,16 +1,22 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
-from fastapi import HTTPException, Request
+
+from fastapi import HTTPException
+from fastapi import Request
 from jwt.exceptions import InvalidTokenError
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
-from examples.identity.deployment_context import DeploymentBinding, resolve_request_deployment
-from examples.identity.sessions.jwt import JwtAuthorizationCredentials
-from examples.identity.sessions.store import auth_session_key, get_auth_session
-from examples.identity.sessions.revocation import is_access_token_revoked
+
 from examples.bff.proxy import get_proxy_access_token
 from examples.bff.security import check_csrf
+from examples.identity.deployment_context import DeploymentBinding
+from examples.identity.deployment_context import resolve_request_deployment
+from examples.identity.sessions.jwt import JwtAuthorizationCredentials
+from examples.identity.sessions.revocation import is_access_token_revoked
+from examples.identity.sessions.store import auth_session_key
+from examples.identity.sessions.store import get_auth_session
 
 
 @dataclass(frozen=True)

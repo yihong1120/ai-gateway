@@ -15,6 +15,7 @@ import psycopg
 from company_agent.api.service import Service
 from company_agent.api.service import WorkQueue
 from company_agent.runtime.execution import DocumentAgent
+from company_agent.runtime.middleware import visible_sources
 from company_agent.runtime.models import close_model
 from company_agent.runtime.models import gateway_for_verified_user
 from company_agent.services.files.nas import NASClient
@@ -204,7 +205,6 @@ class SourceDiscoveryTests(unittest.IsolatedAsyncioTestCase, Fixture):
             requests.append(value)
             name, args = script.pop(0)
             return response(name, args)
-        from company_agent.runtime.middleware import visible_sources
         discoveries = []
 
         def unavailable(ctx, state, role, parameters):

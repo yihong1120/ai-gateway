@@ -15,23 +15,24 @@ from unittest import skipUnless
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
 
+from langsmith import tracing_context
+
+from examples.official_document_workflow.application.multi_agent import DocumentAgent
+from examples.official_document_workflow.domain import documents as module
+from examples.shared.runtime.modules import ModuleReference
 from tests.eip_prompt_cases import BLIND_CASES
 from tests.eip_prompt_cases import CASES
 from tests.eip_prompt_cases import HOLDOUT_CASES
 from tests.eip_prompt_cases import ROLE_DATE_CASES
 
+_workflow_integration = ModuleReference('examples.official_document_workflow.application.integration')
+
 
 @skipUnless(os.environ.get('EIP_PROMPT_LIVE') == '1', 'Live provider calls are opt-in')
 class PromptLiveTests(IsolatedAsyncioTestCase):
     async def test_contrast_cases_through_document_workflow(self):
-        from langsmith import tracing_context
 
-        from examples.official_document_workflow.application.integration import (
-            configured_pipe,
-        )
-        from examples.official_document_workflow.application.multi_agent import DocumentAgent
-
-        from examples.official_document_workflow.domain import documents as module
+        configured_pipe = _workflow_integration.attribute('configured_pipe')
         provider_failure = False
         cases = ROLE_DATE_CASES + HOLDOUT_CASES + BLIND_CASES + CASES
         selected = set(filter(None, os.environ.get('EIP_EVAL_CASES', '').split(',')))

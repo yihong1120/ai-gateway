@@ -1,5 +1,4 @@
 """Async registry transactions and bounded, lifespan-owned PostgreSQL resources."""
-
 from __future__ import annotations
 
 import asyncio

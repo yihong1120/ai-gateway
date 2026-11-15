@@ -7,9 +7,9 @@ import secrets
 import time
 import uuid
 from contextlib import AsyncExitStack
+from dataclasses import asdict
 from functools import partial
 from pathlib import Path
-from dataclasses import asdict
 from typing import Annotated
 from urllib.parse import quote
 
@@ -37,17 +37,17 @@ from examples.official_document_workflow.application.manual_job import ManualJob
 from examples.official_document_workflow.infrastructure.eip.calendar_identity import (
     prepare_source_replay,
 )
-from examples.official_document_workflow.infrastructure.eip.calendar_sync import verified_events
 from examples.official_document_workflow.infrastructure.eip.calendar_sync import check_existing_events
+from examples.official_document_workflow.infrastructure.eip.calendar_sync import verified_events
 from examples.official_document_workflow.infrastructure.eip.calendar_sync import write_events
 from examples.official_document_workflow.infrastructure.eip.netask import Netask
 from examples.official_document_workflow.infrastructure.eip.sessions import manual_session
 from examples.official_document_workflow.infrastructure.eip.task_times import (
     document_recorded_at,
 )
+from examples.official_document_workflow.infrastructure.storage.state import Link
 from examples.official_document_workflow.runtime import current_resources
 from examples.shared.runtime.io import run_sync
-from examples.official_document_workflow.infrastructure.storage.state import Link
 
 FRONTEND = Path(__file__).resolve().parents[1] / 'frontend'
 
@@ -126,7 +126,7 @@ async def status(
     await state.sweep()
     link = state.links.get(user.id)
     storage = await run_sync(lambda: resources.store)
-    config = await run_sync(storage.account,user.id)
+    config = await run_sync(storage.account, user.id)
     automatic = (
         None
         if not config
@@ -144,7 +144,7 @@ async def status(
         }
     )
     results = []
-    tasks, pagination = await run_sync(storage.task_page,user.id, automatic_page, automatic_page_size)
+    tasks, pagination = await run_sync(storage.task_page, user.id, automatic_page, automatic_page_size)
     for task in tasks:
         p = task['payload']
         results.append(
@@ -213,10 +213,10 @@ async def login(data: LoginRequest, user=Depends(get_verified_user)):
         await adapter.login(account, password)
         persist = data.enable_auto if data.save_credentials is None else data.save_credentials
         if persist:
-            await run_sync(storage.bind,user.id, adapter.user_id, account, password, enable_auto=data.enable_auto)
+            await run_sync(storage.bind, user.id, adapter.user_id, account, password, enable_auto=data.enable_auto)
         else:
-            await run_sync(storage.pause,user.id, forget=True)
-        config = await run_sync(storage.account,user.id)
+            await run_sync(storage.pause, user.id, forget=True)
+        config = await run_sync(storage.account, user.id)
         await state.unlink(user.id)
         state.links[user.id] = Link(
             adapter,
@@ -233,7 +233,7 @@ async def unlink(user=Depends(get_verified_user)):
     state = resources.state
     storage = await run_sync(lambda: resources.store)
     async with state.session_lock(user.id):
-        await run_sync(storage.pause,user.id, forget=True)
+        await run_sync(storage.pause, user.id, forget=True)
         await state.unlink(user.id)
     return {'linked': False}
 
@@ -244,7 +244,7 @@ async def pause_automatic(user=Depends(get_verified_user)):
     state = resources.state
     storage = await run_sync(lambda: resources.store)
     async with state.session_lock(user.id):
-        await run_sync(storage.pause,user.id)
+        await run_sync(storage.pause, user.id)
     return {'paused': True}
 
 
@@ -369,7 +369,7 @@ async def preview(data: PreviewRequest, user=Depends(get_verified_user)):
     ) as current:
         staged = await current.read('stage', payload)
         link = current.link
-        events = await run_sync(verified_events,rows, staged, link.adapter.user_id, journal)
+        events = await run_sync(verified_events, rows, staged, link.adapter.user_id, journal)
         await prepare_source_replay(
             events,
             link.adapter.user_id,

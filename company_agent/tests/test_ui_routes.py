@@ -16,6 +16,11 @@ from fastapi import Depends
 from fastapi import FastAPI
 from fastapi import HTTPException
 
+import examples.shared.runtime.io as _io_imports
+from examples.shared.runtime.modules import ModuleReference
+
+_agent_router = ModuleReference('company_agent.api.router')
+
 
 class UIRoutesTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -32,7 +37,7 @@ class UIRoutesTests(unittest.IsolatedAsyncioTestCase):
         for name in ('company_agent.api.router', 'company_agent.api.http', 'company_agent.api.identity'):
             sys.modules.pop(name, None)
         with patch.dict(sys.modules, {'open_webui.utils.auth': auth}):
-            from company_agent.api.router import router
+            router = _agent_router.attribute('router')
             self.routes_module = sys.modules['company_agent.api.router']
             self.identity_module = sys.modules['company_agent.api.identity']
         self.dependency = default_denied
@@ -440,9 +445,10 @@ class UIRoutesTests(unittest.IsolatedAsyncioTestCase):
         queue.submit.return_value = 'new-job'
         queue.public.return_value = {'status': 'queued'}
         model = SimpleNamespace(subject='verified-subject')
-        from examples.shared.runtime.io import run_sync
-        svc = SimpleNamespace(queue=queue, model_factory=Mock(return_value=model),
-                              _io=run_sync, result=queue.public)
+        svc = SimpleNamespace(
+            queue=queue, model_factory=Mock(return_value=model),
+            _io=_io_imports.run_sync, result=queue.public,
+        )
         verified = {'id': 'test'}
         with patch.object(self.routes_module, 'service', return_value=svc), \
                 patch.object(self.routes_module, 'verified_user', AsyncMock(return_value=verified)) as identity, \

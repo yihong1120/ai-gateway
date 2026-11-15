@@ -1,5 +1,4 @@
 """DocumentProcessor responsibilities for the shared document processor."""
-
 from __future__ import annotations
 
 import asyncio
@@ -11,34 +10,6 @@ from typing import Any
 
 from open_webui.models.files import FileModel
 
-from examples.shared.runtime.concurrency import run_ocr
-from examples.official_document_workflow.application.instruction_planner import (
-    current_user_message_from_body,
-    plan_current_instruction,
-)
-from examples.official_document_workflow.domain.calendar.csv_schema import (
-    CALENDAR_CSV_FORMAT,
-    CALENDAR_CSV_FORMAT_KEY,
-)
-from examples.official_document_workflow.domain.calendar.operations import (
-    apply_calendar_operations,
-)
-from examples.official_document_workflow.domain.documents import (
-    DOCX_CONTENT_TYPE,
-    CloudDocumentExtraction,
-    OfficialDocument,
-    PreparedDocument,
-    ProcessedDocument,
-    ProcessingError,
-)
-from examples.official_document_workflow.domain.workflow import (
-    JobPlan,
-    OutputSelection,
-)
-from examples.official_document_workflow.infrastructure.storage.processing_cache import (
-    upload_outcome,
-)
-
 from .components import DocumentRequest
 from .exports import DocumentExports
 from .ocr import DocumentOCR
@@ -48,10 +19,38 @@ from .settings import DocumentSettings
 from .sources import DocumentSources
 from .transport import ModelTransport
 from .values import DocumentValues
+from examples.official_document_workflow.application.instruction_planner import current_user_message_from_body
+from examples.official_document_workflow.application.instruction_planner import plan_current_instruction
+from examples.official_document_workflow.domain.calendar.calendar_semantics import (
+    CalendarRules,
+)
+from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT
+from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT_KEY
+from examples.official_document_workflow.domain.calendar.operations import (
+    apply_calendar_operations,
+)
+from examples.official_document_workflow.domain.documents import CloudDocumentExtraction
+from examples.official_document_workflow.domain.documents import DOCX_CONTENT_TYPE
+from examples.official_document_workflow.domain.documents import OfficialDocument
+from examples.official_document_workflow.domain.documents import PreparedDocument
+from examples.official_document_workflow.domain.documents import ProcessedDocument
+from examples.official_document_workflow.domain.documents import ProcessingError
+from examples.official_document_workflow.domain.workflow import JobPlan
+from examples.official_document_workflow.domain.workflow import OutputSelection
+from examples.official_document_workflow.infrastructure.storage.processing_cache import (
+    upload_outcome,
+)
+from examples.shared.runtime.concurrency import run_ocr
+from examples.shared.runtime.modules import ModuleReference
+
+_workflow_background_upload = ModuleReference('examples.official_document_workflow.application.background_upload')
+_workflow_upload_batch = ModuleReference('examples.official_document_workflow.application.upload_batch')
+_workflow_pending = ModuleReference('examples.official_document_workflow.infrastructure.storage.pending')
+_workflow_clarifications = ModuleReference('examples.official_document_workflow.services.clarifications')
 
 logger = logging.getLogger(__name__)
 
-from .clarifications import CalendarClarifications
+CalendarClarifications = _workflow_clarifications.attribute('CalendarClarifications')
 
 
 class DocumentProcessor:
@@ -59,7 +58,7 @@ class DocumentProcessor:
 
     def __init__(self, *, pending=None, content_cache=None, evidence_cache=None) -> None:
         self.name = '公文 PDF／圖片批次：原始 PDF 改名、可編輯版面 DOCX 與行事曆 CSV（雲端 LLM）'
-        from examples.official_document_workflow.infrastructure.storage.pending import PostgresClarifications
+        PostgresClarifications = _workflow_pending.attribute('PostgresClarifications')
         self._pending = pending if pending is not None else PostgresClarifications()
         self._request = DocumentRequest(self.Valves(), content_cache=content_cache, evidence_cache=evidence_cache)
         self._install_services()
@@ -73,7 +72,9 @@ class DocumentProcessor:
         self.sources = DocumentSources(self._request, self.ocr)
         self.exports = DocumentExports(self._request, self.ocr, self.sources, self.rendering)
         self.transport = ModelTransport(self._request, self.parser, lambda *a, **kw: self.emit_status(*a, **kw))
-        self.clarifications = CalendarClarifications(self._request, self.exports, self.values, self.transport, self._pending)
+        self.clarifications = CalendarClarifications(
+            self._request, self.exports, self.values, self.transport, self._pending,
+        )
 
     @property
     def valves(self):
@@ -135,7 +136,6 @@ class DocumentProcessor:
 
     @property
     def calendar(self):
-        from examples.official_document_workflow.domain.calendar.calendar_semantics import CalendarRules
         return CalendarRules(self.valves.cloud_max_events, self.parser.calendar_rows)
 
     async def process(
@@ -165,11 +165,11 @@ class DocumentProcessor:
                     'tags_generation': {'tags': []},
                     'follow_up_generation': {'follow_ups': []},
                     'query_generation': {'queries': []},
-                }.get(__task__, {})
+                }.get(__task__, {}),
             )
 
         if __metadata__ is not None:
-            from examples.official_document_workflow.application.background_upload import submit
+            submit = _workflow_background_upload.attribute('submit')
 
             return await submit(self, __user__, __metadata__, __event_emitter__)
 
@@ -202,9 +202,7 @@ class DocumentProcessor:
                 source_files,
             )
             if source_kind == 'pdf':
-                from examples.official_document_workflow.application.upload_batch import (
-                    process_uploads,
-                )
+                process_uploads = _workflow_upload_batch.attribute('process_uploads')
 
                 return await process_uploads(
                     self,
@@ -545,7 +543,6 @@ class DocumentProcessor:
         )
         return csv_name, csv_file
 
-
     def _batch_csv_filename(self, results: list[ProcessedDocument]) -> str:
         """Use a deterministic, human-readable name for one batch export."""
         first_date = results[0].document.issued.compact_roc
@@ -600,4 +597,3 @@ class DocumentProcessor:
     def _calendar_owner_name(document: OfficialDocument) -> str:
         """Return only an evidenced document handler for the CSV Name cell."""
         return DocumentValues._csv_value(document.handler_name)
-

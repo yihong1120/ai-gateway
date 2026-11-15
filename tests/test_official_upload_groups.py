@@ -10,6 +10,7 @@ import tempfile
 import types
 import unittest
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
@@ -18,6 +19,9 @@ from unittest.mock import patch
 from pydantic import TypeAdapter
 from pydantic import ValidationError
 
+import examples.official_document_workflow.application.multi_agent as _multi_agent_imports
+import examples.official_document_workflow.application.upload_batch as _upload_batch_imports
+import examples.official_document_workflow.infrastructure.eip.calendar_csv as _calendar_csv_imports
 from .test_eip_group_processing import payload
 from .test_official_document_processor_pipe import DEADLINE_EVIDENCE
 from .test_official_document_processor_pipe import PIPE_MODULE as M
@@ -31,9 +35,22 @@ from examples.official_document_workflow.application.upload_batch import UploadA
 from examples.official_document_workflow.application.upload_batch import validate_groups
 from examples.official_document_workflow.domain.calendar.contracts import GROUP_ANALYSIS_SCHEMA
 from examples.official_document_workflow.domain.calendar.contracts import GroupAnalysis
+from examples.official_document_workflow.domain.calendar.csv_schema import (
+    CALENDAR_CSV_FORMAT,
+)
 from examples.official_document_workflow.domain.documents import OutputUncertain
-from examples.official_document_workflow.infrastructure.storage.processing_cache import upload_outcome
 from examples.official_document_workflow.domain.workflow import JobPlan
+from examples.official_document_workflow.infrastructure.eip.calendar_csv import (
+    MIDNIGHT_IMPORT_NOTICE,
+)
+from examples.official_document_workflow.infrastructure.storage.processing_cache import (
+    upload_outcome,
+)
+from examples.shared.runtime.modules import ModuleReference
+
+_pymupdf = ModuleReference('pymupdf')
+_fixture_test_official_preparation = ModuleReference('tests.test_official_preparation')
+_fixture_test_official_tentative_schedule = ModuleReference('tests.test_official_tentative_schedule')
 
 
 class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
@@ -96,7 +113,7 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
         return grouping, first, child
 
     async def test_parent_keeps_attachment_numbers_and_links_childs_own_files(self):
-        import pymupdf
+        pymupdf = _pymupdf.load()
         grouping, first, child = self.linked_letters()
         own_ref, child_ref = (g['reference_number'] for g in grouping['groups'])
         answer = await self.run_upload(grouping, first, child)
@@ -286,7 +303,7 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('word unavailable', answer)
 
     async def test_separate_main_and_named_multipage_attachments_match_screenshot(self):
-        import pymupdf
+        pymupdf = _pymupdf.load()
         structural = set()
         text = self.pipe._page_tagged_cloud_text(
             SOURCE + '\n附件：附件1查核表、附件2路徑調整圖。\f查核表正文\f查核照片\f路徑調整圖',
@@ -352,8 +369,7 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(item.pdf_path.read_bytes(), original)
 
     async def test_ai_preparation_uses_same_analysis_and_survives_csv_export(self):
-        from datetime import datetime
-        from .test_official_preparation import suggestion
+        suggestion = _fixture_test_official_preparation.attribute('suggestion')
         self.add()
         data = payload(('S1',))
         data['events'][0]['preparation_reminders'] = [suggestion(3), suggestion(3)]
@@ -378,11 +394,8 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('preparation_reminders', self.pipe.analyze_text.await_args_list[0].kwargs['prompt'])
 
     async def test_tentative_schedule_uses_joint_analysis_and_keeps_preparation_anchor(self):
-        from datetime import datetime
-        from .test_official_preparation import suggestion as preparation
-        from .test_official_tentative_schedule import suggestion
-        from examples.official_document_workflow.infrastructure.eip.calendar_csv import parse_csv
-        from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT
+        preparation = _fixture_test_official_preparation.attribute('suggestion')
+        suggestion = _fixture_test_official_tentative_schedule.attribute('suggestion')
 
         self.add()
         data = payload(('S1',))
@@ -397,13 +410,13 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[1]['Start Date'], '2026/09/07')
         self.assertIn('至 EIP 核對修改', answer)
         download = next(f for f in self.saved if f['kind'] == 'calendar_csv')
-        imported, _ = parse_csv(download['payload'], csv_format=CALENDAR_CSV_FORMAT)
+        imported, _ = _calendar_csv_imports.parse_csv(download['payload'], csv_format=CALENDAR_CSV_FORMAT)
         self.assertEqual(len(imported), 2)
         self.pipe.analyze_text.assert_awaited_once()
         self.review.assert_awaited_once()
 
     async def test_tentative_schedule_preserves_main_attachment_and_csv_filenames(self):
-        from .test_official_tentative_schedule import suggestion
+        suggestion = _fixture_test_official_tentative_schedule.attribute('suggestion')
 
         self.add()
         self.add(DEADLINE_EVIDENCE)
@@ -427,8 +440,7 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('AI 暫排', self.rows()[0]['Description'])
 
     async def test_midnight_download_explains_native_all_day_reminder(self):
-        from .test_official_tentative_schedule import suggestion
-        from examples.official_document_workflow.infrastructure.eip.calendar_csv import MIDNIGHT_IMPORT_NOTICE
+        suggestion = _fixture_test_official_tentative_schedule.attribute('suggestion')
 
         self.add()
         data = payload(('S1',))
@@ -440,7 +452,7 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(MIDNIGHT_IMPORT_NOTICE, answer)
 
     async def test_preparation_switch_off_keeps_original_csv_only(self):
-        from .test_official_preparation import suggestion
+        suggestion = _fixture_test_official_preparation.attribute('suggestion')
         self.add()
         self.pipe.valves.calendar_ai_preparation_reminders = False
         data = payload(('S1',))
@@ -450,7 +462,7 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('本次另需', self.pipe.analyze_text.await_args_list[0].kwargs['prompt'])
 
     async def test_rejected_event_cannot_export_its_preparation(self):
-        from .test_official_preparation import suggestion
+        suggestion = _fixture_test_official_preparation.attribute('suggestion')
         self.add()
         data = payload(('S1',))
         data['events'][0]['preparation_reminders'] = [suggestion()]
@@ -529,7 +541,7 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
     def add(self, text=SOURCE, *, kind='native_pdf_text'):
         i = len(self.prepared) + 1
         path = Path(self.tmp.name) / f'source-{i}.pdf'
-        import pymupdf
+        pymupdf = _pymupdf.load()
         with pymupdf.open() as pdf:
             page = pdf.new_page()
             page.insert_text((72, 72), f'Source file {i}')
@@ -635,12 +647,11 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
         return answer
 
     def rows(self):
-        from examples.official_document_workflow.infrastructure.eip.calendar_csv import decode_csv
 
         files = [x for x in self.saved if x['kind'] == 'calendar_csv']
         self.assertEqual(len(files), 1)
         self.assertEqual(files[0]['extra_metadata'][M.CALENDAR_CSV_FORMAT_KEY], M.CALENDAR_CSV_FORMAT)
-        payload = decode_csv(files[0]['payload'], M.CALENDAR_CSV_FORMAT)
+        payload = _calendar_csv_imports.decode_csv(files[0]['payload'], M.CALENDAR_CSV_FORMAT)
         return list(csv.DictReader(io.StringIO(payload.decode('utf-8-sig'))))
 
     async def test_main_and_image_attachment_complement_each_other_through_chat_entry(self):
@@ -677,7 +688,7 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
         for saved in self.saved:
             self.assertEqual(saved['user_id'], 'owner')
             if saved['kind'] == 'document_pdf':
-                import pymupdf
+                pymupdf = _pymupdf.load()
                 with pymupdf.open(stream=saved['payload'], filetype='pdf') as pdf:
                     expected = 'Source file 1' if saved['extra_metadata']['official_document_output_role'] == 'main' else 'Source file 2'
                     self.assertEqual([p.get_text().strip() for p in pdf], [expected])
@@ -1013,7 +1024,7 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
         structural = set()
         text = self.pipe._page_tagged_cloud_text(SOURCE + '\f' + second_source, structural_lines=structural)
         item = self.add(text)
-        import pymupdf
+        pymupdf = _pymupdf.load()
         with pymupdf.open() as pdf:
             for text_label in ('LETTER A', 'LETTER B'):
                 page = pdf.new_page()
@@ -1084,7 +1095,7 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
             '查核表。' + '\f' + SOURCE + '\n附件：共用查核表。' + '\f' + second_source + '\n附件：共用查核表。', structural_lines=structural,
         )
         item = self.add(text)
-        import pymupdf
+        pymupdf = _pymupdf.load()
         with pymupdf.open() as pdf:
             for text_label in ('TABLE', 'LETTER A', 'LETTER B'):
                 page = pdf.new_page()
@@ -1178,7 +1189,7 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('_附件-查核表', file['display_name'])
             self.assertEqual(file['extra_metadata']['official_document_groups'], [refs[i]])
             self.assertEqual(file['extra_metadata']['eip_group_source_ids'], [f'file-{i + 1}', 'file-3'])
-            import pymupdf
+            pymupdf = _pymupdf.load()
             with pymupdf.open(stream=file['payload'], filetype='pdf') as pdf:
                 self.assertEqual([p.get_text().strip() for p in pdf], ['Source file 3'])
             self.assertTrue(file['extra_metadata']['official_document_attachment_evidence'])
@@ -1281,18 +1292,17 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
             await self.group_sources(sources)
 
     def test_scoped_source_preserves_coordinates_and_excludes_unrelated_pages(self):
-        from examples.official_document_workflow.application.upload_batch import source_pages, source_slice
         structural = set()
         text = self.pipe._page_tagged_cloud_text('第一份公文\f另一件不相關公文', structural_lines=structural)
         source = M.CloudSemanticSource(text, 'native_pdf_text', frozenset(structural))
-        pages = source_pages({'S1': source})
-        scoped = source_slice( source, [pages['S1:P2']])
+        pages = _upload_batch_imports.source_pages({'S1': source})
+        scoped = _upload_batch_imports.source_slice(source, [pages['S1:P2']])
         self.assertNotIn('第一份公文', scoped.text)
         self.assertIn('另一件不相關公文', scoped.text)
         self.assertEqual(scoped.text.splitlines().index('另一件不相關公文'), text.splitlines().index('另一件不相關公文'))
 
     async def test_standalone_and_bundle_exports_have_distinct_names_and_correct_parents(self):
-        import pymupdf
+        pymupdf = _pymupdf.load()
         first = payload(('S1',))
         first['events'] = []
         old_ref = first['document']['reference_number']
@@ -1348,7 +1358,7 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(item.pdf_path.read_bytes(), originals[item.source_file.id])
 
     async def test_split_keeps_non_contiguous_attachment_pages_and_original_annotations(self):
-        import pymupdf
+        pymupdf = _pymupdf.load()
         item = self.add()
         with pymupdf.open() as pdf:
             for label in ('LETTER A', 'A TABLE', 'LETTER B', 'A FIGURE'):
@@ -1377,8 +1387,7 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(item.pdf_path.read_bytes(), original)
 
     def test_split_rejects_out_of_range_pages_without_overwriting_source(self):
-        import pymupdf
-        from examples.official_document_workflow.application.multi_agent import write_pdf_pages
+        pymupdf = _pymupdf.load()
         item = self.add()
         with pymupdf.open() as pdf:
             pdf.new_page()
@@ -1387,15 +1396,14 @@ class UploadGroupTests(unittest.IsolatedAsyncioTestCase):
         dest = Path(self.tmp.name) / 'split.pdf'
         for pages in ((), (0,), (2,)):
             with self.subTest(pages=pages), self.assertRaises(ValueError):
-                write_pdf_pages(item.pdf_path, dest, pages)
+                _multi_agent_imports.write_pdf_pages(item.pdf_path, dest, pages)
         self.assertFalse(dest.exists())
         self.assertEqual(item.pdf_path.read_bytes(), original)
 
     def test_source_pages_keep_original_page_numbers_even_when_text_is_missing(self):
-        from examples.official_document_workflow.application.upload_batch import source_pages
         text = '<page index="1">\nfirst\n</page>\n<page index="3">\nthird\n</page>'
         source = M.CloudSemanticSource(text, 'native_pdf_text', frozenset({1, 3, 4, 6}))
-        self.assertEqual(list(source_pages({'S1': source})), ['S1:P1', 'S1:P3'])
+        self.assertEqual(list(_upload_batch_imports.source_pages({'S1': source})), ['S1:P1', 'S1:P3'])
 
     async def test_different_letters_on_the_same_page_do_not_fake_a_page_split(self):
         self.add()
@@ -1418,7 +1426,7 @@ class UniqueUploadPageTests(unittest.TestCase):
         self.items = []
 
     def pdf(self, labels, *, annotation=None):
-        import pymupdf
+        pymupdf = _pymupdf.load()
         n = len(self.items) + 1
         path = self.root / f'{n}.pdf'
         with pymupdf.open() as pdf:
@@ -1437,13 +1445,12 @@ class UniqueUploadPageTests(unittest.TestCase):
         return item
 
     def test_standalone_and_merged_copies_read_once_with_all_original_origins(self):
-        from examples.official_document_workflow.application.upload_batch import unique_uploads, group_pdf
-        import pymupdf
+        pymupdf = _pymupdf.load()
         a = self.pdf(['MAIN A'])
         b = self.pdf(['TABLE', 'PHOTO'])
         c = self.pdf(['MAIN A', 'TABLE', 'PHOTO'])
         before = [item.pdf_path.read_bytes() for item in self.items]
-        unique, origins = unique_uploads(self.items, self.root)
+        unique, origins = _upload_batch_imports.unique_uploads(self.items, self.root)
         self.assertEqual(unique, [a, b])
         self.assertEqual(len(origins), 3)
         self.assertEqual(
@@ -1454,21 +1461,20 @@ class UniqueUploadPageTests(unittest.TestCase):
                 }, {'source_file_id': 'file-3', 'page_number': 3},
             ],
         )
-        path = group_pdf({'S1': a, 'S2': b}, ['S1:P1', 'S2:P1', 'S2:P2'], self.root/'group.pdf')
+        path = _upload_batch_imports.group_pdf({'S1': a, 'S2': b}, ['S1:P1', 'S2:P1', 'S2:P2'], self.root/'group.pdf')
         with pymupdf.open(path) as pdf:
             self.assertEqual([p.get_text().strip() for p in pdf], ['MAIN A', 'TABLE', 'PHOTO'])
         self.assertEqual([item.pdf_path.read_bytes() for item in self.items], before)
         # Upload order cannot make the individual copies reappear.
-        unique, origins = unique_uploads([c, a, b], self.root)
+        unique, origins = _upload_batch_imports.unique_uploads([c, a, b], self.root)
         self.assertEqual(unique, [c])
         self.assertTrue(all(len(v) == 2 for v in origins.values()))
 
     def test_partial_overlap_keeps_new_pages_and_original_page_coordinates(self):
-        from examples.official_document_workflow.application.upload_batch import unique_uploads
-        import pymupdf
+        pymupdf = _pymupdf.load()
         self.pdf(['MAIN A'])
         self.pdf(['MAIN A', 'MAIN B'])
-        unique, origins = unique_uploads(self.items, self.root)
+        unique, origins = _upload_batch_imports.unique_uploads(self.items, self.root)
         self.assertEqual(len(unique), 2)
         with pymupdf.open(unique[1].pdf_path) as pdf:
             self.assertEqual(pdf.page_count, 1)
@@ -1476,20 +1482,18 @@ class UniqueUploadPageTests(unittest.TestCase):
         self.assertEqual(origins['S2:P1'], [{'source_file_id': 'file-2', 'page_number': 2}])
 
     def test_duplicate_pages_within_one_document_keep_their_occurrences(self):
-        from examples.official_document_workflow.application.upload_batch import unique_uploads
         self.pdf(['REPEATED', 'REPEATED'])
         self.pdf(['REPEATED', 'REPEATED'])
-        unique, origins = unique_uploads(self.items, self.root)
+        unique, origins = _upload_batch_imports.unique_uploads(self.items, self.root)
         self.assertEqual(len(unique), 1)
         self.assertEqual(len(origins), 2)
         self.assertEqual([x['page_number'] for x in origins['S1:P2']], [2, 2])
 
     def test_similar_or_annotated_pages_are_not_discarded(self):
-        from examples.official_document_workflow.application.upload_batch import unique_uploads
         self.pdf(['REFERENCE 123'])
         self.pdf(['REFERENCE 124'])
         self.pdf(['REFERENCE 123'], annotation='Keep this review note')
-        unique, origins = unique_uploads(self.items, self.root)
+        unique, origins = _upload_batch_imports.unique_uploads(self.items, self.root)
         self.assertEqual(len(unique), 3)
         self.assertEqual(len(origins), 3)
 

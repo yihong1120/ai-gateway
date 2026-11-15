@@ -1,8 +1,11 @@
 """One held mail profile; provider errors and timeouts have explicit outcomes."""
-
 from __future__ import annotations
+
 import unittest
+
 import httpx
+from fastapi import HTTPException
+
 from examples.identity.accounts.mail import Mailer
 from examples.identity.settings.mail import MailSettings
 from examples.shared.runtime.http_clients import HttpClientPool
@@ -23,12 +26,12 @@ class AccountMailTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(status, json={'messageId': 'provider-id'})
 
         pool = HttpClientPool(
-            {'brevo-email': {'transport': httpx.MockTransport(request), 'timeout': 10}}
+            {'brevo-email': {'transport': httpx.MockTransport(request), 'timeout': 10}},
         )
         self.addAsyncCleanup(pool.close)
         mailer = Mailer(
             MailSettings(
-                brevo_api_key='synthetic-mail-key', mail_from='test@example.test'
+                brevo_api_key='synthetic-mail-key', mail_from='test@example.test',
             ),
             pool,
         )
@@ -39,14 +42,13 @@ class AccountMailTests(unittest.IsolatedAsyncioTestCase):
             all(
                 request.headers['api-key'] == 'synthetic-mail-key'
                 for request in requests
-            )
+            ),
         )
 
     async def test_mail_configuration_is_validated_before_transmission(self):
         pool = HttpClientPool({'brevo-email': {'timeout': 10}})
         self.addAsyncCleanup(pool.close)
         mailer = Mailer(MailSettings(brevo_api_key='', mail_from=''), pool)
-        from fastapi import HTTPException
 
         with self.assertRaises(HTTPException):
             await mailer.send({'template': 'test'})

@@ -11,9 +11,12 @@ from unittest.mock import patch
 from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 
+import company_agent.api.pipe as _pipe_imports
 from company_agent.api.service import WorkQueue
 from company_agent.runtime.execution import DocumentAgent
+from company_agent.runtime.storage import Store
 from company_agent.services.cad.sandbox import cad_worker
+from company_agent.services.cad.sandbox import NOTICE
 from company_agent.services.cad.schemas import CreateCad
 from company_agent.services.cad.schemas import EditCad
 from company_agent.services.cad.schemas import ReadCad
@@ -22,6 +25,9 @@ from company_agent.services.sandbox import run_bounded
 from company_agent.tests.test_agent import call
 from company_agent.tests.test_agent import Fixture
 from company_agent.tests.test_multi_agent import RawRoleModel
+from examples.shared.runtime.modules import ModuleReference
+
+_fixture_test_enterprise_completion = ModuleReference('company_agent.tests.test_enterprise_completion')
 
 
 def sample():
@@ -41,11 +47,9 @@ def create():
 
 class CadContracts(unittest.TestCase):
     def test_chat_retains_fixed_cad_notice(self):
-        from company_agent.services.cad.sandbox import NOTICE
-        from company_agent.api.pipe import markdown
         result = {'status': 'done', 'answer': '完成', 'id': 'job', 'files': [], 'notices': [NOTICE, '<script>']}
-        self.assertIn(NOTICE, markdown(result))
-        self.assertNotIn('<script>', markdown(result))
+        self.assertIn(NOTICE, _pipe_imports.markdown(result))
+        self.assertNotIn('<script>', _pipe_imports.markdown(result))
 
     def test_reject_invalid_coordinates_units_paths_and_commands(self):
         for change in [
@@ -79,7 +83,6 @@ class CadContracts(unittest.TestCase):
             self.assertIn('dst=/input,readonly', ' '.join(command))
 
     def test_invalid_worker_json_raises_native_error(self):
-        import json
         with patch('company_agent.services.sandbox.run_bounded', return_value=b'{bad'), self.assertRaises(json.JSONDecodeError):
             cad_worker('read', data=b'AC1032fake', suffix='.dwg')
 
@@ -181,7 +184,7 @@ class CadToolTests(Fixture):
 class CadGraphTests(unittest.IsolatedAsyncioTestCase, Fixture):
     @unittest.skipUnless(os.getenv('COMPANY_AGENT_CAD_TEST') == '1', 'Needs CAD image')
     async def test_real_cad_tools_typed_completion_and_reviewer(self):
-        from company_agent.tests.test_enterprise_completion import finish
+        finish = _fixture_test_enterprise_completion.attribute('finish')
         self.config.enable_cad = True
         self.config.require_artifact_review = True
         self.config.structured_completion = True
@@ -230,7 +233,6 @@ class CadGraphTests(unittest.IsolatedAsyncioTestCase, Fixture):
             ],
             reviewer=[inspect, AIMessage(content='已讀取结构，非視覺驗證。')],
         )
-        from company_agent.runtime.storage import Store
         method = Store.artifact
 
         def remember(store, owner, job, name, data):

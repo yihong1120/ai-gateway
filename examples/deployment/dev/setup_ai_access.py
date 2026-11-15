@@ -3,17 +3,21 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
-import sys
 import secrets
+import sys
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
 
+from examples.shared.runtime.modules import ModuleReference
+
+_examples_deployment_dev_files = ModuleReference('examples.deployment.dev.files')
+
 ROOT = Path(__file__).resolve().parents[3]
 if __package__ in (None, ''):
     sys.path.insert(0, str(ROOT))
-from examples.deployment.dev.files import save
+save = _examples_deployment_dev_files.attribute('save')
 
 CONFIG = Path.home() / '.config/ai-gateway-dev'
 CLIENT = 'company-ai-access-dev-directory'
@@ -28,16 +32,20 @@ def configure():
     web = json.loads(web_path.read_text())
     llm = json.loads((CONFIG / 'litellm.json').read_text())
     parsed = urlsplit(web['DATABASE_URL'])
-    if (web['WEBUI_URL'] != 'https://ai-dev.changdar-server.mooo.com'
-            or parsed.hostname != '127.0.0.1' or parsed.port != 15432 or parsed.path != '/openwebui_dev'
-            or llm['LITELLM_MASTER_KEY'] == '' or '/litellm_dev' not in llm['LITELLM_DATABASE_URL']):
+    if (
+        web['WEBUI_URL'] != 'https://ai-dev.changdar-server.mooo.com'
+        or parsed.hostname != '127.0.0.1' or parsed.port != 15432 or parsed.path != '/openwebui_dev'
+        or llm['LITELLM_MASTER_KEY'] == '' or '/litellm_dev' not in llm['LITELLM_DATABASE_URL']
+    ):
         raise RuntimeError('Refusing to configure a non-dev environment.')
     bootstrap = json.loads((Path.home() / 'service-migration-phase5/source-keycloak-env.json').read_text())
     with httpx.Client(timeout=20, trust_env=False) as client:
-        response = client.post(BASE + '/realms/master/protocol/openid-connect/token', data={
-            'client_id': 'admin-cli', 'grant_type': 'password',
-            'username': bootstrap['KC_BOOTSTRAP_ADMIN_USERNAME'], 'password': bootstrap['KC_BOOTSTRAP_ADMIN_PASSWORD'],
-        })
+        response = client.post(
+            BASE + '/realms/master/protocol/openid-connect/token', data={
+                'client_id': 'admin-cli', 'grant_type': 'password',
+                'username': bootstrap['KC_BOOTSTRAP_ADMIN_USERNAME'], 'password': bootstrap['KC_BOOTSTRAP_ADMIN_PASSWORD'],
+            },
+        )
         response.raise_for_status()
         client.headers['Authorization'] = 'Bearer ' + response.json()['access_token']
         prefix = BASE + '/admin/realms/visionnaire'

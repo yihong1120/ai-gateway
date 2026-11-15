@@ -4,16 +4,19 @@ Only identity-provider and NAS/EIP network boundaries use synthetic fixtures.
 PDF validation/extraction, PostgreSQL, ownership, receipts and drafts are real.
 No paid model or production-calendar mutation is needed for this acceptance.
 """
-from io import BytesIO
+from __future__ import annotations
+
 import json
 import unittest
+from io import BytesIO
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs
 
 import fitz
 import httpx
 
-from company_agent.tests.test_nas import FakeDSM, NASFixture
+from company_agent.tests.test_nas import FakeDSM
+from company_agent.tests.test_nas import NASFixture
 from company_mcp.tools import TOOLS
 from tests.company_mcp import test_service as service
 
@@ -61,9 +64,11 @@ class ToolAcceptanceTests(unittest.IsolatedAsyncioTestCase, NASFixture):
         }]
         row = [''] * 43
         row[0], row[8], row[14] = '42', '工程會議', '本次會議內文'
-        self.adapter.calendar_detail = AsyncMock(return_value=[
-            row, ['1'], ['', '', 'a.pdf', '/fo/a.pdf', '', '', ''],
-        ])
+        self.adapter.calendar_detail = AsyncMock(
+            return_value=[
+                row, ['1'], ['', '', 'a.pdf', '/fo/a.pdf', '', '', ''],
+            ],
+        )
 
     async def test_all_16_tools_through_independent_http_boundary(self):
         self.successful_tools = set()
@@ -85,8 +90,10 @@ class ToolAcceptanceTests(unittest.IsolatedAsyncioTestCase, NASFixture):
         self.assertIn('alice secret', str(read))
         self.assertFalse(self.dsm.sessions)
 
-        documents = await self.call('eip_query', workspace=workspace, folder='inbox',
-                                    start='2026-11-01', end='2026-11-30')
+        documents = await self.call(
+            'eip_query', workspace=workspace, folder='inbox',
+            start='2026-11-01', end='2026-11-30',
+        )
         handle = documents['documents'][0]['handle']
         detail = await self.call('eip_document_read', workspace=workspace, handle=handle)
         self.assertEqual(detail['fields'][0]['value'], '測試')
@@ -98,27 +105,35 @@ class ToolAcceptanceTests(unittest.IsolatedAsyncioTestCase, NASFixture):
         self.assertEqual(content, again)
         self.adapter.download.assert_awaited_once()
 
-        calendar = await self.call('eip_calendar_query', workspace=workspace,
-                                  start='2026-11-01', end='2026-11-30')
+        calendar = await self.call(
+            'eip_calendar_query', workspace=workspace,
+            start='2026-11-01', end='2026-11-30',
+        )
         event = calendar['events'][0]['handle']
         event_detail = await self.call('eip_calendar_detail', workspace=workspace, handle=event)
         self.assertEqual(event_detail['event']['description'], '本次會議內文')
-        calendar_text = await self.call('eip_read_attachment', workspace=workspace,
-                                        handle=event_detail['attachments'][0]['handle'])
+        calendar_text = await self.call(
+            'eip_read_attachment', workspace=workspace,
+            handle=event_detail['attachments'][0]['handle'],
+        )
         self.assertIn('MCP acceptance: owned EIP attachment.', str(calendar_text))
 
-        draft = await self.call('calendar_plan_prepare', workspace=workspace, events=[{
-            'subject': '工程會議', 'start_date': '2026-11-18', 'end_date': '2026-11-18',
-            'all_day': False, 'start_time': '09:00', 'end_time': '10:00',
-        }])
+        draft = await self.call(
+            'calendar_plan_prepare', workspace=workspace, events=[{
+                'subject': '工程會議', 'start_date': '2026-11-18', 'end_date': '2026-11-18',
+                'all_day': False, 'start_time': '09:00', 'end_time': '10:00',
+            }],
+        )
         self.assertEqual(draft['status'], 'prepared_not_written')
         artifact = await self.call('artifact_get', workspace=workspace, artifact=draft['files'][0]['id'])
         self.assertTrue(artifact['download_url'].startswith(self.configuration.origin + '/agents/artifacts/'))
         self.assertTrue(artifact['sha256'])
         self.assertNotIn('commit', self.adapter.__dict__)
 
-        analysis = await self.call('document_analysis_prepare', workspace=workspace,
-                                  request_id='analysis-once', handles=[attachment])
+        analysis = await self.call(
+            'document_analysis_prepare', workspace=workspace,
+            request_id='analysis-once', handles=[attachment],
+        )
         self.assertFalse(analysis['model_called'])
         self.assertEqual(self.queue.list('alice'), [])
         operation = analysis['operation']
@@ -184,10 +199,14 @@ class ToolAcceptanceTests(unittest.IsolatedAsyncioTestCase, NASFixture):
         self.successful_tools = set()
         self.install_eip_fixture()
         workspace = (await self.call('workspace_prepare', request_id='eip-cache'))['workspace']
-        documents = await self.call('eip_query', workspace=workspace, folder='inbox',
-                                    start='2026-11-01', end='2026-11-30')
-        attachments = await self.call('eip_attachments', workspace=workspace,
-                                      handle=documents['documents'][0]['handle'])
+        documents = await self.call(
+            'eip_query', workspace=workspace, folder='inbox',
+            start='2026-11-01', end='2026-11-30',
+        )
+        attachments = await self.call(
+            'eip_attachments', workspace=workspace,
+            handle=documents['documents'][0]['handle'],
+        )
         attachment = attachments['attachments'][0]['handle']
         await self.call('eip_read_attachment', workspace=workspace, handle=attachment)
         other = (await self.call('workspace_prepare', request_id='different-workspace'))['workspace']

@@ -1,13 +1,13 @@
 """Keep active dynamic modules registered; bound idle versions and evict both maps."""
 from __future__ import annotations
 
+import hashlib
+import sys
+import types
 from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass
-import hashlib
-import sys
 from threading import RLock
-import types
 
 
 @dataclass

@@ -3,31 +3,29 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter
+from fastapi import Depends
+from fastapi import Request
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from examples.deployment.registry.schemas import DeploymentRegistryDocument
+from examples.deployment.registry.schemas import EnrollmentExchangeRequest
+from examples.deployment.registry.schemas import EnrollmentExchangeResponse
+from examples.deployment.registry.service import exchange_enrollment_code
+from examples.deployment.registry.service import get_deployment_registry_document
 from examples.identity.database import get_db
 from examples.identity.redis_pool import get_redis_pool
-from examples.deployment.registry.schemas import (
-    DeploymentRegistryDocument,
-    EnrollmentExchangeRequest,
-    EnrollmentExchangeResponse,
-)
-from examples.deployment.registry.service import (
-    exchange_enrollment_code,
-    get_deployment_registry_document,
-)
 
 # The application mounts this public router outside user-facing API routes.
 router: APIRouter = APIRouter(
-    prefix="/deployment-registry",
-    tags=["deployment-registry"],
+    prefix='/deployment-registry',
+    tags=['deployment-registry'],
 )
 
 
 @router.post(
-    "/v1/enrollments/exchange",
+    '/v1/enrollments/exchange',
     response_model=EnrollmentExchangeResponse,
 )
 # The response model performs the sole HTTP-boundary serialisation check.
@@ -39,7 +37,7 @@ async def exchange_enrollment_code_endpoint(
 ) -> dict[str, UUID]:
     """Exchange one anonymous enrollment code for a deployment identifier."""
     return {
-        "deployment_id": await exchange_enrollment_code(
+        'deployment_id': await exchange_enrollment_code(
             payload.enrollment_code,
             request.client.host if request.client is not None else None,
             db,
@@ -49,7 +47,7 @@ async def exchange_enrollment_code_endpoint(
 
 
 @router.get(
-    "/v1/deployments/{deployment_id}",
+    '/v1/deployments/{deployment_id}',
     response_model=DeploymentRegistryDocument,
 )
 # The service returns plain data; FastAPI validates it exactly once here.

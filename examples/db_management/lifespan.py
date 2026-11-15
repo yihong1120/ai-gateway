@@ -4,8 +4,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from examples.identity.lifespan import global_lifespan as identity_lifespan
+
 from examples.db_management.services.site_media_cleanup import drain_site_media_cleanup_jobs
+from examples.identity.lifespan import global_lifespan as identity_lifespan
 
 logger = logging.getLogger(__name__)
 _site_media_cleanup_interval_seconds = 30
@@ -37,7 +38,6 @@ async def _run_site_media_cleanup_worker(
             )
         except TimeoutError:
             continue
-
 
 
 @asynccontextmanager

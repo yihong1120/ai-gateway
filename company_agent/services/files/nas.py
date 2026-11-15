@@ -237,9 +237,11 @@ class NASVault:
         result = []
         for binding_id, ciphertext, revision, updated, usable in rows:
             data = self.decrypt(owner, revision, ciphertext)
-            result.append({'binding_id': binding_id, 'account': data['account'],
-                           'label': data.get('label') or data['account'], 'revision': revision,
-                           'updated': updated, 'usable': usable, 'bound': True, 'read_only': True})
+            result.append({
+                'binding_id': binding_id, 'account': data['account'],
+                'label': data.get('label') or data['account'], 'revision': revision,
+                'updated': updated, 'usable': usable, 'bound': True, 'read_only': True,
+            })
             data.clear()
         return result
 
@@ -264,8 +266,11 @@ class NASVault:
         }
 
     def decrypt(self, owner, revision, ciphertext):
-        return json.loads(self.cipher().decrypt(
-            ciphertext[:12], ciphertext[12:], (owner + ':' + revision).encode()))
+        return json.loads(
+            self.cipher().decrypt(
+                ciphertext[:12], ciphertext[12:], (owner + ':' + revision).encode(),
+            ),
+        )
 
     def bind(self, owner, account, password, otp=None, *, binding_id=None, label=None):
         if (
@@ -323,8 +328,10 @@ class NASVault:
             if other and binding_id is not None and other[1] != binding_id:
                 raise ValueError('此帳號已有綁定，請更新原連線。')
             if binding_id is not None:
-                if not db.execute('SELECT 1 FROM nas_bindings WHERE owner=%s AND binding_id=%s',
-                                  (owner, binding_id)).fetchone():
+                if not db.execute(
+                    'SELECT 1 FROM nas_bindings WHERE owner=%s AND binding_id=%s',
+                    (owner, binding_id),
+                ).fetchone():
                     raise ValueError('NAS 綁定已解除，請重新新增連線。')
             selected = binding_id or (other[1] if other else uuid.uuid4().hex)
             count = db.execute('SELECT count(*) FROM nas_bindings WHERE owner=%s', (owner,)).fetchone()[0]
@@ -342,7 +349,10 @@ class NASVault:
         with self.store.db() as db:
             self.store.lock(db)
             # Legacy callers with several accounts must explicitly select one.
-            rows = db.execute('SELECT binding_id FROM nas_bindings WHERE owner=%s ORDER BY binding_id', (owner,)).fetchall()
+            rows = db.execute(
+                'SELECT binding_id FROM nas_bindings WHERE owner=%s ORDER BY binding_id',
+                (owner,),
+            ).fetchall()
             if binding_id is None:
                 if len(rows) > 1:
                     raise ValueError('請選擇要解除的 NAS 連線。')
@@ -509,16 +519,22 @@ class NASAccess:
                 name = row.get('name', '')
                 parts = relative_parts(name)
                 extra = row.get('additional', {})
-                if (len(parts) != 1 or name.startswith(('@', '#'))
-                        or row.get('path') != full + '/' + name or extra.get('mount_point_type')
-                        or not self.contained(extra.get('real_path'), real)):
+                if (
+                    len(parts) != 1 or name.startswith(('@', '#'))
+                    or row.get('path') != full + '/' + name or extra.get('mount_point_type')
+                    or not self.contained(extra.get('real_path'), real)
+                ):
                     continue
-                result.append({'name': name, 'path': (path + '/' if path else '') + name,
-                               'is_directory': row.get('isdir') is True})
+                result.append({
+                    'name': name, 'path': (path + '/' if path else '') + name,
+                    'is_directory': row.get('isdir') is True,
+                })
             total = value.get('total')
             has_more = offset + len(rows) < total if type(total) is int else len(rows) == limit
-            return {'entries': result, 'next_offset': offset + len(rows) if has_more and rows else None,
-                    'filtered': len(result) != len(rows)}
+            return {
+                'entries': result, 'next_offset': offset + len(rows) if has_more and rows else None,
+                'filtered': len(result) != len(rows),
+            }
 
     def scan(self, root, cap=300):
         found = []
@@ -584,16 +600,20 @@ class NASAccess:
 
 
 def binding_revisions(settings):
-    return tuple(getattr(settings, 'nas_binding_revisions', ()) or
-                 ([settings.nas_binding_revision] if settings.nas_binding_revision else []))
+    return tuple(
+        getattr(settings, 'nas_binding_revisions', ()) or
+        ([settings.nas_binding_revision] if settings.nas_binding_revision else []),
+    )
 
 
 class CombinedAccess:
     def __init__(self, settings, store, owner):
         self.local = FolderAccess(settings.roots, owner, settings.max_file_bytes)
         vault = NASVault(store)
-        self.remotes = [NASAccess(vault, owner, revision, settings.max_file_bytes)
-                        for revision in binding_revisions(settings)]
+        self.remotes = [
+            NASAccess(vault, owner, revision, settings.max_file_bytes)
+            for revision in binding_revisions(settings)
+        ]
         self.owner = owner
 
     def backend(self, name):
@@ -611,8 +631,10 @@ class CombinedAccess:
             label = data.get('label') or data['account']
             data.clear()
             for root in remote.visible_roots():
-                roots.append({**root, 'connection': label,
-                              'label': label + ' / ' + root['label']})
+                roots.append({
+                    **root, 'connection': label,
+                    'label': label + ' / ' + root['label'],
+                })
         return roots
 
     def allowed(self, name, write=False):

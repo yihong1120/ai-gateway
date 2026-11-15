@@ -1,20 +1,23 @@
 """Real Redis concurrency, single-use rotation, and independent account snapshots."""
-
 from __future__ import annotations
+
 import asyncio
 import json
 import os
-from types import SimpleNamespace
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi import HTTPException
-from examples.identity.config import Settings
-from examples.identity.runtime import IdentityResources, identity_scope
+
+import examples.identity.sessions.authentication as _authentication_imports
 from examples.identity.cache import rate_limiter_service
-from examples.identity.sessions.revocation import is_access_token_revoked
+from examples.identity.config import Settings
 from examples.identity.redis_counters import increment_window
+from examples.identity.runtime import identity_scope
+from examples.identity.runtime import IdentityResources
 from examples.identity.schemas.auth import RefreshRequest
+from examples.identity.sessions.revocation import is_access_token_revoked
 from tests.redis_fixture import RedisFixture
 
 
@@ -29,10 +32,10 @@ class LocalSessionTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
                     'JWT_SECRET_KEY': 'synthetic-session-key-at-least-32-bytes',
                 },
                 clear=True,
-            )
+            ),
         )
         self.resources = IdentityResources(
-            Settings(authjwt_secret_key='synthetic-session-key-at-least-32-bytes')
+            Settings(authjwt_secret_key='synthetic-session-key-at-least-32-bytes'),
         )
         self.addAsyncCleanup(self.resources.http_clients.close)
         self.tokens = self.resources.local_tokens
@@ -47,7 +50,7 @@ class LocalSessionTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
 
     def jti(self, pair):
         return self.resources.jwt_access.decode_token_for_lifecycle(
-            pair['access_token']
+            pair['access_token'],
         )['jti']
 
     async def pair(self):
@@ -60,7 +63,7 @@ class LocalSessionTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
         for pair in pairs:
             await self.tokens.verify(self.redis, pair['refresh_token'])
             self.assertFalse(
-                await is_access_token_revoked(self.redis, {'jti': self.jti(pair)})
+                await is_access_token_revoked(self.redis, {'jti': self.jti(pair)}),
             )
         raw = await self.redis.get(rate_limiter_service._user_key('alice'))
         self.assertNotIn('jti_list', json.loads(raw))
@@ -72,7 +75,7 @@ class LocalSessionTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
     ):
         pairs = await asyncio.gather(*(self.pair() for _ in range(10)))
         rotated = await asyncio.gather(
-            *(self.tokens.rotate(self.redis, pair['refresh_token']) for pair in pairs)
+            *(self.tokens.rotate(self.redis, pair['refresh_token']) for pair in pairs),
         )
         for pair in rotated:
             await self.tokens.verify(self.redis, pair['refresh_token'])
@@ -91,29 +94,29 @@ class LocalSessionTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(len(successful), 1)
         self.assertTrue(any(isinstance(item, HTTPException) for item in results))
         self.assertTrue(
-            await is_access_token_revoked(self.redis, {'jti': self.jti(pair)})
+            await is_access_token_revoked(self.redis, {'jti': self.jti(pair)}),
         )
         for item in successful:
             with self.assertRaises(HTTPException):
                 await self.tokens.verify(self.redis, item['refresh_token'])
             self.assertTrue(
-                await is_access_token_revoked(self.redis, {'jti': self.jti(item)})
+                await is_access_token_revoked(self.redis, {'jti': self.jti(item)}),
             )
 
     async def test_logout_does_not_clobber_another_login(self):
         first, second = await asyncio.gather(self.pair(), self.pair())
         await asyncio.gather(
             self.tokens.logout(
-                self.redis, first['refresh_token'], 'Bearer ' + first['access_token']
+                self.redis, first['refresh_token'], 'Bearer ' + first['access_token'],
             ),
             self.pair(),
         )
         await self.tokens.verify(self.redis, second['refresh_token'])
         self.assertFalse(
-            await is_access_token_revoked(self.redis, {'jti': self.jti(second)})
+            await is_access_token_revoked(self.redis, {'jti': self.jti(second)}),
         )
         self.assertTrue(
-            await is_access_token_revoked(self.redis, {'jti': self.jti(first)})
+            await is_access_token_revoked(self.redis, {'jti': self.jti(first)}),
         )
 
     async def test_all_session_revocation_and_stale_issuer_cannot_resurrect_tokens(
@@ -127,7 +130,7 @@ class LocalSessionTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException):
             await self.tokens.verify(self.redis, pair['refresh_token'])
         self.assertTrue(
-            await is_access_token_revoked(self.redis, {'jti': self.jti(pair)})
+            await is_access_token_revoked(self.redis, {'jti': self.jti(pair)}),
         )
         fresh = await self.pair()
         await self.tokens.verify(self.redis, fresh['refresh_token'])
@@ -135,17 +138,17 @@ class LocalSessionTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
     async def test_idempotent_account_revocation_does_not_kill_a_later_login(self):
         old = await self.pair()
         await self.resources.local_sessions.revoke_once(
-            self.redis, 'alice', 'action-hash'
+            self.redis, 'alice', 'action-hash',
         )
         fresh = await self.pair()
         await self.resources.local_sessions.revoke_once(
-            self.redis, 'alice', 'action-hash'
+            self.redis, 'alice', 'action-hash',
         )
         self.assertTrue(
-            await is_access_token_revoked(self.redis, {'jti': self.jti(old)})
+            await is_access_token_revoked(self.redis, {'jti': self.jti(old)}),
         )
         self.assertFalse(
-            await is_access_token_revoked(self.redis, {'jti': self.jti(fresh)})
+            await is_access_token_revoked(self.redis, {'jti': self.jti(fresh)}),
         )
         await self.tokens.verify(self.redis, fresh['refresh_token'])
 
@@ -160,7 +163,7 @@ class LocalSessionTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
                     'jti_list': ['old'],
                     'jti_meta': {'old': 9999999999},
                     'refresh_tokens': ['old-secret'],
-                }
+                },
             ),
         )
         snapshot = await rate_limiter_service.get_user_data(self.redis, 'alice')
@@ -169,15 +172,14 @@ class LocalSessionTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
         self.assertGreater(await self.redis.ttl(key), 0)
 
     async def test_existing_native_refresh_adapter_keeps_its_response_contract(self):
-        from examples.identity.sessions.authentication import refresh_tokens
 
         pair = await self.pair()
         with identity_scope(self.resources):
-            result = await refresh_tokens(
-                RefreshRequest(refresh_token=pair['refresh_token']), self.redis
+            result = await _authentication_imports.refresh_tokens(
+                RefreshRequest(refresh_token=pair['refresh_token']), self.redis,
             )
         self.assertEqual(
-            set(result), {'access_token', 'refresh_token', 'feature_names'}
+            set(result), {'access_token', 'refresh_token', 'feature_names'},
         )
         self.assertEqual(result['feature_names'], ['read'])
 
@@ -188,7 +190,7 @@ class LocalSessionTests(RedisFixture, unittest.IsolatedAsyncioTestCase):
         self.assertGreater(ttl, 0)
         await self.redis.expire('poison', 12)
         results = await asyncio.gather(
-            *(increment_window(self.redis, 'poison', 30) for _ in range(30))
+            *(increment_window(self.redis, 'poison', 30) for _ in range(30)),
         )
         self.assertEqual(sorted(count for count, _ in results), list(range(9, 39)))
         self.assertLessEqual(await self.redis.ttl('poison'), 12)

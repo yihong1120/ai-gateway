@@ -1,5 +1,4 @@
 """Versioned, transactional company-agent schema upgrades, including legacy adoption."""
-
 from __future__ import annotations
 
 import psycopg
@@ -14,7 +13,7 @@ def migrate(conninfo, schema):
         db.execute(sql.SQL('CREATE SCHEMA IF NOT EXISTS {}').format(sql.Identifier(schema)))
         db.execute(sql.SQL('SET LOCAL search_path TO {}').format(sql.Identifier(schema)))
         db.execute(
-            'CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)'
+            'CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)',
         )
         version = db.execute('SELECT COALESCE(MAX(version),0) FROM schema_migrations').fetchone()[0]
         if version > VERSION:
@@ -26,7 +25,8 @@ def migrate(conninfo, schema):
 
 
 def _company_mcp(db):
-    db.execute('''
+    db.execute(
+        '''
         CREATE TABLE mcp_grants (
             owner TEXT NOT NULL,client TEXT NOT NULL,enabled BOOLEAN NOT NULL,
             revision TEXT NOT NULL,updated DOUBLE PRECISION NOT NULL,PRIMARY KEY(owner,client));
@@ -40,7 +40,8 @@ def _company_mcp(db):
             web_job TEXT,created DOUBLE PRECISION NOT NULL,UNIQUE(owner,client,request_id));
         CREATE TABLE mcp_request_limits (
             owner TEXT PRIMARY KEY,window_start BIGINT NOT NULL,attempts INTEGER NOT NULL);
-    ''', prepare=False)
+    ''', prepare=False,
+    )
 
 
 def _multiple_nas(db):
@@ -152,7 +153,8 @@ def _chat_outbox(db):
 
 
 def _delivery_retries(db):
-    db.execute("""
+    db.execute(
+        """
         ALTER TABLE web_jobs ADD COLUMN chat_failures INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE web_jobs ADD COLUMN chat_next_attempt DOUBLE PRECISION NOT NULL DEFAULT 0;
         ALTER TABLE web_jobs ADD COLUMN chat_last_attempt DOUBLE PRECISION;
@@ -176,11 +178,13 @@ def _delivery_retries(db):
         CREATE TRIGGER web_job_chat_changed BEFORE UPDATE OF status,progress,engine_job,
           request_aliases,document_result,chat_version ON web_jobs
           FOR EACH ROW EXECUTE FUNCTION bump_web_job_chat_version();
-    """, prepare=False)
+    """, prepare=False,
+    )
 
 
 def _job_failures(db):
-    db.execute("""
+    db.execute(
+        """
         ALTER TABLE web_jobs ADD COLUMN error_code TEXT;
         CREATE OR REPLACE FUNCTION bump_web_job_chat_version() RETURNS trigger
           LANGUAGE plpgsql SET search_path FROM CURRENT AS $$
@@ -200,4 +204,5 @@ def _job_failures(db):
         CREATE TRIGGER web_job_chat_changed BEFORE UPDATE OF status,progress,engine_job,
           request_aliases,document_result,chat_version,error_code ON web_jobs
           FOR EACH ROW EXECUTE FUNCTION bump_web_job_chat_version();
-    """, prepare=False)
+    """, prepare=False,
+    )

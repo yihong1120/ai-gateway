@@ -10,22 +10,23 @@ import hashlib
 import re
 from datetime import datetime
 
-from examples.official_document_workflow.domain.calendar import deduplication as rules
-from examples.official_document_workflow.infrastructure.storage.calendar_managed import (
-    digest,
-    normalized_detail,
-)
-from examples.shared.runtime.io import run_sync
-
 from .calendar_read import detail as read_detail
-from .calendar_reconciliation import event_day, existing_snapshot, incoming_snapshot
+from .calendar_reconciliation import event_day
+from .calendar_reconciliation import existing_snapshot
+from .calendar_reconciliation import incoming_snapshot
+from examples.official_document_workflow.domain.calendar import deduplication as rules
+from examples.official_document_workflow.infrastructure.storage.calendar_managed import digest
+from examples.official_document_workflow.infrastructure.storage.calendar_managed import normalized_detail
+from examples.shared.runtime.io import run_sync
 
 
 def ordinary(detail, *, removable=False):
     read_detail(detail, str(detail[0][0]))
     row = detail[0]
-    return (not any(row[i] for i in (6, 7)) and all(str(row[i]) in ('', '0') for i in (22, 23, 33))
-            and (not removable or str(row[17]) in ('', '0')) and len(detail) == int(detail[1][0])+2)
+    return (
+        not any(row[i] for i in (6, 7)) and all(str(row[i]) in ('', '0') for i in (22, 23, 33))
+        and (not removable or str(row[17]) in ('', '0')) and len(detail) == int(detail[1][0])+2
+    )
 
 
 def covers_audience(before, retained, identity):
@@ -62,6 +63,7 @@ def read_bytes(stream):
 async def reconcile(client, history, journal, *, allowed=object, authorize=None, keys=None):
     if (history.store.dsn, history.store.schema) != (journal.dsn, journal.schema):
         raise ValueError('行程來源與寫入收條不在同一資料庫，未清理。')
+
     async def guard():
         if not await run_sync(allowed):
             raise ValueError('綁定變更或自動處理暫停，未清理行程。')
@@ -118,8 +120,10 @@ async def reconcile(client, history, journal, *, allowed=object, authorize=None,
             if not manual:
                 await run_sync(history.state, identity, event_id, 'review' if unproven else 'ready')
                 continue
-            if any(not rules.compatible_facts(a['event'], b['event']) or not rules.clock_compatible(a['event'], b['event'])
-                   for n, a in enumerate(manual) for b in manual[n+1:]):
+            if any(
+                not rules.compatible_facts(a['event'], b['event']) or not rules.clock_compatible(a['event'], b['event'])
+                for n, a in enumerate(manual) for b in manual[n+1:]
+            ):
                 await run_sync(history.state, identity, event_id, 'review')
                 stats['needs_review'] += 1
                 continue
@@ -128,13 +132,15 @@ async def reconcile(client, history, journal, *, allowed=object, authorize=None,
             await guard()
             before = await client.calendar_detail(event_id)
             retained = await client.calendar_detail(keep_id)
-            if (str(before[0][2]) != identity or str(retained[0][0]) != keep_id
-                    or digest(before) != digest(record['value']['detail'])
-                    or not ordinary(before, removable=True) or not ordinary(retained)
-                    or not covers_audience(before, retained, identity)
-                    or str(retained[0][2]) != chosen['owner_id']
-                    or not rules.same_event_schedule(existing_snapshot(before), existing_snapshot(retained))
-                    or existing_snapshot(retained) != chosen['event']):
+            if (
+                str(before[0][2]) != identity or str(retained[0][0]) != keep_id
+                or digest(before) != digest(record['value']['detail'])
+                or not ordinary(before, removable=True) or not ordinary(retained)
+                or not covers_audience(before, retained, identity)
+                or str(retained[0][2]) != chosen['owner_id']
+                or not rules.same_event_schedule(existing_snapshot(before), existing_snapshot(retained))
+                or existing_snapshot(retained) != chosen['event']
+            ):
                 await run_sync(history.state, identity, event_id, 'review')
                 stats['needs_review'] += 1
                 continue
@@ -147,15 +153,21 @@ async def reconcile(client, history, journal, *, allowed=object, authorize=None,
                 total += len(payload)
                 if total > 100_000_000:
                     raise ValueError('行程附件備份總量過大，未清理。')
-                files.append({'name': item['name'], 'sha256': hashlib.sha256(payload).hexdigest(),
-                              'data_base64': base64.b64encode(payload).decode()})
-            backup = {'contract': 'manual-supersession-v1', 'removed': normalized_detail(before),
-                      'retained': normalized_detail(retained), 'files': files}
+                files.append({
+                    'name': item['name'], 'sha256': hashlib.sha256(payload).hexdigest(),
+                    'data_base64': base64.b64encode(payload).decode(),
+                })
+            backup = {
+                'contract': 'manual-supersession-v1', 'removed': normalized_detail(before),
+                'retained': normalized_detail(retained), 'files': files,
+            }
             await run_sync(history.backup, identity, event_id, backup)
             # Recheck after potentially slow file downloads. Human edits win.
             await guard()
-            if (digest(await client.calendar_detail(event_id)) != digest(before)
-                    or digest(await client.calendar_detail(keep_id)) != digest(retained)):
+            if (
+                digest(await client.calendar_detail(event_id)) != digest(before)
+                or digest(await client.calendar_detail(keep_id)) != digest(retained)
+            ):
                 await run_sync(history.state, identity, event_id, 'review')
                 stats['needs_review'] += 1
                 continue

@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 import logging
 import time
+from dataclasses import dataclass
 
 
 class LeaseBusy(RuntimeError):
@@ -51,8 +51,8 @@ async def supervise(operation, health, *, interval=None):
                 health.failures += 1
                 health.last_error_type = type(error).__name__
                 health.retry_at = time.time()+delay
-                logging.getLogger(__name__).warning('Workflow worker unavailable (%s)',type(error).__name__)
+                logging.getLogger(__name__).warning('Workflow worker unavailable (%s)', type(error).__name__)
                 await asyncio.sleep(delay)
-                delay = min(60,delay*2)
+                delay = min(60, delay*2)
     finally:
         health.status, health.retry_at = 'stopped', None

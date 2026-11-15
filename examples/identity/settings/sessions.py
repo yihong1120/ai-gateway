@@ -1,7 +1,10 @@
 from __future__ import annotations
+
 import os
+
 from pydantic import Field
 from pydantic_settings import BaseSettings
+
 from .common import _env_bool
 
 
@@ -56,11 +59,11 @@ class SessionsSettings(BaseSettings):
     )
 
     encryption_key: str = Field(
-        default='', repr=False, validation_alias='BFF_TOKEN_ENCRYPTION_KEY'
+        default='', repr=False, validation_alias='BFF_TOKEN_ENCRYPTION_KEY',
     )
     ttl_seconds: int = Field(
-        default=30 * 24 * 3600, gt=0, validation_alias='BFF_SESSION_TTL_SECONDS'
+        default=30 * 24 * 3600, gt=0, validation_alias='BFF_SESSION_TTL_SECONDS',
     )
     media_ttl_seconds: int = Field(
-        default=600, ge=300, le=900, validation_alias='MEDIA_SESSION_TTL_SECONDS'
+        default=600, ge=300, le=900, validation_alias='MEDIA_SESSION_TTL_SECONDS',
     )

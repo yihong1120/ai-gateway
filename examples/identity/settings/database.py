@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 import os
+
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
@@ -26,5 +28,5 @@ class DatabaseSettings(BaseSettings):
         validation_alias='DB_POOL_TIMEOUT_SECONDS',
     )
     pool_recycle_seconds: int = Field(
-        default=1800, ge=1, validation_alias='DB_POOL_RECYCLE_SECONDS'
+        default=1800, ge=1, validation_alias='DB_POOL_RECYCLE_SECONDS',
     )

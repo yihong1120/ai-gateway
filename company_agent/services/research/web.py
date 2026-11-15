@@ -17,6 +17,14 @@ from urllib.parse import urlsplit
 
 import httpx
 
+import examples.identity.adapters.webui as _webui_imports
+from examples.shared.runtime.modules import ModuleReference
+
+_webui_config = ModuleReference('open_webui.config')
+_webui_config_ = ModuleReference('open_webui.models.config')
+_webui_access_control = ModuleReference('open_webui.utils.access_control')
+_webui_misc = ModuleReference('open_webui.utils.misc')
+
 
 WEB_TOOLS = {'search_web', 'fetch_url'}
 
@@ -74,12 +82,11 @@ async def public_addresses(url):
 
 async def web_config(owner):
     # Imports are deliberately lazy: CLI/tests do not initialize Open WebUI.
-    from open_webui.models.config import Config
-    from open_webui.utils.access_control import has_permission
-    from open_webui.config import WEB_FETCH_FILTER_LIST
-    from examples.identity.adapters.webui import verified_user
+    Config = _webui_config_.attribute('Config')
+    has_permission = _webui_access_control.attribute('has_permission')
+    WEB_FETCH_FILTER_LIST = _webui_config.attribute('WEB_FETCH_FILTER_LIST')
 
-    user = await verified_user(owner)
+    user = await _webui_imports.verified_user(owner)
     if user['role'] != 'admin' and not await has_permission(
         owner, 'features.web_search', await Config.get('user.permissions'),
     ):
@@ -104,7 +111,7 @@ async def web_config(owner):
 def host_allowed(hostnames, filters):
     if not filters:
         return True
-    from open_webui.utils.misc import is_host_allowed
+    is_host_allowed = _webui_misc.attribute('is_host_allowed')
 
     return is_host_allowed(hostnames, filters)
 

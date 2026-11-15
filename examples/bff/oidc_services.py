@@ -1,8 +1,6 @@
 """OIDC authorization-code + PKCE flow for the browser BFF."""
 from __future__ import annotations
 
-from examples.identity.runtime import get_settings
-
 import base64
 import hashlib
 import json
@@ -20,17 +18,18 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from examples.shared.runtime.http_clients import get_application_http_client
 
-from examples.identity.runtime import get_identity
+from examples.bff.schemas import UserSummary
+from examples.bff.security import set_session_cookie
 from examples.identity.deployment_context import resolve_request_deployment
 from examples.identity.models import User
 from examples.identity.providers.oidc_identity import subject_from_oidc_identity
+from examples.identity.runtime import get_identity
+from examples.identity.runtime import get_settings
 from examples.identity.sessions.store import consume_oidc_logout_state
 from examples.identity.sessions.store import create_auth_session
 from examples.identity.sessions.store import create_oidc_logout_state
-from examples.bff.schemas import UserSummary
-from examples.bff.security import set_session_cookie
+from examples.shared.runtime.http_clients import get_application_http_client
 
 _STATE_PREFIX = 'bff:oidc:state'
 _SOCIAL_IDENTITY_PROVIDER_HINTS = frozenset({'google', 'apple'})

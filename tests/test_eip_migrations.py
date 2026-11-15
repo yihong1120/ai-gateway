@@ -40,7 +40,11 @@ class MigrationTests(EIPPostgresTestCase, unittest.TestCase):
                     'calendar_managed_events', 'calendar_creation_intents',
                 },
             )
-            self.assertEqual(db.execute('SELECT version FROM schema_migrations ORDER BY version').fetchall(), [(n,) for n in range(2, migrations.VERSION + 1)])
+            self.assertEqual(
+                db.execute('SELECT version FROM schema_migrations ORDER BY version').fetchall(), [
+                    (n,) for n in range(2, migrations.VERSION + 1)
+                ],
+            )
         self.assertEqual(journal.reserve_event('event'), 'reserved')
         journal.done('event', receipt={'event_id': 'remote-id', 'detail_verified': True})
         self.assertEqual(Journal().reserve_event('event'), 'done')
@@ -174,9 +178,16 @@ class MigrationTests(EIPPostgresTestCase, unittest.TestCase):
         with patch.object(migrations, '_version_nine', side_effect=AssertionError('v9 migration repeated')):
             self.migrate()
         with self.connect() as db:
-            self.assertEqual(db.execute('SELECT * FROM processing_chunks').fetchall(), [('owner', 'private', b'original-ciphertext', 123)])
+            self.assertEqual(
+                db.execute('SELECT * FROM processing_chunks').fetchall(),
+                [('owner', 'private', b'original-ciphertext', 123)],
+            )
             self.assertEqual(db.execute('SELECT * FROM writes').fetchall(), [('uncertain', 'unknown', 456)])
-            self.assertEqual(db.execute('SELECT * FROM schema_migrations WHERE version<10 ORDER BY version').fetchall(), original)
+            self.assertEqual(
+                db.execute(
+                    'SELECT * FROM schema_migrations WHERE version<10 ORDER BY version',
+                ).fetchall(), original,
+            )
             self.assertIsNotNone(db.execute("SELECT to_regclass('shared_content_cache')").fetchone()[0])
 
     def test_version_eleven_upgrade_adds_calendar_provenance_without_rewriting_private_data(self):
@@ -187,12 +198,25 @@ class MigrationTests(EIPPostgresTestCase, unittest.TestCase):
             db.execute("INSERT INTO processing_chunks VALUES('owner','private',%s,123)", (b'original-ciphertext',))
             db.execute("INSERT INTO writes VALUES('calendar-done','done',456),('calendar-unknown','unknown',789)")
             db.execute("INSERT INTO event_receipts VALUES('calendar-done','original-event',456)")
-            original=db.execute('SELECT * FROM schema_migrations ORDER BY version').fetchall()
+            original = db.execute('SELECT * FROM schema_migrations ORDER BY version').fetchall()
         self.migrate()
         with self.connect() as db:
-            self.assertEqual(db.execute('SELECT * FROM processing_chunks').fetchall(), [('owner','private',b'original-ciphertext',123)])
-            self.assertEqual(db.execute('SELECT key,status FROM writes ORDER BY key').fetchall(), [('calendar-done','done'),('calendar-unknown','unknown')])
-            self.assertEqual(db.execute('SELECT * FROM event_receipts').fetchall(), [('calendar-done','original-event',456)])
-            self.assertEqual(db.execute('SELECT * FROM schema_migrations WHERE version<12 ORDER BY version').fetchall(), original)
-            self.assertEqual(db.execute('SELECT count(*) FROM calendar_managed_events').fetchone()[0],0)
-            self.assertEqual(db.execute('SELECT count(*) FROM calendar_creation_intents').fetchone()[0],0)
+            self.assertEqual(
+                db.execute('SELECT * FROM processing_chunks').fetchall(),
+                [('owner', 'private', b'original-ciphertext', 123)],
+            )
+            self.assertEqual(
+                db.execute('SELECT key,status FROM writes ORDER BY key').fetchall(),
+                [('calendar-done', 'done'), ('calendar-unknown', 'unknown')],
+            )
+            self.assertEqual(
+                db.execute('SELECT * FROM event_receipts').fetchall(),
+                [('calendar-done', 'original-event', 456)],
+            )
+            self.assertEqual(
+                db.execute(
+                    'SELECT * FROM schema_migrations WHERE version<12 ORDER BY version',
+                ).fetchall(), original,
+            )
+            self.assertEqual(db.execute('SELECT count(*) FROM calendar_managed_events').fetchone()[0], 0)
+            self.assertEqual(db.execute('SELECT count(*) FROM calendar_creation_intents').fetchone()[0], 0)

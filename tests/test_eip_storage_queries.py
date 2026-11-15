@@ -7,8 +7,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from psycopg.types.json import Json
 from psycopg.pq import TransactionStatus
+from psycopg.types.json import Json
 from sqlalchemy import Column
 from sqlalchemy import JSON
 from sqlalchemy import MetaData
@@ -16,15 +16,21 @@ from sqlalchemy import String
 from sqlalchemy import Table
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from examples.official_document_workflow.infrastructure.eip.calendar_sync import verified_events
+from examples.official_document_workflow.infrastructure.eip.calendar_sync import (
+    verified_events,
+)
 from examples.official_document_workflow.infrastructure.storage import webui_files
 from examples.official_document_workflow.infrastructure.storage.automation_store import (
     AutomationStore,
 )
 from examples.official_document_workflow.infrastructure.storage.state import Journal
+from examples.shared.runtime.database import PoolScope
 from tests.eip_postgres import EIPPostgresTestCase
 from tests.test_eip_connector import remote
 from tests.test_eip_connector import row
+# Match the application's retained pool lifetime. A borrower-only pool
+# is intentionally closed on context exit, so inspecting that closed
+# handle's transaction status would not test transaction cleanup.
 
 
 class StorageTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
@@ -43,10 +49,6 @@ class StorageTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
 
     def test_both_stores_commit_rollback_and_release_with_their_row_formats(self):
         journal = Journal()
-        # Match the application's retained pool lifetime. A borrower-only pool
-        # is intentionally closed on context exit, so inspecting that closed
-        # handle's transaction status would not test transaction cleanup.
-        from examples.shared.runtime.database import PoolScope
         scope = PoolScope()
         self.addCleanup(scope.close)
         with scope.bind(), TemporaryDirectory() as directory:

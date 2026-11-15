@@ -16,9 +16,9 @@ import time
 import uuid
 from collections import Counter
 from functools import partial
-from types import SimpleNamespace
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import psycopg
@@ -26,12 +26,20 @@ from psycopg import sql
 
 from company_agent.api.queue import WorkQueue
 from company_agent.api.service import Service
-from company_agent.evals.sandbox import make_state_directory
 from company_agent.evals.runner import evaluation
+from company_agent.evals.sandbox import make_state_directory
+from examples.official_document_workflow.infrastructure.storage.automation_store import (
+    AutomationStore,
+)
+from examples.official_document_workflow.infrastructure.storage.state import Journal
+from examples.official_document_workflow.infrastructure.storage.state import State
 from examples.shared.runtime import concurrency
+from examples.shared.runtime.modules import ModuleReference
 from examples.shared.runtime.workers import WorkerHealth
-from examples.official_document_workflow.infrastructure.storage.automation_store import AutomationStore
-from examples.official_document_workflow.infrastructure.storage.state import State, Journal
+
+_docx = ModuleReference('docx')
+_workflow_application = ModuleReference('examples.official_document_workflow.application')
+_pymupdf = ModuleReference('pymupdf')
 
 
 def percentile(values, fraction):
@@ -41,8 +49,8 @@ def percentile(values, fraction):
 
 def render_document():
     """Real local PDF/Word creation and PDF rendering, using synthetic text."""
-    import pymupdf
-    from docx import Document
+    pymupdf = _pymupdf.load()
+    Document = _docx.attribute('Document')
     with pymupdf.open() as pdf:
         for number in range(10):
             page = pdf.new_page()
@@ -61,7 +69,7 @@ def render_document():
 
 
 async def profile(limit, model_limit, ocr_limit, users, hold):
-    from examples.official_document_workflow.application import automation, background_upload
+    automation, background_upload = _workflow_application.attributes('automation', 'background_upload')
     company_dsn = os.environ['COMPANY_AGENT_TEST_DATABASE_URL']
     eip_dsn = os.environ['EIP_TEST_DATABASE_URL']
     company_schema = 'company_agent_test_' + uuid.uuid4().hex
@@ -163,9 +171,9 @@ async def profile(limit, model_limit, ocr_limit, users, hold):
                     peak['ocr'] = max(peak['ocr'], ocr_limit-ocr_gate._value)
 
             with patch.object(concurrency, 'DOCUMENTS', concurrency.OwnerSlots(limit)), \
-                patch.object(concurrency, 'MODELS', model_gate), patch.object(concurrency, 'OCR', ocr_gate), \
-                patch.object(service, 'execute', side_effect=company), \
-                patch.object(background_upload, 'execute', side_effect=document):
+                    patch.object(concurrency, 'MODELS', model_gate), patch.object(concurrency, 'OCR', ocr_gate), \
+                    patch.object(service, 'execute', side_effect=company), \
+                    patch.object(background_upload, 'execute', side_effect=document):
                 service.task = asyncio.create_task(service.loop())
                 scheduler = automation.AutomaticScheduler(
                     db, journal, state, WorkerHealth(),

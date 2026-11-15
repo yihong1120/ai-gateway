@@ -4,12 +4,12 @@ An unscoped one-off transaction borrows a temporary pool. A scope retains only
 DSNs it actually uses, and closing one app never closes another app's pool or
 an active transaction. Session advisory leases still use dedicated connections.
 """
-
 from __future__ import annotations
 
-import atexit
 import asyncio
-from contextlib import contextmanager, asynccontextmanager
+import atexit
+from contextlib import asynccontextmanager
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from threading import Lock
@@ -42,9 +42,9 @@ class PoolRegistry:
                     max_waiting=64,
                     open=True,
                     kwargs={
-                        'options': '-c lock_timeout=5000 -c statement_timeout=30000'
+                        'options': '-c lock_timeout=5000 -c statement_timeout=30000',
                     },
-                )
+                ),
             )
         return self._entries[dsn]
 
@@ -173,7 +173,7 @@ def connection(dsn, schema, *, row_factory=None):
         try:
             db.row_factory = row_factory or previous
             db.execute(
-                sql.SQL('SET LOCAL search_path TO {}').format(sql.Identifier(schema))
+                sql.SQL('SET LOCAL search_path TO {}').format(sql.Identifier(schema)),
             )
             yield db
         finally:

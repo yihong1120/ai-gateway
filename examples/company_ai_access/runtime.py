@@ -1,19 +1,21 @@
 """Lifespan-owned service, worker lease, async database pool and HTTP client."""
-
 from __future__ import annotations
 
 import asyncio
-from contextlib import AsyncExitStack, asynccontextmanager, suppress
 import fcntl
 import os
+from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack
+from contextlib import suppress
 
 import httpx
 
-from examples.company_ai_access.storage.repository import Repository
+from examples.company_ai_access.adapters.upstream import Directory
+from examples.company_ai_access.adapters.upstream import LiteLLM
 from examples.company_ai_access.services.devices import Service
-from examples.company_ai_access.storage.registry import Store
 from examples.company_ai_access.services.inference import InferenceProxy
-from examples.company_ai_access.adapters.upstream import Directory, LiteLLM
+from examples.company_ai_access.storage.registry import Store
+from examples.company_ai_access.storage.repository import Repository
 
 
 @asynccontextmanager
@@ -38,7 +40,7 @@ async def runtime(app, settings):
                     trust_env=False,
                     follow_redirects=False,
                     limits=httpx.Limits(max_connections=30, max_keepalive_connections=10),
-                )
+                ),
             )
             instance = Service(
                 settings,

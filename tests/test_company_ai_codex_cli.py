@@ -3,35 +3,46 @@
 The deterministic upstream emits a local shell call, verifies its replayed result,
 then completes the answer. No external model, user credential or child agent is used.
 """
+from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+import fcntl
 import json
 import os
-from pathlib import Path
+import pty
 import re
+import select
 import shutil
+import signal
 import socket
+import struct
 import subprocess
 import sys
+import termios
 import threading
 import time
+import tomllib
+import unittest
+from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
 import httpx
 import pytest
 import uvicorn
-import unittest
-from tests.ai_access_postgres import access_database
+from fastapi import FastAPI
 
-from examples.company_ai_access.routers.inference import inference_router
-from examples.company_ai_access.services.inference import InferenceProxy
-from examples.company_ai_access.storage.repository import Repository
-from examples.company_ai_access.protocols.codex_catalog import candidate, COMPANY_MODELS
 from examples.company_ai_access.config import Settings
-from examples.company_ai_access.services.devices import Service, challenge
+from examples.company_ai_access.protocols.codex_catalog import candidate
+from examples.company_ai_access.protocols.codex_catalog import COMPANY_MODELS
+from examples.company_ai_access.routers.inference import inference_router
+from examples.company_ai_access.services.devices import challenge
+from examples.company_ai_access.services.devices import Service
+from examples.company_ai_access.services.inference import InferenceProxy
 from examples.company_ai_access.storage.registry import Store
-from tests.test_company_ai_access import FakeDirectory, FakeLiteLLM
+from examples.company_ai_access.storage.repository import Repository
+from tests.ai_access_postgres import access_database
+from tests.test_company_ai_access import FakeDirectory
+from tests.test_company_ai_access import FakeLiteLLM
 
 
 @pytest.mark.skipif(
@@ -42,13 +53,6 @@ def test_installed_codex_interactive_startup_with_long_generated_company_home(tm
     executable, powershell = shutil.which('codex'), shutil.which('pwsh')
     if not executable or not powershell:
         pytest.skip('Approved Codex and portable PowerShell are needed for the interactive regression.')
-    import fcntl
-    import pty
-    import select
-    import signal
-    import struct
-    import termios
-    import tomllib
 
     home = tmp_path / ('Company AI user with spaces ' * 4)
     home.mkdir()
@@ -154,9 +158,9 @@ def test_installed_codex_picker_contains_exactly_the_three_company_models(tmp_pa
                 'name = "Company AI"',
                 'base_url = "http://127.0.0.1:9/v1"',
                 'wire_api = "responses"',
-            ]
+            ],
         )
-        + '\n'
+        + '\n',
     )
 
     async def listing():
@@ -283,10 +287,14 @@ def test_installed_codex_tool_loop(tmp_path, model, request, mcp_config='', mcp_
                     elif tool.get('type') == 'namespace':
                         yield from functions_in(tool.get('tools', []), tool['name'])
             functions = list(functions_in(body.get('tools', [])))
-            shell = next((tool for tool in functions if (
-                tool['name'].endswith(mcp_tool_suffix) if mcp_tool_suffix else
-                tool['name'] in {'shell_command', 'exec_command', 'shell'}
-            )), None)
+            shell = next(
+                (
+                    tool for tool in functions if (
+                        tool['name'].endswith(mcp_tool_suffix) if mcp_tool_suffix else
+                        tool['name'] in {'shell_command', 'exec_command', 'shell'}
+                    )
+                ), None,
+            )
             assert shell is not None, 'CLI did not offer a local shell tool: ' + ','.join(
                 tool['name'] for tool in functions
             )
@@ -318,7 +326,7 @@ def test_installed_codex_tool_loop(tmp_path, model, request, mcp_config='', mcp_
                         'type': 'output_text',
                         'text': 'CODEX_GATEWAY_OK',
                         'annotations': [],
-                    }
+                    },
                 ],
             }
         response = {
@@ -405,9 +413,9 @@ def test_installed_codex_tool_loop(tmp_path, model, request, mcp_config='', mcp_
                 'args = [' + json.dumps(str(helper)) + ']',
                 'timeout_ms = 5000',
                 'refresh_interval_ms = 300000',
-            ]
+            ],
         )
-        + '\n' + mcp_config
+        + '\n' + mcp_config,
     )
     env = {
         key: value

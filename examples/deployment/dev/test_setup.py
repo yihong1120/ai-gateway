@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import importlib.metadata
 import shlex
 import sys
@@ -104,14 +106,20 @@ def test_dev_model_environment_excludes_production_management_and_database_crede
 
 
 def test_nested_provider_references_are_selected_without_unrelated_configuration():
-    config = {'model_list': [{'litellm_params': {
-        'provider': [{'credentials': 'os.environ/VERTEX_CREDENTIALS'}],
-        'api_key': 'os.environ/PROVIDER_KEY', 'unset': 'os.environ/UNSET',
-    }}], 'general_settings': {'master_key': 'os.environ/LITELLM_MASTER_KEY'}}
-    assert setup.model_environment(config, {
-        'VERTEX_CREDENTIALS': 'synthetic-credentials', 'PROVIDER_KEY': 'synthetic-provider-key',
-        'UNSET': '', 'LITELLM_MASTER_KEY': 'never-copy', 'OTHER': 'never-copy',
-    }) == {'VERTEX_CREDENTIALS': 'synthetic-credentials', 'PROVIDER_KEY': 'synthetic-provider-key'}
+    config = {
+        'model_list': [{
+            'litellm_params': {
+                'provider': [{'credentials': 'os.environ/VERTEX_CREDENTIALS'}],
+                'api_key': 'os.environ/PROVIDER_KEY', 'unset': 'os.environ/UNSET',
+            },
+        }], 'general_settings': {'master_key': 'os.environ/LITELLM_MASTER_KEY'},
+    }
+    assert setup.model_environment(
+        config, {
+            'VERTEX_CREDENTIALS': 'synthetic-credentials', 'PROVIDER_KEY': 'synthetic-provider-key',
+            'UNSET': '', 'LITELLM_MASTER_KEY': 'never-copy', 'OTHER': 'never-copy',
+        },
+    ) == {'VERTEX_CREDENTIALS': 'synthetic-credentials', 'PROVIDER_KEY': 'synthetic-provider-key'}
 
 
 def test_template_covers_model_environment_and_litellm_versioned_environment():
@@ -143,19 +151,23 @@ def test_missing_dev_local_endpoint_fails_before_deployment(tmp_path, monkeypatc
     assert not setup.DATA.exists()
 
 
-@pytest.mark.parametrize('catalog', [
-    [], {}, {'model_list': {}}, {'model_list': [None]},
-    {'model_list': [{'model_name': 'shared', 'litellm_params': []}]},
-])
+@pytest.mark.parametrize(
+    'catalog', [
+        [], {}, {'model_list': {}}, {'model_list': [None]},
+        {'model_list': [{'model_name': 'shared', 'litellm_params': []}]},
+    ],
+)
 def test_invalid_catalog_structure_is_rejected(tmp_path, monkeypatch, catalog):
     write_catalog(tmp_path, monkeypatch, catalog, {})
     with pytest.raises(ValueError, match='Invalid LiteLLM catalog'):
         setup.litellm_config()
 
 
-@pytest.mark.parametrize('policies', [
-    [], {'models': {'shared': {}}}, {'general_settings': []}, {'unknown_section': {}},
-])
+@pytest.mark.parametrize(
+    'policies', [
+        [], {'models': {'shared': {}}}, {'general_settings': []}, {'unknown_section': {}},
+    ],
+)
 def test_dev_accepts_only_native_policy_sections(tmp_path, monkeypatch, policies):
     catalog = {'model_list': [{'model_name': 'shared', 'litellm_params': {}}], 'general_settings': {}}
     write_catalog(tmp_path, monkeypatch, catalog, policies)
@@ -182,7 +194,10 @@ def prisma_runtime(tmp_path, monkeypatch):
     versions = {'litellm': '1.109.1', 'prisma': '0.15.0'}
     monkeypatch.setattr(sys, 'prefix', str(tmp_path))
     monkeypatch.setattr(importlib.metadata, 'version', versions.__getitem__)
-    monkeypatch.setattr(importlib.metadata, 'distribution', lambda _: SimpleNamespace(locate_file=lambda name: tmp_path / name))
+    monkeypatch.setattr(
+        importlib.metadata, 'distribution',
+        lambda _: SimpleNamespace(locate_file=lambda name: tmp_path / name),
+    )
     return source, versions
 
 
@@ -216,11 +231,13 @@ def test_prisma_initialization_does_not_modify_foreign_environment(prisma_runtim
     assert source.read_bytes() == before
 
 
-@pytest.mark.parametrize('source_text', [
-    'unexpected implementation\n',
-    '        prisma_client._Prisma__engine = engine\n' * 2,
-    '        prisma_client._Prisma__engine = engine\n        prisma_client._engine = engine\n',
-])
+@pytest.mark.parametrize(
+    'source_text', [
+        'unexpected implementation\n',
+        '        prisma_client._Prisma__engine = engine\n' * 2,
+        '        prisma_client._Prisma__engine = engine\n        prisma_client._engine = engine\n',
+    ],
+)
 def test_prisma_initialization_rejects_unknown_source_without_writing(prisma_runtime, source_text):
     source, _ = prisma_runtime
     source.write_text(source_text)
@@ -246,9 +263,13 @@ def test_setup_initializes_prisma_only_inside_selected_litellm_environment(tmp_p
     check_output = Mock(return_value=str(schema) + '\n')
     provision = Mock()
     monkeypatch.setattr(setup.os, 'geteuid', lambda: 1000)
-    monkeypatch.setattr(setup, 'read_services', Mock(return_value={
-        'litellm': {'LOCAL_MODEL_DEV_API_BASE': 'http://dev.test/v1'}, 'webui': {},
-    }))
+    monkeypatch.setattr(
+        setup, 'read_services', Mock(
+            return_value={
+                'litellm': {'LOCAL_MODEL_DEV_API_BASE': 'http://dev.test/v1'}, 'webui': {},
+            },
+        ),
+    )
     monkeypatch.setattr(setup, 'CONFIG', tmp_path / 'generated')
     monkeypatch.setattr(setup, 'DATA', tmp_path / 'data')
     monkeypatch.setattr(setup, 'LLMPY', selected_python)

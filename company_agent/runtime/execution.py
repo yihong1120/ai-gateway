@@ -13,6 +13,8 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.types import Command
 from langsmith import tracing_context
 
+import company_agent.services.delivery.explicit as _explicit_imports
+import company_agent.services.delivery.preservation as _preservation_imports
 from company_agent.config import Settings
 from company_agent.graph import build_graph
 from company_agent.runtime.context import Context
@@ -22,6 +24,7 @@ from company_agent.runtime.models import routed_model
 from company_agent.runtime.models import UserBilledModel
 from company_agent.runtime.results import finish_run
 from company_agent.runtime.storage import Store
+from company_agent.services.delivery.schemas import DeliveryPlan
 from company_agent.services.external_tools.tools import external_agent_tools
 from company_agent.state import GRAPH_VERSION
 
@@ -70,19 +73,16 @@ class DocumentAgent:
             ] + [HumanMessage(content=instruction)],
         }
         if delivery_plan is not None:
-            from company_agent.services.delivery.schemas import DeliveryPlan
-            from company_agent.services.delivery.explicit import check_explicit_cells
 
             specification = DeliveryPlan.model_validate(delivery_plan)
-            check_explicit_cells(instruction, specification)
-            from company_agent.services.delivery.preservation import bind_preservation, native_targets
-            targets = native_targets(instruction, specification.files)
+            _explicit_imports.check_explicit_cells(instruction, specification)
+            targets = _preservation_imports.native_targets(instruction, specification.files)
             if targets:
                 if any(f.name in targets and f.base_source is None for f in specification.files):
                     raise ValueError('注入的原簿保留計畫須指定base_source的root/path/sha256，才能在建立工作前驗證。')
                 self.billing_identity(owner)
                 specification = await asyncio.to_thread(
-                    bind_preservation,
+                    _preservation_imports.bind_preservation,
                     Context(owner, '', self.settings, self.store, self.model), instruction, specification,
                     [f.base_source.model_dump() for f in specification.files if f.base_source is not None],
                 )

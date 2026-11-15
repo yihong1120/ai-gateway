@@ -1,12 +1,18 @@
 """Authenticated model routes; transport owns upstream HTTP and streaming."""
-
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter
+from fastapi import Depends
+from fastapi import Request
 
-from examples.company_ai_access.routers.dependencies import service, client_ip, require_inference_network, limited_json, validate_inference_query
+import examples.company_ai_access.protocols.responses as _responses_imports
 from examples.company_ai_access.errors import error
 from examples.company_ai_access.protocols.messages import envelope as message_envelope
+from examples.company_ai_access.routers.dependencies import client_ip
+from examples.company_ai_access.routers.dependencies import limited_json
+from examples.company_ai_access.routers.dependencies import require_inference_network
+from examples.company_ai_access.routers.dependencies import service
+from examples.company_ai_access.routers.dependencies import validate_inference_query
 
 
 def inference_router():
@@ -72,7 +78,6 @@ def inference_router():
 
     @router.post('/v1/responses')
     async def responses(request: Request):
-        from examples.company_ai_access.protocols.responses import envelope
 
         raw, device = await authenticated(request)
         state = service(request)
@@ -83,7 +88,7 @@ def inference_router():
         value = await limited_json(request)
         if value.get('model') not in state.settings.codex_models:
             raise error(403, 'ai_access_model_not_allowed')
-        body = envelope(value)
+        body = _responses_imports.envelope(value)
         body['user'] = device['subject']
         return await request.app.state.company_ai_inference.forward(request, raw, device, body, '/v1/responses')
 

@@ -6,24 +6,24 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from examples.identity.database import get_db
-from examples.identity.models import Feature
-from examples.identity.models import Group
-from examples.identity.models import User
-from examples.identity.dependencies import get_current_user
-from examples.identity.dependencies import require_super_admin
-from examples.identity.schemas.feature import FeatureCreate
-from examples.identity.schemas.feature import FeatureDelete
-from examples.identity.schemas.feature import FeatureRead
-from examples.identity.schemas.feature import FeatureUpdate
-from examples.identity.schemas.feature import GroupFeatureUpdate
-from examples.identity.schemas.group import GroupFeatureRead
 from examples.identity.authorization.features import create_feature
 from examples.identity.authorization.features import delete_feature
 from examples.identity.authorization.features import list_features
 from examples.identity.authorization.features import list_group_features
 from examples.identity.authorization.features import update_feature
 from examples.identity.authorization.features import update_group_features
+from examples.identity.database import get_db
+from examples.identity.dependencies import get_current_user
+from examples.identity.dependencies import require_super_admin
+from examples.identity.models import Feature
+from examples.identity.models import Group
+from examples.identity.models import User
+from examples.identity.schemas.feature import FeatureCreate
+from examples.identity.schemas.feature import FeatureDelete
+from examples.identity.schemas.feature import FeatureRead
+from examples.identity.schemas.feature import FeatureUpdate
+from examples.identity.schemas.feature import GroupFeatureUpdate
+from examples.identity.schemas.group import GroupFeatureRead
 
 router = APIRouter(tags=['feature-mgmt'])
 

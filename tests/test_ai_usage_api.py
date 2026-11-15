@@ -7,6 +7,10 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from examples.shared.runtime.modules import ModuleReference
+
+_examples_ai_usage_app = ModuleReference('examples.ai_usage.app')
+
 
 _TEST_ENV = {
     'PYTHON_DOTENV_DISABLED': '1',
@@ -26,7 +30,7 @@ class AiUsageApiTests(TestCase):
 
     def test_daily_usage_requires_a_bearer_token(self) -> None:
         with patch.dict(os.environ, _TEST_ENV, clear=False):
-            from examples.ai_usage.app import app
+            app = _examples_ai_usage_app.attribute('app')
 
             with TestClient(app) as client:
                 response = client.get(

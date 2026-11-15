@@ -9,9 +9,6 @@ from fastapi.responses import RedirectResponse
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from examples.identity.database import get_db
-from examples.identity.providers.mode import identity_provider_account_url
-from examples.identity.redis_pool import get_redis_pool
 from examples.bff.oidc_services import complete_oidc_login
 from examples.bff.oidc_services import oidc_global_logout_redirect
 from examples.bff.oidc_services import oidc_login_redirect
@@ -24,6 +21,9 @@ from examples.bff.session_services import current_bff_session
 from examples.bff.session_services import login_bff_session
 from examples.bff.session_services import logout_bff_session
 from examples.bff.session_services import proxy_bff_request
+from examples.identity.database import get_db
+from examples.identity.providers.mode import identity_provider_account_url
+from examples.identity.redis_pool import get_redis_pool
 
 router = APIRouter(prefix='/bff', tags=['bff'])
 

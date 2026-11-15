@@ -7,14 +7,18 @@ import io
 import json
 from datetime import date
 
-from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_HEADERS
-from examples.official_document_workflow.infrastructure.eip.calendar_csv import parse_csv
+import company_agent.services.eip.client as _client_imports
+from examples.official_document_workflow.domain.calendar.csv_schema import (
+    CALENDAR_HEADERS,
+)
+from examples.official_document_workflow.infrastructure.eip.calendar_csv import (
+    parse_csv,
+)
 
 
 async def prepare(ctx, args):
-    from company_agent.services.eip.client import binding
 
-    await binding(ctx)
+    await _client_imports.binding(ctx)
     canonical = sorted(
         (e.model_dump() for e in args.events), key=lambda e: json.dumps(e, sort_keys=True),
     )
@@ -55,7 +59,7 @@ async def prepare(ctx, args):
         writer.writerow(row)
     payload = stream.getvalue().encode('utf-8-sig')
     parse_csv(payload)
-    await binding(ctx)
+    await _client_imports.binding(ctx)
     artifact = ctx.store.artifact(
         ctx.owner, ctx.job, '行事曆待確認_' + digest[:10] + '.csv', payload,
     )

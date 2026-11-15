@@ -1,6 +1,9 @@
 """Strict protocol arguments, preserving the SDK's public argument interface."""
+from __future__ import annotations
+
 from mcp.server.mcpserver.utilities.func_metadata import ArgModelBase
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict
+from pydantic import Field
 
 
 class Arguments(ArgModelBase):

@@ -1,7 +1,10 @@
 from __future__ import annotations
+
 import os
+
 from pydantic import Field
 from pydantic_settings import BaseSettings
+
 from .common import _env_bool
 
 

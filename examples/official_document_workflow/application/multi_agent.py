@@ -6,13 +6,6 @@ agents. No persistent checkpoint contains source text or credentials here;
 the scheduler's existing journal remains the external-side-effect boundary.
 """
 from __future__ import annotations
-from .analysis_state import AnalysisState
-from examples.official_document_workflow.services.analysis_reuse import analyze_content, source_revisions
-from examples.official_document_workflow.services.source_readings import read_source
-from .calendar_stage import CalendarStage
-from .outcomes import GroupResult, DocumentResult, CalendarResult, DocumentExportResult
-
-from examples.official_document_workflow.domain import documents as module
 
 import asyncio
 import json
@@ -26,31 +19,54 @@ from zoneinfo import ZoneInfo
 
 from langsmith import tracing_context
 
+from .analysis_state import AnalysisState
+from .calendar_stage import CalendarStage
 from .group_processing import outcome
 from .group_processing import parse_group
 from .group_processing import parse_group_document
 from .long_source import group_text
 from .long_source import source_lines
-from .prompts import EMPTY_EVENTS_REPAIR_PROMPT
+from .outcomes import CalendarResult
+from .outcomes import DocumentExportResult
+from .outcomes import DocumentResult
+from .outcomes import GroupResult
 from .prompts import EIP_RELATIVE_DATE_PROMPT
 from .prompts import EIP_TRACKING_REMINDER_PROMPT
+from .prompts import EMPTY_EVENTS_REPAIR_PROMPT
 from .prompts import group_prompt
 from .prompts import preparation_prompt
 from .prompts import REPAIR_PROMPT
 from examples.official_document_workflow.application.calendar_review import consolidate_events
 from examples.official_document_workflow.application.calendar_review import review_calendar
-from examples.official_document_workflow.application.preparation_review import reviewed_preparations
+from examples.official_document_workflow.application.preparation_review import (
+    reviewed_preparations,
+)
+from examples.official_document_workflow.domain import documents as module
 from examples.official_document_workflow.domain.calendar.calendar_semantics import literal_source_candidates
 from examples.official_document_workflow.domain.calendar.calendar_semantics import temporal_source_candidates
 from examples.official_document_workflow.domain.calendar.calendar_semantics import uncovered_time_candidates
-from examples.official_document_workflow.domain.calendar.contracts import GROUP_ANALYSIS_SCHEMA
-from examples.official_document_workflow.domain.calendar.tracking_reminders import TrackingReminderProof
-from examples.official_document_workflow.domain.calendar.preparation import preparation_rows
-from examples.official_document_workflow.domain.calendar.relative_dates import RelativeDateProof
+from examples.official_document_workflow.domain.calendar.contracts import (
+    GROUP_ANALYSIS_SCHEMA,
+)
+from examples.official_document_workflow.domain.calendar.preparation import (
+    preparation_rows,
+)
+from examples.official_document_workflow.domain.calendar.relative_dates import (
+    RelativeDateProof,
+)
+from examples.official_document_workflow.domain.calendar.tracking_reminders import (
+    TrackingReminderProof,
+)
 from examples.official_document_workflow.domain.limits import MAX_EIP_ATTACHMENTS
-from examples.official_document_workflow.domain.validation import ContentValidationError
 from examples.official_document_workflow.domain.validation import content_issue
+from examples.official_document_workflow.domain.validation import ContentValidationError
 from examples.official_document_workflow.domain.workflow import JobPlan
+from examples.official_document_workflow.services.analysis_reuse import analyze_content
+from examples.official_document_workflow.services.analysis_reuse import source_revisions
+from examples.official_document_workflow.services.source_readings import read_source
+from examples.shared.runtime.modules import ModuleReference
+
+_pymupdf = ModuleReference('pymupdf')
 
 
 class DocumentAgent:
@@ -162,8 +178,10 @@ class DocumentAgent:
             except ValueError as error:
                 if not self.correction_enabled:
                     raise
-                issue = content_issue(error, group_index=state['group_index'],
-                                      repair_attempted=state.get('analysis_attempts', 0) >= 2)
+                issue = content_issue(
+                    error, group_index=state['group_index'],
+                    repair_attempted=state.get('analysis_attempts', 0) >= 2,
+                )
                 if issue is None:
                     raise
                 self.pending_calendar(state, issue)
@@ -383,7 +401,7 @@ class DocumentAgent:
 
 def write_pdf_pages(source_path, destination, page_numbers):
     """Select original PDF pages using PyMuPDF; never overwrite the upload."""
-    import pymupdf
+    pymupdf = _pymupdf.load()
 
     with pymupdf.open(source_path) as pdf:
         if not page_numbers or any(not 1 <= n <= pdf.page_count for n in page_numbers):
@@ -454,14 +472,16 @@ class GroupExporter:
                 # retained for ownership/provenance, while the temporary PDF dies here.
                 if self.plan.outputs.renamed_pdf:
                     data = await asyncio.to_thread(prepared.pdf_path.read_bytes)
-                    files.append(await self.save(
-                        prepared,
-                        data,
-                        stem + '.pdf',
-                        'application/pdf',
-                        'document_pdf',
-                        metadata,
-                    ))
+                    files.append(
+                        await self.save(
+                            prepared,
+                            data,
+                            stem + '.pdf',
+                            'application/pdf',
+                            'document_pdf',
+                            metadata,
+                        ),
+                    )
                 if self.plan.outputs.editable_docx:
                     await self.pipe.emit_status(
                         self.emitter, '文件輸出工具：' + label + '，建立可編輯 Word' if load_word_document is None
@@ -470,14 +490,16 @@ class GroupExporter:
                     data = await self.pipe.exports.word_payload(
                         prepared.pdf_path, spotting_required=spotting_required, load_word_document=load_word_document,
                     )
-                    files.append(await self.save(
-                        prepared,
-                        data,
-                        stem + '.docx',
-                        module.DOCX_CONTENT_TYPE,
-                        'document_docx',
-                        metadata,
-                    ))
+                    files.append(
+                        await self.save(
+                            prepared,
+                            data,
+                            stem + '.docx',
+                            module.DOCX_CONTENT_TYPE,
+                            'document_docx',
+                            metadata,
+                        ),
+                    )
         except (ValueError, OSError) as exc:
             # Never retry a failed/uncertain write. Earlier acknowledged outputs
             # remain downloads even when a later format could not be completed.
@@ -507,9 +529,13 @@ class BatchWorkflow:
         self.instruction = instruction
         self.calendar_stage = CalendarStage(pipe, owner)
         self.pipe._estimate_relative_dates = True
-        self.preparation_date = datetime.now(ZoneInfo('Asia/Taipei')).date() if getattr(pipe, '_eip_tracking_reminders', False) else None
+        self.preparation_date = datetime.now(
+            ZoneInfo('Asia/Taipei'),
+        ).date() if getattr(pipe, '_eip_tracking_reminders', False) else None
         self.seen_preparations = set()
-        self.document_agent = DocumentAgent(pipe,  emitter, preparation_date=self.preparation_date, correction_enabled=True)
+        self.document_agent = DocumentAgent(
+            pipe,  emitter, preparation_date=self.preparation_date, correction_enabled=True,
+        )
 
     async def coordinate(self):
         await self.pipe.emit_status(self.emitter, '工作協調 Agent：理解本次指令與輸出需求')
@@ -607,12 +633,17 @@ class BatchWorkflow:
         if state['plan'].outputs.calendar_csv:
             await self.pipe.emit_status(self.emitter, '行事曆工具：驗證期限、套用使用者提醒並產生 CSV')
             prepared = self.calendar_stage.prepare(
-                CalendarResult(tuple(state['rows']), tuple(state['calendar_errors']), True), state['plan'])
+                CalendarResult(tuple(state['rows']), tuple(state['calendar_errors']), True), state['plan'],
+            )
             state['warnings'].extend(prepared.pending)
             state['notices'].extend(prepared.notices)
-            result = await self.calendar_stage.save(prepared, f"行事曆_附件組_{len(self.groups)}組.csv", self.ids[0],
-                {'eip_group_source_ids': self.ids, 'relative_date_estimates': state['date_estimates'],
-                 'tracking_reminders': state['tracking_reminders']})
+            result = await self.calendar_stage.save(
+                prepared, f"行事曆_附件組_{len(self.groups)}組.csv", self.ids[0],
+                {
+                    'eip_group_source_ids': self.ids, 'relative_date_estimates': state['date_estimates'],
+                    'tracking_reminders': state['tracking_reminders'],
+                },
+            )
             if result.error:
                 state['errors'].append('CSV 未完成：' + result.error)
                 state['calendar_errors'].append(result.error)

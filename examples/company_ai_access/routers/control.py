@@ -1,13 +1,19 @@
 """Browser approval and native device lifecycle routes."""
-
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter
+from fastapi import Depends
+from fastapi import Request
 
 from examples.company_ai_access import schemas
-from examples.company_ai_access.schemas import Start, Proof, Approve
-from examples.company_ai_access.routers.dependencies import service, mutation, client_ip, require_inference_network
 from examples.company_ai_access.errors import error
+from examples.company_ai_access.routers.dependencies import client_ip
+from examples.company_ai_access.routers.dependencies import mutation
+from examples.company_ai_access.routers.dependencies import require_inference_network
+from examples.company_ai_access.routers.dependencies import service
+from examples.company_ai_access.schemas import Approve
+from examples.company_ai_access.schemas import Proof
+from examples.company_ai_access.schemas import Start
 
 
 def create_router(principal_dependency):

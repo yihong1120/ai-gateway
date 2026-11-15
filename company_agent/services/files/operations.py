@@ -7,6 +7,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import company_agent.services.cad.sandbox as _sandbox_imports_
+import company_agent.services.files.nas as _nas_imports
+import company_agent.services.office.ocr as _ocr_imports
+import company_agent.services.office.sandbox as _sandbox_imports
 from company_agent.services.files import block_page
 from company_agent.services.files.access import relative_parts
 from company_agent.services.files.errors import RecoverableToolError
@@ -57,9 +61,8 @@ def output_name(name, extensions):
 class ToolBox:
     def __init__(self, settings, store, owner, job):
         self.store, self.owner, self.job = store, owner, job
-        from company_agent.services.files.nas import file_access
 
-        self.access = file_access(settings, store, owner)
+        self.access = _nas_imports.file_access(settings, store, owner)
         self.sources = {}  # Current job only; not a company-wide memory.
         self.settings = settings
 
@@ -85,7 +88,6 @@ class ToolBox:
         return data, prior
 
     def read_ocr(self, args):
-        from company_agent.services.office.ocr import ocr_page
 
         if not self.settings.enable_ocr:
             raise ValueError('此入口未啟用本地 OCR。')
@@ -104,7 +106,7 @@ class ToolBox:
             limit=10,
         )
         if result is None:
-            result = ocr_page(data, suffix, args.page)
+            result = _ocr_imports.ocr_page(data, suffix, args.page)
             self.access.allowed(args.root)
             self.store.finish_tool(self.owner, self.job, key, result)
         source = self._remember_source(args, sha)
@@ -115,42 +117,38 @@ class ToolBox:
         }
 
     def create_spreadsheet_report(self, args):
-        from company_agent.services.office.sandbox import office_worker
 
         if not self.settings.enable_spreadsheet_reports:
             raise ValueError('此入口未啟用 Excel 計算報表。')
-        result, data = office_worker('report', **args.model_dump(exclude={'name'}))
+        result, data = _sandbox_imports.office_worker('report', **args.model_dump(exclude={'name'}))
         return {
             **self.store.artifact(self.owner, self.job, output_name(args.name, {'.xlsx'}), data),
             'calculation': result,
         }
 
     def read_cad(self, args):
-        from company_agent.services.cad.sandbox import cad_worker
 
         self._cad_enabled()
         suffix = Path(args.path).suffix.lower()
         if suffix not in {'.dwg', '.dxf'}:
             raise ValueError('CAD 僅接受 DWG／DXF。')
         data, sha = self.access.read(args.root, args.path)
-        result = cad_worker(
+        result = _sandbox_imports_.cad_worker(
             'read', data=data, suffix=suffix, **args.model_dump(exclude={'root', 'path'}),
         )
         source = self._remember_source(args, sha)
         return {**source, **result}
 
     def create_cad(self, args):
-        from company_agent.services.cad.sandbox import cad_worker
 
         self._cad_enabled()
         name = output_name(args.name, {'.dxf'})
-        result, data = cad_worker(
+        result, data = _sandbox_imports_.cad_worker(
             'create', units=args.units, entities=[e.model_dump() for e in args.entities],
         )
         return {**self.store.artifact(self.owner, self.job, name, data), 'cad': result}
 
     def edit_cad_text(self, args):
-        from company_agent.services.cad.sandbox import cad_worker
 
         self._cad_enabled()
         if Path(args.path).suffix.lower() != '.dxf':
@@ -160,7 +158,7 @@ class ToolBox:
             args, unread='請先在本工作 read_cad 核對來源版本。',
             changed='來源已變更，請重新讀取。',
         )
-        result, changed = cad_worker(
+        result, changed = _sandbox_imports_.cad_worker(
             'edit',
             data=data,
             handle=args.handle.upper(),

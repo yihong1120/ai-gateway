@@ -132,7 +132,7 @@ def _utc_iso_after(seconds: int) -> str:
         Timezone-aware ISO 8601 timestamp.
     """
     expires_at = datetime.datetime.now(
-        datetime.timezone.utc,
+        datetime.UTC,
     ) + datetime.timedelta(seconds=seconds)
     return expires_at.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
 

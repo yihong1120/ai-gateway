@@ -1,5 +1,4 @@
 """DocumentSources responsibilities for the shared document processor."""
-
 from __future__ import annotations
 
 import asyncio
@@ -10,24 +9,29 @@ import unicodedata
 import warnings
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
+from typing import Literal
 
-from open_webui.models.files import FileModel, Files
+from open_webui.models.files import FileModel
+from open_webui.models.files import Files
 from open_webui.storage.provider import Storage
 
-from examples.official_document_workflow.domain.documents import (
-    IMAGE_CONTENT_TYPES,
-    IMAGE_FORMATS,
-    IMAGE_SUFFIXES,
-    PreparedDocument,
-    ProcessingError,
-)
+from examples.official_document_workflow.domain.documents import IMAGE_CONTENT_TYPES
+from examples.official_document_workflow.domain.documents import IMAGE_FORMATS
+from examples.official_document_workflow.domain.documents import IMAGE_SUFFIXES
+from examples.official_document_workflow.domain.documents import PreparedDocument
+from examples.official_document_workflow.domain.documents import ProcessingError
 from examples.official_document_workflow.infrastructure.office import office_input
+from examples.shared.runtime.modules import ModuleReference
+
+_PIL = ModuleReference('PIL')
+_workflow_components = ModuleReference('examples.official_document_workflow.services.components')
+_pillow_heif = ModuleReference('pillow_heif')
 
 logger = logging.getLogger(__name__)
 
 
-from .components import ConfiguredService
+ConfiguredService = _workflow_components.attribute('ConfiguredService')
 
 
 class DocumentSources(ConfiguredService):
@@ -67,7 +71,7 @@ class DocumentSources(ConfiguredService):
                     source_bytes = source_path.stat().st_size
                     if not self.valves.eip_large_sources and total_bytes + source_bytes > maximum_total_bytes:
                         raise ProcessingError(
-                            f'文件合計超過 {self.valves.max_batch_pdf_total_size_mb} MB 的安全處理上限'
+                            f'文件合計超過 {self.valves.max_batch_pdf_total_size_mb} MB 的安全處理上限',
                         )
                     pdf_path, temporary_directory = source_path, None
                     source_kind = self._source_file_kind(file)
@@ -86,7 +90,7 @@ class DocumentSources(ConfiguredService):
                     total_bytes += max(source_bytes, pdf_path.stat().st_size)
                     if not self.valves.eip_large_sources and total_bytes > maximum_total_bytes:
                         raise ProcessingError(
-                            f'文件合計超過 {self.valves.max_batch_pdf_total_size_mb} MB 的安全處理上限'
+                            f'文件合計超過 {self.valves.max_batch_pdf_total_size_mb} MB 的安全處理上限',
                         )
                     total_pages += self.ocr._validate_pdf_page_count(pdf_path)
                     if not self.valves.eip_large_sources and total_pages > self.valves.max_batch_pdf_total_pages:
@@ -247,8 +251,8 @@ class DocumentSources(ConfiguredService):
     def _images_to_pdf(self, image_paths: tuple[Path, ...], output_path: Path) -> None:
         """Build a bounded PDF from supported phone images in the prepared filename order."""
         try:
-            from PIL import Image, ImageOps, UnidentifiedImageError
-            from pillow_heif import register_heif_opener
+            Image, ImageOps, UnidentifiedImageError = _PIL.attributes('Image', 'ImageOps', 'UnidentifiedImageError')
+            register_heif_opener = _pillow_heif.attribute('register_heif_opener')
         except ImportError as exc:
             raise ProcessingError('伺服器缺少手機影像處理套件；請聯絡管理員') from exc
 

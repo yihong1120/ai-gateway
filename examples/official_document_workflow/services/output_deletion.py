@@ -4,8 +4,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-from examples.shared.runtime.io import run_sync
 from examples.official_document_workflow.application.output_receipts import DELETE_PENDING
+from examples.shared.runtime.io import run_sync
 
 
 @dataclass(frozen=True)
@@ -29,27 +29,27 @@ class OutputDeletion:
 
     async def _delete(self, key, owner):
         try:
-            record = await run_sync(self.receipts.get,key,owner)
+            record = await run_sync(self.receipts.get, key, owner)
             if record is None:
-                return DeletionResult('unknown',key,'MissingReceipt')
+                return DeletionResult('unknown', key, 'MissingReceipt')
             if record.state == 'deleted':
-                return DeletionResult('deleted',key)
+                return DeletionResult('deleted', key)
             if record.state in DELETE_PENDING:
                 path = record.path
             else:
                 item = await self.files.find(record)
                 path = item.path if item else None
             if not path:
-                return DeletionResult('unknown',key,'MissingStoragePath')
-            intent = await run_sync(self.receipts.request_delete,record,path)
+                return DeletionResult('unknown', key, 'MissingStoragePath')
+            intent = await run_sync(self.receipts.request_delete, record, path)
             if intent is None:
-                return DeletionResult('unknown',key,'StaleReceipt')
+                return DeletionResult('unknown', key, 'StaleReceipt')
             await self.files.remove(intent)
-            completed = await run_sync(self.receipts.finish_delete,intent)
+            completed = await run_sync(self.receipts.finish_delete, intent)
             if completed is None or completed.state != 'deleted':
-                return DeletionResult('unknown',key,'ReceiptNotConfirmed')
-            return DeletionResult('deleted',key)
+                return DeletionResult('unknown', key, 'ReceiptNotConfirmed')
+            return DeletionResult('deleted', key)
         except Exception as error:
             # Keep intent and original file list. Read-only repair can prove
             # both resources absent later; it never repeats a DELETE itself.
-            return DeletionResult('unknown',key,type(error).__name__)
+            return DeletionResult('unknown', key, type(error).__name__)

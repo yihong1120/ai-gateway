@@ -9,9 +9,11 @@ from pathlib import Path
 
 from psycopg.rows import dict_row
 
+from company_agent.api.source_snapshots import SourceSnapshots
 from company_agent.config import MAX_STEPS
 from company_agent.runtime.storage import Store
-from company_agent.api.source_snapshots import SourceSnapshots
+from company_agent.services.files.nas import NASVault
+from company_agent.state import GRAPH_VERSION
 
 SUPPORTED = {
     '.pdf',
@@ -61,19 +63,23 @@ class WorkQueue:
             raise ValueError('本人的待處理工作已達上限，請等待完成或取消部分工作。')
 
     def submit(self, owner, subject, chat, request_id, instruction, inputs, references=(), conversation=(), *, allow_pending_references=False):
-        from company_agent.services.files.nas import NASVault
 
         vault = NASVault(self.store)
         with self.store.db() as db:
-            nas_revisions = sorted(row[0] for row in db.execute(
-                'SELECT revision FROM nas_bindings WHERE owner=%s AND usable', (owner,)).fetchall())
+            nas_revisions = sorted(
+                row[0] for row in db.execute(
+                    'SELECT revision FROM nas_bindings WHERE owner=%s AND usable', (owner,),
+                ).fetchall()
+            )
             # A continuation keeps its original source scope even when a new account was added.
             inherited = []
             for reference in references:
                 row = db.execute('SELECT payload FROM web_jobs WHERE owner=%s AND id=%s', (owner, reference)).fetchone()
                 if row:
                     old = json.loads(row[0])
-                    revisions = old.get('nas_binding_revisions') or ([old['nas_binding_revision']] if old.get('nas_binding_revision') else [])
+                    revisions = old.get('nas_binding_revisions') or (
+                        [old['nas_binding_revision']] if old.get('nas_binding_revision') else []
+                    )
                     inherited.append(sorted(revisions))
             if inherited:
                 if any(revisions != inherited[0] for revisions in inherited):
@@ -111,6 +117,7 @@ class WorkQueue:
                 raise ValueError(
                     '附件格式或大小不支援；接受 PDF、DOCX、PPTX、XLSX、TXT、MD、CSV、DWG、DXF，單檔 20 MB。',
                 )
+
         def existing_submission(db):
             prior = db.execute(
                 'SELECT id,request_hash FROM web_jobs WHERE owner=%s AND chat=%s AND (request_id=%s OR %s=ANY(request_aliases))',
@@ -125,6 +132,7 @@ class WorkQueue:
         if prior:
             return prior
         registration_written = False
+
         def register(key, manifest):
             nonlocal registration_written
             payload = {
@@ -148,7 +156,8 @@ class WorkQueue:
                 for existing, stored in active:
                     stored_payload = json.loads(stored)
                     stored_nas = stored_payload.get('nas_binding_revisions') or (
-                        [stored_payload['nas_binding_revision']] if stored_payload.get('nas_binding_revision') else [])
+                        [stored_payload['nas_binding_revision']] if stored_payload.get('nas_binding_revision') else []
+                    )
                     if sorted(stored_nas) == nas_revisions and stored_payload.get('eip_binding_revision') == eip_revision:
                         db.execute(
                             'UPDATE web_jobs SET request_aliases=array_append(request_aliases,%s) WHERE id=%s', (
@@ -162,8 +171,10 @@ class WorkQueue:
                     vault.credentials(owner, revision, db=db).clear()
                 for reference in references:
                     with db.cursor(row_factory=dict_row) as cursor:
-                        old = cursor.execute('SELECT chat,subject,kind,status,payload FROM web_jobs WHERE owner=%s AND id=%s',
-                                             (owner, reference)).fetchone()
+                        old = cursor.execute(
+                            'SELECT chat,subject,kind,status,payload FROM web_jobs WHERE owner=%s AND id=%s',
+                            (owner, reference),
+                        ).fetchone()
                     if old is None:
                         raise ValueError('工作不存在或沒有權限。')
                     old['payload'] = json.loads(old['payload'])
@@ -280,8 +291,10 @@ class WorkQueue:
 
     def output_changed(self, owner, key):
         with self.store.db() as db:
-            return db.execute("UPDATE web_jobs SET chat_version=chat_version+1 WHERE owner=%s AND id=%s AND kind='document'",
-                              (owner,key)).rowcount == 1
+            return db.execute(
+                "UPDATE web_jobs SET chat_version=chat_version+1 WHERE owner=%s AND id=%s AND kind='document'",
+                (owner, key),
+            ).rowcount == 1
 
     def chat_pending(self, limit=32):
         """Bounded durable outbox; observe job changes without fetching input payloads."""
@@ -353,7 +366,6 @@ class WorkQueue:
 
     @staticmethod
     def public_view(row):
-        from company_agent.state import GRAPH_VERSION
 
         value = {k: row[k] for k in ('id', 'status', 'progress', 'created', 'kind')}
         value.update(files=[], proposals=[], answer='')
@@ -363,8 +375,10 @@ class WorkQueue:
             value['progress'] = '等待執行（多人並行排程，同一帳號依序處理）'
         if row['kind'] == 'document':
             result = json.loads(row['document_result'])
-            value.update(answer=result.get('answer', ''), files=result.get('files', []),
-                         notices=result.get('notices', []), resumable=False)
+            value.update(
+                answer=result.get('answer', ''), files=result.get('files', []),
+                notices=result.get('notices', []), resumable=False,
+            )
             return value
         if row['kind'] != 'company':
             result = json.loads(row['result'] or '{}')
@@ -461,7 +475,6 @@ class WorkQueue:
         if not row['engine_job']:
             raise ValueError('此工作尚無可恢復節點，請另送新工作。')
         current = self.store.result(owner, row['engine_job'])
-        from company_agent.state import GRAPH_VERSION
         if current.get('graph_version', GRAPH_VERSION) != GRAPH_VERSION:
             raise ValueError('此工作建立於更新前，請另開新工作；原有成果仍可下載。')
         if not current.get('resumable'):

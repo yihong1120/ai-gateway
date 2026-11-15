@@ -1,41 +1,59 @@
 """Real HTTP MCP and PostgreSQL boundaries; only synthetic OIDC/NAS/EIP data."""
 from __future__ import annotations
 
-from dataclasses import replace
-from functools import partial
-from urllib.parse import parse_qs
 import asyncio
 import json
 import time
-from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, Mock, patch
+from dataclasses import replace
+from functools import partial
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from unittest.mock import Mock
+from unittest.mock import patch
+from urllib.parse import parse_qs
 
-from cryptography.hazmat.primitives.asymmetric import rsa
 import httpx
 import jwt
+from cryptography.hazmat.primitives.asymmetric import rsa
 
-from company_agent.tests.test_nas import NASFixture
-from company_mcp.authentication import AuthorizationUnavailable, Principal, Verifier
-from company_mcp.config import Configuration, PATH, SCOPE
-from company_mcp.adapters.company import Resources
-from company_mcp.tools import TOOLS
-from company_mcp.server import Boundary, build
-from company_mcp.storage import Repository, ResourceError
+import company_mcp.adapters.analysis as _analysis_imports
+import company_mcp.doctor as _doctor_imports
 from company_agent.api.queue import WorkQueue
-from examples.official_document_workflow.runtime import current_resources
-from examples.official_document_workflow.infrastructure.storage.state import Link
+from company_agent.api.service import Service
+from company_agent.config import Settings
+from company_agent.tests.test_nas import NASFixture
+from company_mcp.adapters.company import Resources
+from company_mcp.authentication import AuthorizationUnavailable
+from company_mcp.authentication import Principal
+from company_mcp.authentication import Verifier
+from company_mcp.config import Configuration
+from company_mcp.config import PATH
+from company_mcp.config import SCOPE
+from company_mcp.server import Boundary
+from company_mcp.server import build
+from company_mcp.server import ResourceServer
+from company_mcp.storage import Repository
+from company_mcp.storage import ResourceError
+from company_mcp.tools import TOOLS
 from examples.official_document_workflow.api.schemas import LoginRequest
+from examples.official_document_workflow.infrastructure.storage.state import Link
+from examples.official_document_workflow.runtime import current_resources
+from examples.shared.runtime.modules import ModuleReference
+
+_psycopg_errors = ModuleReference('psycopg.errors')
 
 
 def configuration(**updates):
-    return Configuration(**{
-        'origin': 'https://company.example', 'issuer': 'https://identity.example/realms/company',
-        'clients': ('company-codex', 'company-claude'), 'cidrs': ('127.0.0.0/8',),
-        'backend_key': 'synthetic-private-backend-service-key-1234567890',
-        'introspection_client': 'resource-verifier', 'introspection_secret': 'synthetic-private-verifier',
-        'eip_transport_acknowledged': True, **updates,
-    })
+    return Configuration(
+        **{
+            'origin': 'https://company.example', 'issuer': 'https://identity.example/realms/company',
+            'clients': ('company-codex', 'company-claude'), 'cidrs': ('127.0.0.0/8',),
+            'backend_key': 'synthetic-private-backend-service-key-1234567890',
+            'introspection_client': 'resource-verifier', 'introspection_secret': 'synthetic-private-verifier',
+            'eip_transport_acknowledged': True, **updates,
+        },
+    )
 
 
 def user_for_owner(owner):
@@ -95,9 +113,11 @@ class CompanyMCPTests(unittest.IsolatedAsyncioTestCase, NASFixture):
         self.workflow.store.bind('alice', '17', 'eip-alice', 'synthetic-eip-password', enable_auto=False)
         self.adapter = SimpleNamespace(
             user_id='17', close=AsyncMock(),
-            documents=AsyncMock(return_value=[{
-                'id': '10', 'folder': 'inbox', 'subject': '測試公文', 'date': '2026-11-13',
-            }]),
+            documents=AsyncMock(
+                return_value=[{
+                    'id': '10', 'folder': 'inbox', 'subject': '測試公文', 'date': '2026-11-13',
+                }],
+            ),
             document_detail=AsyncMock(return_value={'fields': [{'label': '主旨', 'value': '測試'}], 'attachments': []}),
             attachments=AsyncMock(return_value=[{'name': 'a.pdf', 'url': '/fo/a.pdf'}]),
             calendar=AsyncMock(return_value=[]),
@@ -227,32 +247,35 @@ class CompanyMCPTests(unittest.IsolatedAsyncioTestCase, NASFixture):
 
     async def test_calendar_plan_creates_only_private_draft(self):
         key = await self.workspace()
-        output = await self.invoke('calendar_plan_prepare', workspace=key, events=[{
-            'subject': '工程會議', 'start_date': '2026-11-18', 'end_date': '2026-11-18',
-            'all_day': False, 'start_time': '09:00', 'end_time': '10:00',
-        }])
+        output = await self.invoke(
+            'calendar_plan_prepare', workspace=key, events=[{
+                'subject': '工程會議', 'start_date': '2026-11-18', 'end_date': '2026-11-18',
+                'all_day': False, 'start_time': '09:00', 'end_time': '10:00',
+            }],
+        )
         self.assertEqual(output['status'], 'prepared_not_written')
         self.assertIn('/agents/mcp?calendar=', output['confirmation_url'])
         self.assertEqual(len(self.store.files('alice', key)), 1)
         self.assertNotIn('commit', self.adapter.__dict__)
 
     async def test_confirmed_worker_isolates_result_and_does_not_replay(self):
-        from company_agent.config import Settings
-        from company_mcp.adapters.analysis import execute
-        from unittest.mock import Mock
         key = await self.workspace()
         docs = await self.invoke('eip_query', workspace=key, folder='inbox', start='2026-11-01', end='2026-11-30')
         attachments = await self.invoke('eip_attachments', workspace=key, handle=docs['documents'][0]['handle'])
-        ready = await self.invoke('document_analysis_prepare', workspace=key, request_id='worker-one',
-                                  handles=[attachments['attachments'][0]['handle']])
+        ready = await self.invoke(
+            'document_analysis_prepare', workspace=key, request_id='worker-one',
+            handles=[attachments['attachments'][0]['handle']],
+        )
         self.resources.repository.submit_analysis(self.alice, ready['operation'], self.queue)
         with self.store.db() as db:
             db.execute('UPDATE mcp_workspaces SET expires=0 WHERE id=%s', (key,))
         row = self.queue.claim()
-        service = SimpleNamespace(queue=self.queue,
+        service = SimpleNamespace(
+            queue=self.queue,
             identity=AsyncMock(return_value={'id': 'alice', 'role': 'user', 'oauth': {'oidc': {'sub': 'alice-sub'}}}),
             settings_factory=Mock(return_value=Settings(state_dir=str(self.private))),
-            model_factory=Mock(return_value=SimpleNamespace(subject='alice-sub')))
+            model_factory=Mock(return_value=SimpleNamespace(subject='alice-sub')),
+        )
 
         self.worker_row, self.worker_workspace = row, key
         with patch(
@@ -260,7 +283,7 @@ class CompanyMCPTests(unittest.IsolatedAsyncioTestCase, NASFixture):
         ), patch('company_mcp.adapters.analysis.process', side_effect=partial(worker_result, self)) as run, patch(
             'company_mcp.adapters.analysis.close_model', new=AsyncMock(),
         ):
-            await execute(service, row)
+            await _analysis_imports.execute(service, row)
             self.assertEqual(run.await_count, 1)
             result = self.queue.public('alice', row['id'])
             self.assertEqual(result['status'], 'done')
@@ -268,13 +291,12 @@ class CompanyMCPTests(unittest.IsolatedAsyncioTestCase, NASFixture):
             self.assertEqual(len(result['files']), 1)
             self.assertEqual(self.store.files('alice', key), [])
             self.assertEqual(self.queue.chat_pending(), [])
-            from psycopg.errors import UniqueViolation
+            UniqueViolation = _psycopg_errors.attribute('UniqueViolation')
             with self.assertRaises(UniqueViolation):
-                await execute(service, row)
+                await _analysis_imports.execute(service, row)
             self.assertEqual(run.await_count, 1)
 
     async def test_external_work_types_share_company_concurrency_capacity(self):
-        from company_agent.api.service import Service
         service = Service(self.queue, None, None, None, max_concurrent=1)
         self.active_slots, self.maximum_slots, self.started_owners = 0, 0, []
         jobs = []
@@ -307,18 +329,26 @@ class OIDCTests(unittest.IsolatedAsyncioTestCase):
         self.calls = []
 
         self.http = httpx.AsyncClient(transport=httpx.MockTransport(partial(introspection_response, self)))
-        self.verifier = Verifier(self.config, self.http, resolve_owner=self.resolve,
-            key_client=SimpleNamespace(get_signing_key_from_jwt=Mock(return_value=SimpleNamespace(key=self.key.public_key()))))
+        self.verifier = Verifier(
+            self.config, self.http, resolve_owner=self.resolve,
+            key_client=SimpleNamespace(
+                get_signing_key_from_jwt=Mock(
+                    return_value=SimpleNamespace(key=self.key.public_key()),
+                ),
+            ),
+        )
 
     async def asyncTearDown(self):
         await self.http.aclose()
 
     def token(self, **changes):
-        return jwt.encode({
-            'iss': self.config.issuer, 'aud': self.config.resource, 'sub': 'alice-sub',
-            'azp': 'company-codex', 'iat': int(time.time()), 'exp': int(time.time()) + 60,
-            'scope': SCOPE, **changes,
-        }, self.key, algorithm='RS256')
+        return jwt.encode(
+            {
+                'iss': self.config.issuer, 'aud': self.config.resource, 'sub': 'alice-sub',
+                'azp': 'company-codex', 'iat': int(time.time()), 'exp': int(time.time()) + 60,
+                'scope': SCOPE, **changes,
+            }, self.key, algorithm='RS256',
+        )
 
     async def test_verified_signature_resource_and_live_session(self):
         verified = await self.verifier.verify_token(self.token())
@@ -328,8 +358,10 @@ class OIDCTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('synthetic-private-verifier', str(verified))
 
     async def test_wrong_audience_issuer_client_scope_expiry_and_signature_are_rejected_before_introspection(self):
-        for changes in ({'aud': 'models-only'}, {'iss': 'https://other.example'}, {'azp': 'unapproved-client'},
-                        {'scope': 'openid'}, {'exp': 1}, {'sub': ''}):
+        for changes in (
+            {'aud': 'models-only'}, {'iss': 'https://other.example'}, {'azp': 'unapproved-client'},
+            {'scope': 'openid'}, {'exp': 1}, {'sub': ''},
+        ):
             self.assertIsNone(await self.verifier.verify_token(self.token(**changes)))
         self.assertEqual(self.calls, [])
 
@@ -347,6 +379,7 @@ class OIDCTests(unittest.IsolatedAsyncioTestCase):
 
 class HTTPTests(unittest.IsolatedAsyncioTestCase, NASFixture):
     token = OIDCTests.token
+
     async def asyncSetUp(self):
         await CompanyMCPTests.asyncSetUp(self)
         OIDCTests.setUp(self)
@@ -402,9 +435,10 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase, NASFixture):
         self.assertEqual((await self.rpc('tools/list', {})).json()['result']['tools'], [])
 
     async def test_high_level_server_keeps_concurrent_owners_separate(self):
-        from company_mcp.server import ResourceServer
-        self.assertIsInstance(ResourceServer(self.configuration, self.verifier, Mock(return_value=self.resources), TOOLS),
-                              __import__('mcp.server.mcpserver', fromlist=['MCPServer']).MCPServer)
+        self.assertIsInstance(
+            ResourceServer(self.configuration, self.verifier, Mock(return_value=self.resources), TOOLS),
+            __import__('mcp.server.mcpserver', fromlist=['MCPServer']).MCPServer,
+        )
         self.resolve.side_effect = owner_for_subject
         async with httpx.AsyncClient(transport=httpx.MockTransport(actor_introspection)) as upstream:
             self.verifier.client = upstream
@@ -412,34 +446,54 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase, NASFixture):
             self.entered_owners = set()
             self.execution_gate = asyncio.Event()
             async with managed.router.lifespan_context(managed):
-                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=managed),
-                                             base_url=self.configuration.origin) as client:
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=managed),
+                    base_url=self.configuration.origin,
+                ) as client:
                     with patch.object(self.resources, 'execute', side_effect=partial(concurrent_result, self)):
-                        replies = await asyncio.gather(*[client.post(PATH,
-                            headers={'Authorization': 'Bearer ' + self.token(sub=owner + '-sub'),
-                                     'accept': 'application/json, text/event-stream'},
-                            json={'jsonrpc': '2.0', 'id': index, 'method': 'tools/call',
-                                  'params': {'name': 'connections_list', 'arguments': {}}})
-                            for index, owner in enumerate(('alice', 'bob'))])
-            self.assertEqual([reply.json()['result']['structuredContent']['owner'] for reply in replies],
-                             ['alice', 'bob'])
+                        replies = await asyncio.gather(
+                            *[
+                                client.post(
+                                    PATH,
+                                    headers={
+                                        'Authorization': 'Bearer ' + self.token(sub=owner + '-sub'),
+                                        'accept': 'application/json, text/event-stream',
+                                    },
+                                    json={
+                                        'jsonrpc': '2.0', 'id': index, 'method': 'tools/call',
+                                        'params': {'name': 'connections_list', 'arguments': {}},
+                                    },
+                                )
+                                for index, owner in enumerate(('alice', 'bob'))
+                            ],
+                        )
+            self.assertEqual(
+                [reply.json()['result']['structuredContent']['owner'] for reply in replies],
+                ['alice', 'bob'],
+            )
 
 
 class PersistenceSchemaTests(unittest.TestCase):
     def test_keycloak_metadata_requires_issuer_bound_callbacks_and_fixed_endpoints(self):
-        from company_mcp.doctor import validate_metadata
         config = configuration()
-        metadata = {'issuer': config.issuer, 'code_challenge_methods_supported': ['S256'],
-                    'authorization_response_iss_parameter_supported': True}
-        metadata.update({key: config.issuer + '/protocol/openid-connect' + suffix for key, suffix in (
-            ('authorization_endpoint', '/auth'), ('token_endpoint', '/token'),
-            ('jwks_uri', '/certs'), ('introspection_endpoint', '/token/introspect'))})
-        self.assertTrue(validate_metadata(config, metadata)['issuer_metadata_valid'])
-        for changes in ({'authorization_response_iss_parameter_supported': False},
-                        {'token_endpoint': 'https://untrusted.example/token'},
-                        {'code_challenge_methods_supported': ['plain']}):
+        metadata = {
+            'issuer': config.issuer, 'code_challenge_methods_supported': ['S256'],
+            'authorization_response_iss_parameter_supported': True,
+        }
+        metadata.update({
+            key: config.issuer + '/protocol/openid-connect' + suffix for key, suffix in (
+                ('authorization_endpoint', '/auth'), ('token_endpoint', '/token'),
+                ('jwks_uri', '/certs'), ('introspection_endpoint', '/token/introspect'),
+            )
+        })
+        self.assertTrue(_doctor_imports.validate_metadata(config, metadata)['issuer_metadata_valid'])
+        for changes in (
+            {'authorization_response_iss_parameter_supported': False},
+            {'token_endpoint': 'https://untrusted.example/token'},
+            {'code_challenge_methods_supported': ['plain']},
+        ):
             with self.assertRaises(ValueError):
-                validate_metadata(config, {**metadata, **changes})
+                _doctor_imports.validate_metadata(config, {**metadata, **changes})
 
     def test_old_login_semantics_and_separate_saved_read_only_choice(self):
         old = LoginRequest(accept_http=True, account='alice', password='synthetic')
@@ -449,4 +503,7 @@ class PersistenceSchemaTests(unittest.TestCase):
         self.assertTrue(new.save_credentials)
         self.assertFalse(new.enable_auto)
         with self.assertRaises(ValueError):
-            LoginRequest(accept_http=True, account='alice', password='synthetic', save_credentials=False, enable_auto=True)
+            LoginRequest(
+                accept_http=True, account='alice', password='synthetic',
+                save_credentials=False, enable_auto=True,
+            )

@@ -8,10 +8,14 @@ from langchain_core.tools import ToolException
 
 class RecoverableToolError(ToolException):
     def __init__(self, code, message, **details):
-        super().__init__(json.dumps({
-            'code': code, 'message': message, 'executed': False,
-            'retryable_argument_error': code == 'sheet_not_found', **details,
-        }, ensure_ascii=False))
+        super().__init__(
+            json.dumps(
+                {
+                    'code': code, 'message': message, 'executed': False,
+                    'retryable_argument_error': code == 'sheet_not_found', **details,
+                }, ensure_ascii=False,
+            ),
+        )
 
 
 def input_error_feedback(error):

@@ -1,9 +1,10 @@
 """Atomic local sessions; profile snapshots never own mutable token lists."""
-
 from __future__ import annotations
+
 import hashlib
 import json
 import time
+
 from fastapi import HTTPException
 
 
@@ -199,7 +200,7 @@ class LocalSessions:
     async def revoke_all(self, redis, username):
         skey, akey, index = self.user_keys(username)
         await redis.eval(
-            _REVOKE_ALL, 4, skey, akey, index, self.prefix + ':user_cache:' + username
+            _REVOKE_ALL, 4, skey, akey, index, self.prefix + ':user_cache:' + username,
         )
 
     async def revoke_once(self, redis, username, action):

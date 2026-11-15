@@ -7,13 +7,12 @@ from functools import partial
 
 from open_webui.models.users import Users
 
+from .automatic_task import AutomaticTask
 from examples.official_document_workflow.infrastructure.eip.automatic_session import (
     AutomaticSession,
 )
 from examples.official_document_workflow.infrastructure.eip.netask import Netask
 from examples.shared.runtime.io import run_sync
-
-from .automatic_task import AutomaticTask
 
 
 async def verified_owner(owner):
@@ -31,23 +30,23 @@ class AutomaticAccount:
         completed = 0
         allowed = partial(db.active, owner, generation)
         async with AsyncExitStack() as cleanup:
-            if not await run_sync(allowed,):
+            if not await run_sync(allowed):
                 return
             if not await verify(owner):
-                await run_sync(db.pause,owner)
+                await run_sync(db.pause, owner)
                 return
-            config = await run_sync(db.account,owner)
+            config = await run_sync(db.account, owner)
             adapter = AutomaticSession(db, owner, generation, factory, verify)
             cleanup.push_async_callback(adapter.close)
             await adapter.login()
-            if not await run_sync(allowed,):
+            if not await run_sync(allowed):
                 return
             supersession = await adapter.reconcile_calendar(journal, allowed=allowed)
             documents = await adapter.read('automatic_documents', config['scan_start'])
             current = {doc['id']: doc for doc in documents}
-            await run_sync(db.discover,owner, adapter.user_id, documents)
-            for task in await run_sync(db.tasks,owner, adapter.user_id, pending=True):
-                if not await run_sync(allowed,):
+            await run_sync(db.discover, owner, adapter.user_id, documents)
+            for task in await run_sync(db.tasks, owner, adapter.user_id, pending=True):
+                if not await run_sync(allowed):
                     break
                 payload = task['payload']
                 processor = AutomaticTask(db, journal, owner, task, adapter, config, allowed, verify, self.slots)
@@ -61,7 +60,7 @@ class AutomaticAccount:
                 )
                 if not eligible:
                     payload['notice'] = '文件匣紀錄時間早於固定抓取起點，未自動處理；需要時請手動選取。'
-                    await run_sync(db.save_task,task, 'outside_scope', payload)
+                    await run_sync(db.save_task, task, 'outside_scope', payload)
                     continue
                 task_run = asyncio.create_task(processor.run())
                 try:
@@ -78,7 +77,8 @@ class AutomaticAccount:
                 message += f"已保留人工行程並清理 {supersession['removed']} 筆 AI 複本。"
             if supersession['needs_review']:
                 message += f"另有 {supersession['needs_review']} 筆行程清理待核對。"
-            await run_sync(db.finish,
+            await run_sync(
+                db.finish,
                 owner,
                 generation,
                 message,
@@ -89,21 +89,23 @@ class AutomaticAccount:
 class AutomaticScheduler:
     def __init__(self, db, journal, state, health, account=None):
         self.db, self.journal, self.state, self.health = db, journal, state, health
-        self.account = account if account is not None else AutomaticAccount(db,journal,state.processing)
+        self.account = account if account is not None else AutomaticAccount(db, journal, state.processing)
 
     async def _run_due(self, account):
         try:
-            await self.account.run(account['owner'],account['generation'])
+            await self.account.run(account['owner'], account['generation'])
         except Exception as failure:
-            await run_sync(self.db.finish,account['owner'],account['generation'],
-                f'本輪已中止（{type(failure).__name__}）；失敗文件不自動重試。',failed=True)
+            await run_sync(
+                self.db.finish, account['owner'], account['generation'],
+                f'本輪已中止（{type(failure).__name__}）；失敗文件不自動重試。', failed=True,
+            )
 
     async def run(self):
         db, journal, running = self.db, self.journal, self.state.automatic_tasks
         if running:
             raise ValueError('自動排程器已啟動。')
         async with journal.scheduler_lock() as lease:
-            await run_sync(db.recover,)
+            await run_sync(db.recover)
             try:
                 while True:
                     await lease.execute('SELECT 1')
@@ -113,7 +115,7 @@ class AutomaticScheduler:
                             task.result()
                     available = self.state.processing.limit - len(running)
                     if available:
-                        for account in await run_sync(db.claim_due,limit=available, excluded_owners=list(running)):
+                        for account in await run_sync(db.claim_due, limit=available, excluded_owners=list(running)):
                             owner = account['owner']
                             if owner in running:
                                 raise ValueError('重複的自動排程帳號。')
@@ -134,4 +136,3 @@ class AutomaticScheduler:
                 if running:
                     await asyncio.gather(*running.values(), return_exceptions=True)
                 running.clear()
-

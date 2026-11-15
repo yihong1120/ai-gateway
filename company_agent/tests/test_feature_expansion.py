@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -13,6 +14,11 @@ from unittest.mock import patch
 
 from openpyxl import load_workbook
 
+import company_agent.api.pipe as _pipe_imports
+import company_agent.api.service as _service_imports
+import company_agent.services.eip.client as _client_imports
+import company_agent.services.office.ocr as _ocr_imports
+from company_agent.api.service import WorkQueue
 from company_agent.runtime.context import Context
 from company_agent.runtime.execution import DocumentAgent
 from company_agent.services.eip.client import query
@@ -27,6 +33,9 @@ from company_agent.tests.test_agent import call
 from company_agent.tests.test_agent import Fixture
 from company_agent.tests.test_enterprise_completion import finish
 from company_agent.tests.test_multi_agent import RawRoleModel
+from examples.shared.runtime.modules import ModuleReference
+
+_pymupdf = ModuleReference('pymupdf')
 
 
 def report_spec():
@@ -45,7 +54,6 @@ class ExpansionContracts(unittest.TestCase):
             SpreadsheetReport.model_validate(spec)
 
     def test_owned_message_inline_image_and_external_refusal(self):
-        from company_agent.api.pipe import current_turn
         message = {
             'id': 'u', 'role': 'user', 'content': [
                 {'type': 'text', 'text': '讀圖中文字'}, {
@@ -54,10 +62,14 @@ class ExpansionContracts(unittest.TestCase):
             ],
         }
         chat = {'history': {'messages': {'u': message, 'a': {'parentId': 'u'}}}}
-        self.assertEqual(current_turn(chat, 'u', 'a')[1], [{'inline_image': 'data:image/png;base64,aGVsbG8='}])
+        self.assertEqual(
+            _pipe_imports.current_turn(chat, 'u', 'a')[1], [
+                {'inline_image': 'data:image/png;base64,aGVsbG8='},
+            ],
+        )
         message['content'][1]['image_url']['url'] = 'http://127.0.0.1/private'
         with self.assertRaises(ValueError):
-            current_turn(chat, 'u', 'a')
+            _pipe_imports.current_turn(chat, 'u', 'a')
 
     def test_formula_external_code_and_overwrite_rejected(self):
         for f in ['=WEBSERVICE(A1)', '=HYPERLINK(A1)', '=SUM(Sheet1!A1)', '=SUM([1]A1)', '=exec(A1)', '=A9999', '=SUM(A:A)', '=A1^9999999', '=INDIRECT(A1)']:
@@ -88,10 +100,9 @@ class ExpansionContracts(unittest.TestCase):
                 EIPQuery(**args)
 
     def test_ocr_endpoint_rejects_remote_or_credentials(self):
-        from company_agent.services.office.ocr import endpoint
         for url in ['https://example.com', 'http://127.0.0.1:8113/path', 'http://user:pw@127.0.0.1:8113', 'http://localhost:8113']:
             with patch.dict(os.environ, {'COMPANY_AGENT_OCR_URL': url}), self.assertRaises(ValueError):
-                endpoint()
+                _ocr_imports.endpoint()
 
 
 @unittest.skipUnless(os.getenv('COMPANY_AGENT_OFFICE_TEST') == '1', 'Needs offline Office image')
@@ -119,7 +130,7 @@ class OfficeContainerTests(unittest.TestCase):
                 office_worker('report', **SpreadsheetReport.model_validate(spec).model_dump(exclude={'name'}))
 
     def test_pdf_page_bounds_and_image_preparation(self):
-        import pymupdf
+        pymupdf = _pymupdf.load()
         doc = pymupdf.open()
         p = doc.new_page(width=300, height=100)
         p.insert_text((20, 50), 'Page one')
@@ -137,12 +148,11 @@ class OfficeContainerTests(unittest.TestCase):
 
     @unittest.skipUnless(os.getenv('COMPANY_AGENT_OCR_TEST') == '1', 'Needs live local PaddleOCR')
     def test_local_ocr_real_scanned_page(self):
-        import pymupdf
-        from company_agent.services.office.ocr import ocr_page
+        pymupdf = _pymupdf.load()
         doc = pymupdf.open()
         p = doc.new_page(width=400, height=150)
         p.insert_text((20, 60), 'Company OCR test 12345', fontsize=20)
-        result = ocr_page(p.get_pixmap().tobytes('png'), '.png', 1)
+        result = _ocr_imports.ocr_page(p.get_pixmap().tobytes('png'), '.png', 1)
         self.assertIn('12345', ''.join(b['text'] for b in result['blocks']))
 
 
@@ -184,17 +194,14 @@ class EIPToolTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.config.eip_binding_revision = 'test-revision'
 
     async def test_inline_image_signature_dedup_and_remote_refusal(self):
-        import base64
-        from company_agent.api.service import upload_bytes
         raw = b'\x89PNG\r\n\x1a\nexample'
         item = {'inline_image': 'data:image/png;base64,'+base64.b64encode(raw).decode()}
-        self.assertEqual(await upload_bytes('alice', [item, item]), [('image_1.png', raw)])
+        self.assertEqual(await _service_imports.upload_bytes('alice', [item, item]), [('image_1.png', raw)])
         for item in [{'inline_image': 'http://127.0.0.1/private'}, {'inline_image': 'data:image/png;base64,aGVsbG8='}, {'inline_image': 'data:image/png;base64,!'}]:
             with self.assertRaises(ValueError):
-                await upload_bytes('alice', [item])
+                await _service_imports.upload_bytes('alice', [item])
 
     async def test_followup_cannot_carry_rebound_eip_context(self):
-        from company_agent.api.service import WorkQueue
         revision = ['original']
         queue = WorkQueue(self.private, self.base/'image-inputs', lambda _: revision[0])
         first = queue.submit('alice', 'subject', 'chat', 'first', '查 EIP', [])
@@ -265,11 +272,10 @@ class EIPToolTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertTrue(result['notices'])
 
     async def test_binding_checks_real_owner_and_revision(self):
-        from company_agent.services.eip.client import binding
         db = SimpleNamespace(account=lambda owner: {'generation': 'different'})
         with patch('examples.identity.adapters.webui.verified_user', new=AsyncMock()) as verified, patch('examples.official_document_workflow.infrastructure.storage.automation_store.store', return_value=db):
             with self.assertRaises(ValueError):
-                await binding(Context('alice', self.job, self.config, self.store))
+                await _client_imports.binding(Context('alice', self.job, self.config, self.store))
             verified.assert_awaited_once_with('alice')
 
     @unittest.skipUnless(os.getenv('COMPANY_AGENT_OFFICE_TEST') == '1', 'Needs Office image')

@@ -1,13 +1,19 @@
 """Installer downloads and browser setup assets."""
-
 from __future__ import annotations
 
+import os
 from html import escape
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl
+from urllib.parse import urlencode
+from urllib.parse import urlsplit
+from urllib.parse import urlunsplit
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, Response
+from fastapi import APIRouter
+from fastapi import HTTPException
+from fastapi import Request
+from fastapi.responses import FileResponse
+from fastapi.responses import Response
 
 from examples.company_ai_access.errors import error
 
@@ -23,7 +29,6 @@ def assets_router(*, browser_api_prefix='/api/company-ai', login_path='/auth'):
 
     @router.get('/company-ai/portal/{asset:path}', include_in_schema=False)
     async def flutter(asset: str):
-        import os
 
         configured = os.getenv('AI_ACCESS_FLUTTER_DIR', '')
         if not configured:

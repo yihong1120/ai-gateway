@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from pydantic import Field
 
 from examples.identity.providers.subjects import linked_subject
 

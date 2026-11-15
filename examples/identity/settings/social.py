@@ -1,13 +1,14 @@
 from __future__ import annotations
+
 import os
+
 from pydantic import Field
 from pydantic_settings import BaseSettings
-from .common import (
-    _join_env_values,
-    DEFAULT_GOOGLE_CLIENT_IDS,
-    DEFAULT_APPLE_BUNDLE_ID,
-    DEFAULT_APPLE_SERVICE_ID,
-)
+
+from .common import _join_env_values
+from .common import DEFAULT_APPLE_BUNDLE_ID
+from .common import DEFAULT_APPLE_SERVICE_ID
+from .common import DEFAULT_GOOGLE_CLIENT_IDS
 
 
 class SocialSettings(BaseSettings):

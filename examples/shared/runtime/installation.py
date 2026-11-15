@@ -1,5 +1,6 @@
 """Install host extensions once, rolling back partial in-process assembly."""
 from __future__ import annotations
+
 from contextlib import contextmanager
 
 

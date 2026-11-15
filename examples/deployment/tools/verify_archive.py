@@ -1,12 +1,12 @@
 """Check versioned archive metadata, or explicitly verify local archive bytes."""
-
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
-from pathlib import Path, PurePosixPath
 import re
+from pathlib import Path
+from pathlib import PurePosixPath
 
 ARCHIVE = Path(__file__).resolve().parents[1] / 'archive'
 INDEX = ARCHIVE / 'integrity.json'
@@ -60,7 +60,7 @@ def verify(archive_dir=None):
             actual = hashlib.file_digest(stream, 'sha256').hexdigest()
         if actual != expected:
             raise ValueError(
-                'Archive integrity verification failed: ' + local.as_posix()
+                'Archive integrity verification failed: ' + local.as_posix(),
             )
     return len(entries)
 
@@ -81,11 +81,11 @@ def main():
     args = parser.parse_args()
     if args.manifest_only:
         print(
-            f'Validated {verify_manifest()} archive manifest entries; archive bytes were not checked.'
+            f'Validated {verify_manifest()} archive manifest entries; archive bytes were not checked.',
         )
     else:
         print(
-            f'Verified {verify(args.archive_dir)} immutable deployment archive files.'
+            f'Verified {verify(args.archive_dir)} immutable deployment archive files.',
         )
 
 

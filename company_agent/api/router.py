@@ -16,16 +16,23 @@ from fastapi.responses import Response
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
-from examples.shared.runtime.browser import data
+import company_agent.services.eip.calendar as _calendar_imports
+import company_agent.services.eip.client as _client_imports
+import examples.official_document_workflow.runtime as _runtime_imports
+import examples.shared.runtime.installation as _installation_imports
 from company_agent.api.http import active
 from company_agent.api.http import PrivateRoute
 from company_agent.api.identity import router as identity_router
+from company_agent.api.lifespan import ServiceLifespan
 from company_agent.api.service import configured_service
 from company_agent.api.service import service
-from company_agent.api.lifespan import ServiceLifespan
-from examples.shared.runtime.jobs import JobServiceMiddleware
-from examples.identity.adapters.webui import verified_user
 from company_agent.runtime.models import close_model
+from company_agent.services.files.nas import endpoint
+from company_agent.services.files.nas import NASVault
+from examples.identity.adapters.webui import verified_user
+from examples.shared.runtime import concurrency as limits
+from examples.shared.runtime.browser import data
+from examples.shared.runtime.jobs import JobServiceMiddleware
 
 router = APIRouter(route_class=PrivateRoute)
 router.include_router(identity_router)
@@ -77,16 +84,14 @@ async def eip_document_page(user=Depends(active)):
 
 @router.get('/agents/eip/{job}/{handle}/data')
 async def eip_document_data(job: str, handle: str, user=Depends(active)):
-    from company_agent.services.eip.client import view_document
 
-    return await view_document(service().queue.store, user.id, job, handle)
+    return await _client_imports.view_document(service().queue.store, user.id, job, handle)
 
 
 @router.get('/agents/eip/{job}/{handle}/attachments/{index}')
 async def eip_document_attachment(job: str, handle: str, index: int, user=Depends(active)):
-    from company_agent.services.eip.client import view_attachment
 
-    name, payload = await view_attachment(service().queue.store, user.id, job, handle, index)
+    name, payload = await _client_imports.view_attachment(service().queue.store, user.id, job, handle, index)
     media_type = mimetypes.guess_type(name)[0] or 'application/octet-stream'
     disposition = 'inline' if media_type == 'application/pdf' else 'attachment'
     return StreamingResponse(
@@ -107,9 +112,8 @@ async def calendar_preview(request: Request, user=Depends(active)):
     value = await data(request)
     if set(value) != {'artifact_id'} or not isinstance(value['artifact_id'], str):
         raise ValueError('請選擇行事曆 CSV。')
-    from company_agent.services.eip.calendar import preview
 
-    return await preview(service().queue.store, user.id, value['artifact_id'])
+    return await _calendar_imports.preview(service().queue.store, user.id, value['artifact_id'])
 
 
 @router.post('/agents/calendar/confirm')
@@ -121,14 +125,12 @@ async def calendar_confirm(request: Request, user=Depends(active)):
         or not isinstance(value['token'], str)
     ):
         raise ValueError('需要本人明確確認行事曆。')
-    from company_agent.services.eip.calendar import confirm
 
-    return await confirm(service().queue.store, user.id, value['token'])
+    return await _calendar_imports.confirm(service().queue.store, user.id, value['token'])
 
 
 @router.get('/agents/nas')
 async def nas_status(user=Depends(active)):
-    from company_agent.services.files.nas import NASVault, endpoint
 
     configured = bool(os.getenv('COMPANY_AGENT_NAS_URL'))
     if configured:
@@ -142,11 +144,12 @@ async def nas_bind(request: Request, user=Depends(active)):
     value = await data(request)
     if not {'account', 'password', 'consent'} <= set(value) or set(value) - {'account', 'password', 'consent', 'binding_id', 'label'} or value['consent'] is not True:
         raise ValueError('請確認個人帳號、加密保存及所需文件雲端分析的同意事項。')
-    from company_agent.services.files.nas import NASVault
 
     vault = NASVault(configured_service().queue.store)
-    result = await asyncio.to_thread(vault.bind, user.id, value['account'], value['password'],
-                                     binding_id=value.get('binding_id'), label=value.get('label'))
+    result = await asyncio.to_thread(
+        vault.bind, user.id, value['account'], value['password'],
+        binding_id=value.get('binding_id'), label=value.get('label'),
+    )
     vault.store.audit(user.id, None, 'nas_bind', 'done')
     return result
 
@@ -156,7 +159,6 @@ async def nas_unlink(request: Request, user=Depends(active)):
     value = await data(request)
     if set(value) - {'binding_id'}:
         raise ValueError('解除綁定僅接受本人連線識別碼。')
-    from company_agent.services.files.nas import NASVault
 
     vault = NASVault(configured_service().queue.store)
     await asyncio.to_thread(vault.unlink, user.id, value.get('binding_id'))
@@ -169,7 +171,6 @@ async def nas_test(request: Request, user=Depends(active)):
     value = await data(request)
     if set(value) - {'binding_id'}:
         raise ValueError('測試連線僅接受本人連線識別碼。')
-    from company_agent.services.files.nas import NASVault
 
     vault = NASVault(configured_service().queue.store)
     if not value.get('binding_id') and len(vault.bindings(user.id)) > 1:
@@ -232,7 +233,8 @@ async def followup(key: str, request: Request, user=Depends(active)):
     if old['kind'] != 'company':
         raise ValueError('請回公文聊天另送新訊息；未重播既有公文工作。')
     subject = await billed_subject(user)
-    new = await svc._io(svc.queue.submit,
+    new = await svc._io(
+        svc.queue.submit,
         user.id, subject, old['chat'], request_id, value['instruction'], [], [key],
     )
     return await svc._io(svc.result, user.id, new)
@@ -246,10 +248,8 @@ async def billed_subject(user):
         await close_model(model)
 
 
-
 def install(app):
-    from examples.shared.runtime.installation import install_once
-    with install_once(app, 'company_agent_installed') as installing:
+    with _installation_imports.install_once(app, 'company_agent_installed') as installing:
         if installing:
             app.add_middleware(JobServiceMiddleware, owner=app)
             app.router.lifespan_context = ServiceLifespan(app.router.lifespan_context).run
@@ -266,9 +266,7 @@ async def capacity(user=Depends(active)):
     """Content-free operational counters; administrators only."""
     if user.role != 'admin':
         raise HTTPException(403, '需要管理員權限。')
-    from examples.shared.runtime import concurrency as limits
-    from examples.official_document_workflow.runtime import current_resources
-    state = current_resources().state
+    state = _runtime_imports.current_resources().state
     current = configured_service()
 
     def queued():

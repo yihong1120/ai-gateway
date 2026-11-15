@@ -14,10 +14,10 @@ from company_agent.runtime.tools import tool_receipt
 from company_agent.services.cad.schemas import CreateCad
 from company_agent.services.cad.schemas import EditCad
 from company_agent.services.cad.schemas import ReadCad
-from company_agent.services.files.operations import ToolBox
+from company_agent.services.delivery.validation import prepare_output
 from company_agent.services.files.errors import input_error_feedback
 from company_agent.services.files.errors import RecoverableToolError
-from company_agent.services.delivery.validation import prepare_output
+from company_agent.services.files.operations import ToolBox
 from company_agent.services.files.schemas import Publish
 from company_agent.services.files.schemas import Read
 from company_agent.services.files.schemas import ReadOCR
@@ -95,8 +95,10 @@ async def file_tool(runtime: ToolRuntime, *, tool_name, input_schema, **kwargs):
             box.access.allowed, plain['root'], write=name == 'propose_publish',
         )
     if name in {'read_spreadsheet', 'analyze_spreadsheet'} and sheet_failures(runtime.state.get('messages', []), name, plain) >= 2:
-        raise RecoverableToolError('sheet_recovery_exhausted', '本來源已連續兩次工作表錯誤，停止執行；請交回blocked與工具不一致的限制，不猜字形或重送統計。',
-                                   root=plain['root'], path=plain['path'], next_action='return_blocked')
+        raise RecoverableToolError(
+            'sheet_recovery_exhausted', '本來源已連續兩次工作表錯誤，停止執行；請交回blocked與工具不一致的限制，不猜字形或重送統計。',
+            root=plain['root'], path=plain['path'], next_action='return_blocked',
+        )
     if name == 'read_file' and PurePosixPath(plain['path']).suffix.lower() in {
         '.dwg',
         '.dxf',
@@ -139,12 +141,14 @@ async def file_tool(runtime: ToolRuntime, *, tool_name, input_schema, **kwargs):
             error = json.loads(str(failure))
             if error['code'] != 'sheet_not_found':
                 raise
-            raise RecoverableToolError('sheet_not_found', error['message'],
-                                       root=plain['root'], path=plain['path'],
-                                       requested_sheet=error.get('requested_sheet'),
-                                       model_requested_sheet=plain.get('sheet'),
-                                       available_sheets=error.get('available_sheets', []),
-                                       next_action='只用可用清單精確名稱修正一次；已選對卻仍失敗時回報工具不一致。') from failure
+            raise RecoverableToolError(
+                'sheet_not_found', error['message'],
+                root=plain['root'], path=plain['path'],
+                requested_sheet=error.get('requested_sheet'),
+                model_requested_sheet=plain.get('sheet'),
+                available_sheets=error.get('available_sheets', []),
+                next_action='只用可用清單精確名稱修正一次；已選對卻仍失敗時回報工具不一致。',
+            ) from failure
         except FileNotFoundError as failure:
             # Only route a missing, exact single-file name known in this job.
             # ACL/path validation ran first. Existing same-named sources still
@@ -156,8 +160,10 @@ async def file_tool(runtime: ToolRuntime, *, tool_name, input_schema, **kwargs):
             if not matches or failure.filename != plain['path']:
                 if name in {'read_file', 'read_spreadsheet', 'analyze_spreadsheet'}:
                     await asyncio.to_thread(box.access.allowed, plain['root'])
-                    raise RecoverableToolError('source_not_found', '找不到指定來源；請搜尋授權目錄或請使用者補充檔案。',
-                                               root=plain['root'], path=plain['path']) from failure
+                    raise RecoverableToolError(
+                        'source_not_found', '找不到指定來源；請搜尋授權目錄或請使用者補充檔案。',
+                        root=plain['root'], path=plain['path'],
+                    ) from failure
                 raise
             return Command(
                 update={
@@ -180,9 +186,11 @@ async def file_tool(runtime: ToolRuntime, *, tool_name, input_schema, **kwargs):
         source = box.sources[(plain['root'], plain['path'])]
         evidence = await asyncio.to_thread(
             context.store.save_evidence, context.owner, context.job, runtime.tool_call_id,
-            {'tool': name, 'source': source, 'parameters': plain,
-             'result': {key: result[key] for key in ('sum', 'count', 'min', 'max', 'mean', 'excluded')},
-             'algorithm': 'constant_numeric_v1'},
+            {
+                'tool': name, 'source': source, 'parameters': plain,
+                'result': {key: result[key] for key in ('sum', 'count', 'min', 'max', 'mean', 'excluded')},
+                'algorithm': 'constant_numeric_v1',
+            },
         )
         result = {**result, 'statistics_evidence': evidence}
     await asyncio.to_thread(context.store.audit, context.owner, context.job, name, 'done')
@@ -206,7 +214,9 @@ async def file_tool(runtime: ToolRuntime, *, tool_name, input_schema, **kwargs):
 
 def file_tools():
     return [
-        injected_tool(name, schema, description, file_tool, tool_name=name, input_schema=schema,
-                      handle_tool_error=input_error_feedback)
+        injected_tool(
+            name, schema, description, file_tool, tool_name=name, input_schema=schema,
+            handle_tool_error=input_error_feedback,
+        )
         for name, (schema, description) in FILE_TOOL_SPECS.items()
     ]

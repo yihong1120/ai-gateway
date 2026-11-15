@@ -1,13 +1,20 @@
 """Bounded same-host calls; no credential storage and no automatic retries."""
+from __future__ import annotations
+
 import asyncio
+import json
 import time
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken
 from pydantic import ValidationError
 
-from .authentication import AuthorizationUnavailable, principal
-from .backend import ASSERTION_HEADER, Identity, MAX_BYTES, PROTOCOL
+from .authentication import AuthorizationUnavailable
+from .authentication import principal
+from .backend import ASSERTION_HEADER
+from .backend import Identity
+from .backend import MAX_BYTES
+from .backend import PROTOCOL
 from .config import SCOPE
 from .storage import ResourceError
 from .tools import contract_digest
@@ -23,8 +30,10 @@ class BackendClient:
             headers[ASSERTION_HEADER] = assertion
         payload = {'protocol': PROTOCOL, 'action': action, 'tool': tool, 'arguments': arguments or {}, 'output': output}
         try:
-            request = self.client.build_request('POST', self.settings.backend_url, headers=headers,
-                                                json=payload, timeout=125)
+            request = self.client.build_request(
+                'POST', self.settings.backend_url, headers=headers,
+                json=payload, timeout=125,
+            )
             request.headers.pop('cookie', None)
             response = await self.client.send(request, stream=True, follow_redirects=False, auth=None)
             try:
@@ -33,7 +42,6 @@ class BackendClient:
                     body.extend(part)
                     if len(body) > MAX_BYTES:
                         raise AuthorizationUnavailable('Company resource backend is unavailable.')
-                import json
                 value = json.loads(body)
                 if not isinstance(value, dict):
                     raise ValueError()
@@ -63,9 +71,11 @@ class BackendClient:
         async with asyncio.timeout(5):
             value = await self.request('health')
         config = self.configuration
-        if (value.get('protocol') != PROTOCOL or value.get('resource') != config.resource
-                or value.get('issuer') != config.issuer or value.get('tools') != contract_digest()
-                or value.get('clients') != list(config.clients)):
+        if (
+            value.get('protocol') != PROTOCOL or value.get('resource') != config.resource
+            or value.get('issuer') != config.issuer or value.get('tools') != contract_digest()
+            or value.get('clients') != list(config.clients)
+        ):
             raise AuthorizationUnavailable('Company resource backend configuration does not match.')
 
 
@@ -85,12 +95,16 @@ class RemoteVerifier:
         except ValidationError:
             raise AuthorizationUnavailable('Company authorization is unavailable.') from None
         config = self.backend.configuration
-        if (value.issuer != config.issuer or value.resource != config.resource or value.client not in config.clients
-                or not 0 < value.expires - time.time() <= 300):
+        if (
+            value.issuer != config.issuer or value.resource != config.resource or value.client not in config.clients
+            or not 0 < value.expires - time.time() <= 300
+        ):
             return None
-        return AccessToken(token=token, client_id=value.client, subject=value.subject,
-                           scopes=[SCOPE], resource=config.resource, expires_at=value.expires,
-                           claims={'owner': value.owner, 'iss': config.issuer})
+        return AccessToken(
+            token=token, client_id=value.client, subject=value.subject,
+            scopes=[SCOPE], resource=config.resource, expires_at=value.expires,
+            claims={'owner': value.owner, 'iss': config.issuer},
+        )
 
 
 class RemoteResources:

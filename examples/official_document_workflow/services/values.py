@@ -1,23 +1,26 @@
 """Stateless document values operations, independent of request and host state."""
-
 from __future__ import annotations
 
 import json
 import re
-from typing import Any, Literal
+from typing import Any
+from typing import Literal
 
-from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_HEADERS
-from examples.official_document_workflow.domain.documents import (
-    CALENDAR_PROJECT_CATEGORIES,
-    CJK_INLINE_SPACE,
-    WHITESPACE,
-    CloudExtractionError,
-    OfficialDocument,
+from examples.official_document_workflow.application.prompts import (
+    TENTATIVE_SCHEDULE_PROMPT,
 )
-from examples.official_document_workflow.infrastructure.eip.calendar_csv import export_eip_csv
-
-
+from examples.official_document_workflow.domain.calendar.csv_schema import (
+    CALENDAR_HEADERS,
+)
 from examples.official_document_workflow.domain.calendar.values import CalendarValues
+from examples.official_document_workflow.domain.documents import CALENDAR_PROJECT_CATEGORIES
+from examples.official_document_workflow.domain.documents import CJK_INLINE_SPACE
+from examples.official_document_workflow.domain.documents import CloudExtractionError
+from examples.official_document_workflow.domain.documents import OfficialDocument
+from examples.official_document_workflow.domain.documents import WHITESPACE
+from examples.official_document_workflow.infrastructure.eip.calendar_csv import (
+    export_eip_csv,
+)
 
 
 class DocumentValues(CalendarValues):
@@ -26,9 +29,6 @@ class DocumentValues(CalendarValues):
         source_kind: Literal['native_pdf_text', 'paddle_layout_ocr'],
     ) -> str:
         """Return the low-latency contract for geometry-preserved local text."""
-        from examples.official_document_workflow.application.prompts import (
-            TENTATIVE_SCHEDULE_PROMPT,
-        )
 
         category_options = '、'.join(CALENDAR_PROJECT_CATEGORIES)
         source_description = 'PDF 原生文字層' if source_kind == 'native_pdf_text' else 'PaddleOCR-VL 版面區塊'
@@ -396,30 +396,9 @@ class DocumentValues(CalendarValues):
             raise CloudExtractionError('calendar response JSON has trailing content')
         return value
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     def calendar_csv(self, rows: list[dict[str, str]]) -> bytes:
         return export_eip_csv(
-            [{header: self._csv_safe_cell(str(row.get(header, ''))) for header in CALENDAR_HEADERS} for row in rows]
+            [{header: self._csv_safe_cell(str(row.get(header, ''))) for header in CALENDAR_HEADERS} for row in rows],
         )
 
     @staticmethod

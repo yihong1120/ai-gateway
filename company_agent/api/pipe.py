@@ -1,22 +1,33 @@
 """Thin official Pipe bridge; source selection comes from the owned saved turn."""
 from __future__ import annotations
 
-from examples.shared.runtime.chat import current_turn, wait_for_result  # noqa: F401 - public chat entry contract
 from urllib.parse import quote
 
+import company_agent.runtime.models as _models_imports
+import company_agent.services.research.web as _web_imports
 from company_agent.api.progress import progress_text
 from company_agent.api.progress import STATUSES
 from company_agent.api.service import service
 from company_agent.api.service import upload_bytes
+from company_agent.services.cad.sandbox import NOTICE
+from company_agent.services.office.ocr import NOTICE as OCR_NOTICE
 from examples.identity.adapters.webui import verified_user
+from examples.official_document_workflow.application.output_receipts import (
+    DELETION_REVIEW_NOTICE,
+)
+from examples.shared.runtime.chat import current_turn
+from examples.shared.runtime.chat import wait_for_result
+from examples.shared.runtime.modules import ModuleReference
 
-
+_webui_chats = ModuleReference('open_webui.models.chats')
+_webui_context_compaction = ModuleReference('open_webui.utils.context_compaction')
+_webui_misc = ModuleReference('open_webui.utils.misc')
 
 
 def conversation(chat, message_id, *, exclude_current=False):
     """Only the owned saved branch; never accept browser tool calls or system roles."""
-    from open_webui.utils.misc import get_message_list
-    from open_webui.utils.context_compaction import _apply_latest_summary_checkpoint
+    get_message_list = _webui_misc.attribute('get_message_list')
+    _apply_latest_summary_checkpoint = _webui_context_compaction.attribute('_apply_latest_summary_checkpoint')
 
     branch = get_message_list(chat.get('history', {}).get('messages', {}), message_id)
     if message_id and (not branch or branch[0].get('parentId')):
@@ -47,20 +58,16 @@ def markdown(result):
     for item in result['files']:
         # Labels are fixed; arbitrary model filenames cannot inject Markdown.
         lines.append(f'[下載檔案 {len(lines)-2}]({item["url"]})')
-    from company_agent.services.research.web import public_url
 
     for index, source in enumerate(result.get('web_sources', []), 1):
-        url = public_url(source['url'])
+        url = _web_imports.public_url(source['url'])
         lines.append(f'[網路來源 {index}]({quote(url, safe=":/?=&%#@+~")})')
-    from company_agent.services.cad.sandbox import NOTICE
 
     if NOTICE in result.get('notices', []):
         lines.append(NOTICE)
-    from company_agent.services.office.ocr import NOTICE as OCR_NOTICE
 
     if OCR_NOTICE in result.get('notices', []):
         lines.append(OCR_NOTICE)
-    from examples.official_document_workflow.application.output_receipts import DELETION_REVIEW_NOTICE
     if DELETION_REVIEW_NOTICE in result.get('notices', []):
         lines.append(DELETION_REVIEW_NOTICE)
     return '\n\n'.join(lines)
@@ -69,8 +76,7 @@ def markdown(result):
 async def run_pipe(body, user, metadata, emitter=None, task=None):
     if task:
         return '公司工作助理'  # No title/tag/query task can enqueue or bill.
-    from open_webui.models.chats import Chats
-    from company_agent.runtime.models import close_model
+    Chats = _webui_chats.attribute('Chats')
 
     verified = await verified_user((user or {}).get('id'))
     chat_id = (metadata or {}).get('chat_id')
@@ -87,7 +93,7 @@ async def run_pipe(body, user, metadata, emitter=None, task=None):
     # Validate OIDC + connection without making a paid request.
     model = svc.model_factory(verified)
     subject = model.subject
-    await close_model(model)
+    await _models_imports.close_model(model)
     inputs = await upload_bytes(verified['id'], ids)
     history, branch_ids = conversation(chat.chat, user_message, exclude_current=True)
 

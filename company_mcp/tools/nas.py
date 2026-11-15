@@ -1,10 +1,13 @@
 """Read-only NAS tool contracts; reuse existing file service validation."""
+from __future__ import annotations
+
 from typing import Literal
 
 from pydantic import Field
 
-from company_agent.services.files.schemas import Read, Search
 from .common import Workspace
+from company_agent.services.files.schemas import Read
+from company_agent.services.files.schemas import Search
 
 
 class NasRead(Workspace, Read):

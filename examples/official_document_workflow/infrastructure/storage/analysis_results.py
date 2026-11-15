@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import hashlib
 
-from .shared_content import SharedContentCache, _MISS
+from .shared_content import _MISS
+from .shared_content import SharedContentCache
 from examples.official_document_workflow.domain.documents import ProcessingError
 
 
@@ -49,23 +50,33 @@ class AnalysisResults(SharedContentCache):
         if not owner:
             return
         with self.store.db() as db:
-            db.execute("""INSERT INTO document_analysis_uses(scope,key,owner,job) VALUES(%s,%s,%s,%s)
-                ON CONFLICT DO NOTHING""", (self.scope, key, owner, job or ''))
+            db.execute(
+                """INSERT INTO document_analysis_uses(scope,key,owner,job) VALUES(%s,%s,%s,%s)
+                ON CONFLICT DO NOTHING""", (self.scope, key, owner, job or ''),
+            )
 
     def confirm_not_started(self, key, *, actor, reason):
         """Explicit operator evidence that no provider call started, never a retry on timeout."""
         if not isinstance(actor, str) or not actor.strip() or not isinstance(reason, str) or not reason.strip():
             raise ValueError('Operator and evidence are required.')
         with self.store.db() as db:
-            locked = db.execute('SELECT pg_try_advisory_xact_lock(hashtextextended(%s,0)) AS locked',
-                                (self._lock_name(key),)).fetchone()['locked']
+            locked = db.execute(
+                'SELECT pg_try_advisory_xact_lock(hashtextextended(%s,0)) AS locked',
+                (self._lock_name(key),),
+            ).fetchone()['locked']
             if not locked:
                 raise ValueError('Analysis is still running; its reservation cannot be released.')
-            row = db.execute('SELECT state,payload FROM document_analysis_results WHERE scope=%s AND key=%s FOR UPDATE',
-                             (self.scope, key)).fetchone()
+            row = db.execute(
+                'SELECT state,payload FROM document_analysis_results WHERE scope=%s AND key=%s FOR UPDATE',
+                (self.scope, key),
+            ).fetchone()
             if row is None or row['state'] != 'unknown':
                 raise ValueError('Only an uncertain paid reservation can be reconciled.')
-            db.execute("""INSERT INTO document_analysis_resolutions(scope,key,actor,reason,previous_payload_sha256)
-                VALUES(%s,%s,%s,%s,%s)""", (self.scope, key, actor, reason, hashlib.sha256(bytes(row['payload'])).hexdigest()))
-            db.execute("""UPDATE document_analysis_results SET state='failed',payload=%s,expires_at=CURRENT_TIMESTAMP
-                WHERE scope=%s AND key=%s""", (self._encode(key, None, failed=True), self.scope, key))
+            db.execute(
+                """INSERT INTO document_analysis_resolutions(scope,key,actor,reason,previous_payload_sha256)
+                VALUES(%s,%s,%s,%s,%s)""", (self.scope, key, actor, reason, hashlib.sha256(bytes(row['payload'])).hexdigest()),
+            )
+            db.execute(
+                """UPDATE document_analysis_results SET state='failed',payload=%s,expires_at=CURRENT_TIMESTAMP
+                WHERE scope=%s AND key=%s""", (self._encode(key, None, failed=True), self.scope, key),
+            )

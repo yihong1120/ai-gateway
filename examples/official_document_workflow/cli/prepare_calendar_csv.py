@@ -1,14 +1,11 @@
 """Prepare a downloaded calendar CSV for a direct upload in the EIP website."""
-
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
-from examples.official_document_workflow.infrastructure.eip.calendar_csv import (
-    export_eip_csv,
-    parse_csv,
-)
+from examples.official_document_workflow.infrastructure.eip.calendar_csv import export_eip_csv
+from examples.official_document_workflow.infrastructure.eip.calendar_csv import parse_csv
 
 
 def prepare(payload: bytes) -> tuple[int, bytes]:
@@ -20,16 +17,16 @@ def prepare(payload: bytes) -> tuple[int, bytes]:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source", type=Path)
-    parser.add_argument("--output", type=Path)
+    parser.add_argument('source', type=Path)
+    parser.add_argument('--output', type=Path)
     args = parser.parse_args()
-    target = args.output or args.source.with_name(args.source.stem + "_EIP直接匯入.csv")
+    target = args.output or args.source.with_name(args.source.stem + '_EIP直接匯入.csv')
     count, payload = prepare(args.source.read_bytes())
-    with target.open("xb") as stream:
+    with target.open('xb') as stream:
         stream.write(payload)
     print(f"已產生 {count} 筆行程：{target.resolve()}")
-    print("在 EIP 網站直接上傳此檔，編碼選 UTF-8；%2B 會還原為 +。")
+    print('在 EIP 網站直接上傳此檔，編碼選 UTF-8；%2B 會還原為 +。')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

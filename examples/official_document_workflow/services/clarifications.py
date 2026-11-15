@@ -1,48 +1,29 @@
 """Source-bound, expiring calendar clarification state transitions."""
-
 from __future__ import annotations
-from examples.shared.runtime.io import run_sync
 
 import asyncio
 import hashlib
-
 import json
-
 import logging
-
-
-
 from typing import Any
 
-from open_webui.models.files import FileModel, Files
+from open_webui.models.files import FileModel
+from open_webui.models.files import Files
 
-from examples.official_document_workflow.application.instruction_planner import (
-    current_user_message_from_body,
-    resolve_pending_reminder_choice,
-)
-
-from examples.official_document_workflow.application.pending import (
-    PendingRepository,
-    PendingClarificationScope,
-)
-
-from examples.official_document_workflow.domain.calendar.operations import (
-    CalendarTransformResult,
-    apply_calendar_operations,
-)
-
-from examples.official_document_workflow.domain.documents import (
-    PendingCalendarReminder,
-    ProcessedDocument,
-    ProcessingError,
-)
-
-from examples.official_document_workflow.domain.workflow import (
-    JobPlan,
-    PendingReminderResolution,
-)
-
+from .calendar_delivery import CalendarOutputDelivery
 from .components import ConfiguredService
+from examples.official_document_workflow.application.instruction_planner import current_user_message_from_body
+from examples.official_document_workflow.application.instruction_planner import resolve_pending_reminder_choice
+from examples.official_document_workflow.application.pending import PendingClarificationScope
+from examples.official_document_workflow.application.pending import PendingRepository
+from examples.official_document_workflow.domain.calendar.operations import apply_calendar_operations
+from examples.official_document_workflow.domain.calendar.operations import CalendarTransformResult
+from examples.official_document_workflow.domain.documents import PendingCalendarReminder
+from examples.official_document_workflow.domain.documents import ProcessedDocument
+from examples.official_document_workflow.domain.documents import ProcessingError
+from examples.official_document_workflow.domain.workflow import JobPlan
+from examples.official_document_workflow.domain.workflow import PendingReminderResolution
+from examples.shared.runtime.io import run_sync
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +40,6 @@ class CalendarClarifications(ConfiguredService):
         super().__init__(request)
         self.exports, self.values, self.transport = exports, values, transport
         self.pending = pending
-        from .calendar_delivery import CalendarOutputDelivery
 
         self.delivery = CalendarOutputDelivery(pending.outputs, exports, values)
 
@@ -161,7 +141,7 @@ class CalendarClarifications(ConfiguredService):
             raise ProcessingError('無法安全暫存本次期限選擇') from exc
 
     def _pending_payload_is_within_limit(
-        self, payload: PendingCalendarReminder
+        self, payload: PendingCalendarReminder,
     ) -> bool:
         """Return false rather than failing core exports when the continuation is too large."""
 
@@ -207,7 +187,7 @@ class CalendarClarifications(ConfiguredService):
         clarification: str,
     ) -> str:
         options = CalendarClarifications._pending_deadline_options(
-            payload.calendar_rows
+            payload.calendar_rows,
         )
         rendered_options = '\n'.join(
             f'- {index}：{date_value}' for index, date_value in enumerate(options)
@@ -241,7 +221,7 @@ class CalendarClarifications(ConfiguredService):
         plan_payload = job_plan.model_dump()
         operations = plan_payload.get('calendar_operations')
         if not isinstance(operations, list) or not 0 <= operation_index < len(
-            operations
+            operations,
         ):
             raise ProcessingError('待確認的提醒操作已失效')
         operation = operations[operation_index]
@@ -257,7 +237,7 @@ class CalendarClarifications(ConfiguredService):
                 existing.scope,
                 expected_generation=existing.generation,
                 attachment_fingerprint=fingerprint,
-            )
+            ),
         )
         try:
             return await asyncio.shield(task)
@@ -292,15 +272,15 @@ class CalendarClarifications(ConfiguredService):
         if reviewing:
             existing = await run_sync(self.pending.review, scope)
         if existing is None or not isinstance(
-            existing.payload, PendingCalendarReminder
+            existing.payload, PendingCalendarReminder,
         ):
             return None
         pending_sources = await self._owned_pending_source_files(
-            existing.payload, user_id
+            existing.payload, user_id,
         )
         if pending_sources is None:
             await run_sync(
-                self.pending.discard, scope, expected_generation=existing.generation
+                self.pending.discard, scope, expected_generation=existing.generation,
             )
             return (
                 '先前待確認的公文附件已不存在或不再屬於目前帳號；請重新附加檔案後處理。'
@@ -309,7 +289,7 @@ class CalendarClarifications(ConfiguredService):
             attachment_fingerprint = self._attachment_fingerprint(pending_sources)
         except ProcessingError:
             await run_sync(
-                self.pending.discard, scope, expected_generation=existing.generation
+                self.pending.discard, scope, expected_generation=existing.generation,
             )
             return '先前待確認的公文附件識別已失效；請重新附加檔案後處理。'
         if reviewing:
@@ -400,7 +380,7 @@ class CalendarClarifications(ConfiguredService):
                         '因此未建立更新後 CSV；請重新附加公文並明確指定各提醒的期限。'
                     )
                 if not await run_sync(
-                    self.pending.advance, record, next_payload
+                    self.pending.advance, record, next_payload,
                 ):
                     return '期限選擇已被新附件取代或逾時；請重新確認目前附件。'
                 return self._pending_question(
@@ -412,7 +392,7 @@ class CalendarClarifications(ConfiguredService):
             if updated_plan.outputs.calendar_csv and calendar_transform.rows:
                 write_started = True
                 task = asyncio.create_task(
-                    self.delivery.deliver(record, payload, calendar_transform.rows)
+                    self.delivery.deliver(record, payload, calendar_transform.rows),
                 )
                 try:
                     delivery = await asyncio.shield(task)
@@ -485,7 +465,7 @@ class CalendarClarifications(ConfiguredService):
             options: tuple[str, ...],
         ) -> dict[str, Any]:
             return await self.transport._cloud_pending_reminder_choice_payload(
-                message, options
+                message, options,
             )
 
         return await resolve_pending_reminder_choice(
@@ -510,16 +490,16 @@ class CalendarClarifications(ConfiguredService):
         for report in calendar_transform.reports:
             if report.applied:
                 lines.append(
-                    f'- 使用者提醒「{report.title}」：已加入 {report.applied} 項 CSV 行事曆事件。'
+                    f'- 使用者提醒「{report.title}」：已加入 {report.applied} 項 CSV 行事曆事件。',
                 )
             if report.clarification:
                 lines.append(
-                    f'> 提醒「{report.title}」尚未加入：{report.clarification}'
+                    f'> 提醒「{report.title}」尚未加入：{report.clarification}',
                 )
         if job_plan.outputs.calendar_csv:
             if csv_file is not None:
                 lines.append(
-                    f'- 更新後行事曆 CSV：{self.exports.download_link(request, csv_file.id, csv_name)}'
+                    f'- 更新後行事曆 CSV：{self.exports.download_link(request, csv_file.id, csv_name)}',
                 )
             elif csv_error:
                 lines.append(f'> 已完成期限選擇，但無法儲存更新後 CSV：{csv_error}')
@@ -532,4 +512,3 @@ class CalendarClarifications(ConfiguredService):
         if csv_file is not None:
             lines.append(f'\n[EIP 行事曆預覽／確認匯入](/eip?csv={csv_file.id})')
         return '\n'.join(lines)
-

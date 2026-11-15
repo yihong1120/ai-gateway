@@ -8,6 +8,8 @@ from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from examples.identity.accounts.password_reset import request_password_reset
+from examples.identity.accounts.password_reset import reset_password
 from examples.identity.database import get_db
 from examples.identity.providers.mode import require_local_password_management
 from examples.identity.redis_pool import get_redis_pool
@@ -15,8 +17,6 @@ from examples.identity.schemas.password_reset import ForgotPasswordRequest
 from examples.identity.schemas.password_reset import PasswordErrorResponse
 from examples.identity.schemas.password_reset import PasswordMessageResponse
 from examples.identity.schemas.password_reset import ResetPasswordRequest
-from examples.identity.accounts.password_reset import request_password_reset
-from examples.identity.accounts.password_reset import reset_password
 
 router = APIRouter(prefix='/password', tags=['password-reset'])
 

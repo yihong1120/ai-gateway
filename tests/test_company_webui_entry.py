@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import os
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock
 from unittest.mock import patch
 
+import company_agent.ops.deploy_webui as _deploy_webui_imports
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -39,7 +41,7 @@ class WebUIEntryTests(unittest.IsolatedAsyncioTestCase):
                 run.assert_awaited_once()
 
     def test_launcher_installs_canonical_router(self):
-        source = (ROOT / 'examples/openwebui/app.py').read_text()
+        source = (ROOT / 'examples/openwebui/_host.py').read_text()
         imports = [
             node.module
             for node in ast.walk(ast.parse(source))
@@ -47,19 +49,19 @@ class WebUIEntryTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertIn('company_agent.api.router', imports)
         self.assertNotIn('company_agent.web_router', imports)
+        bootstrap = (ROOT / 'examples/openwebui/app.py').read_text()
+        self.assertIn("ModuleReference('examples.openwebui._host')", bootstrap)
 
     def test_relocated_deployment_reads_the_actual_function_template(self):
-        from company_agent.ops.deploy_webui import function_source
 
         self.assertEqual(
-            function_source(),
+            _deploy_webui_imports.function_source(),
             (ROOT / 'examples/openwebui/functions/company_agent_pipe.py').read_text(
                 encoding='utf-8',
             ),
         )
 
     async def test_missing_function_template_fails_before_deployment(self):
-        from company_agent.ops.deploy_webui import deploy
 
         with patch(
             'company_agent.ops.deploy_webui.function_source',
@@ -67,7 +69,6 @@ class WebUIEntryTests(unittest.IsolatedAsyncioTestCase):
         ):
             with patch.dict('os.environ', {}, clear=True):
                 with self.assertRaises(FileNotFoundError):
-                    await deploy()
-                import os
+                    await _deploy_webui_imports.deploy()
 
                 self.assertNotIn('FROM_INIT_PY', os.environ)

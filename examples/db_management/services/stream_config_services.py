@@ -9,17 +9,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from examples.identity.models import Group
-from examples.identity.models import Site
-from examples.identity.models import StreamConfig
-from examples.identity.models import User
-from examples.identity.dependencies import _site_permission
-from examples.identity.dependencies import ensure_admin_with_group
-from examples.identity.dependencies import is_super_admin
 from examples.db_management.schemas.stream_config import SiteStreamConfigUpsert
 from examples.db_management.schemas.stream_config import StreamConfigCreate
 from examples.db_management.schemas.stream_config import StreamConfigRead
 from examples.db_management.schemas.stream_config import StreamConfigUpdate
+from examples.identity.dependencies import _site_permission
+from examples.identity.dependencies import ensure_admin_with_group
+from examples.identity.dependencies import is_super_admin
+from examples.identity.models import Group
+from examples.identity.models import Site
+from examples.identity.models import StreamConfig
+from examples.identity.models import User
 
 
 async def _get_site_or_404(site_id: int, db: AsyncSession) -> Site:
@@ -112,8 +112,10 @@ def _stream_config_to_read(
     """Serialise only response fields, using the already loaded group limits."""
     current, maximum = limits
     return StreamConfigRead(
-        **{name: getattr(cfg, name) for name in StreamConfigRead.model_fields
-           if name not in {'total_stream_in_group', 'max_allowed_streams'}},
+        **{
+            name: getattr(cfg, name) for name in StreamConfigRead.model_fields
+            if name not in {'total_stream_in_group', 'max_allowed_streams'}
+        },
         total_stream_in_group=current,
         max_allowed_streams=maximum,
     )
@@ -239,12 +241,16 @@ async def upsert_site_stream_configs(
             raise HTTPException(status_code=400, detail='Duplicate stream names are not allowed.')
         # Re-read after waiting for the locks; an earlier writer may have
         # changed names or values in this session's identity map meanwhile.
-        site_configs = list((await db.scalars(
-            select(StreamConfig).where(StreamConfig.site_id == site_id)
-            .execution_options(populate_existing=True),
-        )).all())
-        existing = {cfg.id: cfg for cfg in site_configs
-                    if visible_group_id is None or cfg.group_id == visible_group_id}
+        site_configs = list((
+            await db.scalars(
+                select(StreamConfig).where(StreamConfig.site_id == site_id)
+                .execution_options(populate_existing=True),
+            )
+        ).all())
+        existing = {
+            cfg.id: cfg for cfg in site_configs
+            if visible_group_id is None or cfg.group_id == visible_group_id
+        }
         owners = {cfg.stream_name: cfg.id for cfg in site_configs}
         for item in payload.streams:
             if item.id is not None and item.id not in existing:
@@ -338,7 +344,7 @@ async def _group_stream_limits(
         select(Group.id, func.count(StreamConfig.id), Group.max_allowed_streams)
         .outerjoin(StreamConfig, StreamConfig.group_id == Group.id)
         .where(Group.id.in_(group_ids))
-        .group_by(Group.id, Group.max_allowed_streams)
+        .group_by(Group.id, Group.max_allowed_streams),
     )
     limits = {identifier: (current, maximum) for identifier, current, maximum in rows}
     if group_ids - limits.keys():

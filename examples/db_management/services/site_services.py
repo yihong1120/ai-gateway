@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 from fastapi import HTTPException
 from sqlalchemy import delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -8,19 +7,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
+from examples.db_management.schemas.site import SiteRead
+from examples.db_management.services.site_media_cleanup import (
+    enqueue_site_media_cleanup_for_site,
+)
+from examples.identity.dependencies import SUPER_ADMIN_NAME
 from examples.identity.models import Site
 from examples.identity.models import site_groups_table
 from examples.identity.models import SiteNotificationPreference
 from examples.identity.models import User
 from examples.identity.models import user_sites_table
-from examples.identity.dependencies import SUPER_ADMIN_NAME
-from examples.db_management.schemas.site import SiteRead
-from examples.db_management.services.site_media_cleanup import (
-    enqueue_site_media_cleanup_for_site,
-)
+from examples.shared.runtime.modules import ModuleReference
 
-
-
+_identity_sites = ModuleReference('examples.identity.authorization.sites')
 
 
 def site_to_read(
@@ -70,10 +69,6 @@ async def _list_user_ids_for_groups(
         select(User.id).where(User.group_id.in_(group_ids)),
     )
     return list(result.scalars().all())
-
-
-
-
 
 
 async def list_sites(
@@ -417,4 +412,4 @@ async def remove_group_from_site(
     )
     await db.commit()
 
-from examples.identity.authorization.sites import seed_site_notification_preferences
+seed_site_notification_preferences = _identity_sites.attribute('seed_site_notification_preferences')

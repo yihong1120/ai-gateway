@@ -10,7 +10,10 @@ from unittest.mock import patch
 from langchain.agents.middleware.model_call_limit import ModelCallLimitExceededError
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
+from langsmith import get_tracing_context
+from langsmith import tracing_context
 
+import company_agent.services.office.documents as _documents_imports
 from company_agent.graph import build_graph
 from company_agent.runtime.execution import DocumentAgent
 from company_agent.runtime.storage import Store
@@ -19,6 +22,7 @@ from company_agent.tests.postgres_fixture import checkpointer
 from company_agent.tests.test_agent import call
 from company_agent.tests.test_agent import Fixture
 from company_agent.tests.test_agent import ScriptedModel
+
 """Real graph/checkpointer tests; only the model is replaced by scripted messages."""
 
 
@@ -216,12 +220,11 @@ asyncio.run(main())
         self.assertFalse(model.messages)
 
     async def test_edit_uses_checkpoint_source_version_and_rechecks_current_file(self):
-        from company_agent.services.office.documents import create_word, extract
         for changed in (False, True):
             with self.subTest(changed=changed):
-                data = create_word('原標題', [{'text': '原內容', 'heading': False}])
+                data = _documents_imports.create_word('原標題', [{'text': '原內容', 'heading': False}])
                 source = self.file('edit.docx', data)
-                run = next(r for b in extract(data, '.docx') for r in b['runs'])
+                run = next(r for b in _documents_imports.extract(data, '.docx') for r in b['runs'])
                 stopped = await self.failed_job(
                     DocumentAgent(
                         self.config, ScriptedModel([
@@ -291,7 +294,6 @@ asyncio.run(main())
         self.assertNotIn('secret-', json.dumps(events))
 
     async def test_host_wide_tracing_is_not_inherited(self):
-        from langsmith import get_tracing_context, tracing_context
 
         def response(messages):
             self.assertFalse(get_tracing_context()['enabled'])

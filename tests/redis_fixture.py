@@ -1,11 +1,12 @@
 """A private Unix-socket Redis instance; never connects to a developer's service."""
-
 from __future__ import annotations
+
 import asyncio
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
+
 from redis.asyncio import Redis
 
 

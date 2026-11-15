@@ -1,10 +1,16 @@
 """EIP queries and drafts. Authentication and confirmed writes stay server-side."""
 from __future__ import annotations
-from examples.shared.runtime.io import run_sync
 
 import json
 import re
 import uuid
+
+import examples.identity.adapters.webui as _webui_imports
+import examples.official_document_workflow.infrastructure.eip.sessions as _sessions_imports
+import examples.official_document_workflow.infrastructure.storage.automation_store as _automation_store_imports
+import examples.official_document_workflow.runtime as _runtime_imports
+from examples.official_document_workflow.infrastructure.eip import calendar_read
+from examples.shared.runtime.io import run_sync
 
 
 def source(ctx, handle, kind):
@@ -54,17 +60,14 @@ def remember(ctx, payload):
 
 
 async def view_document(store, owner, job, handle):
-    from examples.official_document_workflow.infrastructure.storage.automation_store import store as workflow_store
-    from examples.official_document_workflow.infrastructure.eip.sessions import manual_session
-    from examples.official_document_workflow.runtime import current_resources
-    state = current_resources().state
+    state = _runtime_imports.current_resources().state
 
-    account_store = await run_sync(workflow_store,)
-    account = await run_sync(account_store.account,owner)
+    account_store = await run_sync(_automation_store_imports.store)
+    account = await run_sync(account_store.account, owner)
     if not account:
         raise ValueError('EIP 尚未綁定，請至帳號與連線重新連結。')
-    document = await run_sync(view_source,store, owner, job, handle, account['generation'])
-    async with manual_session(owner, state, account_store) as current:
+    document = await run_sync(view_source, store, owner, job, handle, account['generation'])
+    async with _sessions_imports.manual_session(owner, state, account_store) as current:
         detail = await current.read(
             'document_detail', document['id'], document['folder'],
         )
@@ -93,17 +96,14 @@ async def view_document(store, owner, job, handle):
 
 
 async def view_attachment(store, owner, job, handle, index):
-    from examples.official_document_workflow.infrastructure.storage.automation_store import store as workflow_store
-    from examples.official_document_workflow.infrastructure.eip.sessions import manual_session
-    from examples.official_document_workflow.runtime import current_resources
-    state = current_resources().state
+    state = _runtime_imports.current_resources().state
 
-    account_store = await run_sync(workflow_store,)
-    account = await run_sync(account_store.account,owner)
+    account_store = await run_sync(_automation_store_imports.store)
+    account = await run_sync(account_store.account, owner)
     if not account:
         raise ValueError('EIP 尚未綁定，請至帳號與連線重新連結。')
-    document = await run_sync(view_source,store, owner, job, handle, account['generation'])
-    async with manual_session(owner, state, account_store) as current:
+    document = await run_sync(view_source, store, owner, job, handle, account['generation'])
+    async with _sessions_imports.manual_session(owner, state, account_store) as current:
         attachments = await current.read(
             'attachments', document['id'], document['folder'],
         )
@@ -121,12 +121,10 @@ async def binding(ctx):
         await ctx.authorize_resources()
     if not ctx.settings.enable_eip_read:
         raise ValueError('此入口未啟用 EIP 查詢。')
-    from examples.identity.adapters.webui import verified_user
-    from examples.official_document_workflow.infrastructure.storage.automation_store import store as workflow_store
 
-    await verified_user(ctx.owner)
-    db = await run_sync(workflow_store,)
-    account = await run_sync(db.account,ctx.owner)
+    await _webui_imports.verified_user(ctx.owner)
+    db = await run_sync(_automation_store_imports.store)
+    account = await run_sync(db.account, ctx.owner)
     if (
         not account
         or not ctx.settings.eip_binding_revision
@@ -137,16 +135,14 @@ async def binding(ctx):
 
 
 async def query(ctx, name, args, call_id):
-    from examples.official_document_workflow.infrastructure.eip import calendar_read
-    from examples.official_document_workflow.infrastructure.eip.sessions import manual_session
-    from examples.official_document_workflow.runtime import current_resources
-    state = current_resources().state
+    state = _runtime_imports.current_resources().state
 
     db = await binding(ctx)
-    event = await run_sync(source,ctx, args.handle, 'calendar_event') if name == 'eip_calendar_detail' else None
+    event = await run_sync(source, ctx, args.handle, 'calendar_event') if name == 'eip_calendar_detail' else None
     if event is not None:
         call_id = 'eip_calendar_detail:' + args.handle
-    cached = await run_sync(ctx.store.begin_tool,
+    cached = await run_sync(
+        ctx.store.begin_tool,
         ctx.owner,
         ctx.job,
         call_id,
@@ -157,13 +153,13 @@ async def query(ctx, name, args, call_id):
     )
     if cached is not None:
         return cached
-    async with manual_session(ctx.owner, state, db) as current:
+    async with _sessions_imports.manual_session(ctx.owner, state, db) as current:
         if name == 'eip_calendar_query':
             rows = await current.read('calendar', args.start, args.end)
             events = [
                 {
                     **{k: v for k, v in row.items() if k != 'id'},
-                    'handle': await run_sync(remember,ctx, {**row, 'kind': 'calendar_event'}),
+                    'handle': await run_sync(remember, ctx, {**row, 'kind': 'calendar_event'}),
                 }
                 for row in rows
             ]
@@ -190,7 +186,7 @@ async def query(ctx, name, args, call_id):
                 'attachments': [
                     {
                         'name': attachment['name'],
-                        'handle': await run_sync(remember,ctx, {'kind': 'attachment', 'doc': event, 'attachment': attachment}),
+                        'handle': await run_sync(remember, ctx, {'kind': 'attachment', 'doc': event, 'attachment': attachment}),
                     }
                     for attachment in detail['attachments']
                 ],
@@ -202,7 +198,7 @@ async def query(ctx, name, args, call_id):
                 raise ValueError('EIP 清單超過單頁上限。')
             result = []
             for row in rows:
-                handle = await run_sync(remember,ctx, row)
+                handle = await run_sync(remember, ctx, row)
                 view_url = f"/agents/eip/{ctx.job}/{handle}"
                 result.append(
                     {
@@ -222,7 +218,7 @@ async def query(ctx, name, args, call_id):
                 'notice': '只列本帳號此文件匣及日期範圍；文件匣日期不是公文期限。未讀附件，不代表已分析公文。',
             }
         else:
-            doc = await run_sync(source,ctx, args.handle, 'document')
+            doc = await run_sync(source, ctx, args.handle, 'document')
             rows = await current.read('attachments', doc['id'], doc['folder'])
             if len(rows) > 50:
                 raise ValueError('附件清單超過 50 份上限。')
@@ -230,7 +226,8 @@ async def query(ctx, name, args, call_id):
                 'attachments': [
                     {
                         'name': r['name'],
-                        'handle': await run_sync(remember,
+                        'handle': await run_sync(
+                            remember,
                             ctx, {'kind': 'attachment', 'doc': doc, 'attachment': r},
                         ),
                     }
@@ -242,13 +239,12 @@ async def query(ctx, name, args, call_id):
     await binding(ctx)
     if len(json.dumps(output, ensure_ascii=False)) > 18000:
         raise ValueError('EIP 結果過大，未截斷宣稱完整。')
-    await run_sync(ctx.store.finish_tool,ctx.owner, ctx.job, call_id, output)
+    await run_sync(ctx.store.finish_tool, ctx.owner, ctx.job, call_id, output)
     return output
 
 
 async def attachment_list(current, document):
     if document.get('kind') == 'calendar_event':
-        from examples.official_document_workflow.infrastructure.eip import calendar_read
 
         rows = await current.read('calendar_detail', document['id'])
         return calendar_read.detail(rows, document['id'])['attachments']

@@ -3,28 +3,37 @@ from __future__ import annotations
 
 import copy
 import csv
+import hashlib
 import io
 import json
-import types
 import tempfile
-import hashlib
-from pathlib import Path
+import types
 import unittest
-from unittest.mock import patch, AsyncMock
+from pathlib import Path
+from unittest.mock import AsyncMock
+from unittest.mock import patch
 
 from . import test_eip_group_processing as fixtures
 from examples.official_document_workflow.application import calendar_review
-from examples.official_document_workflow.domain.calendar.contracts import CALENDAR_REVIEW_SCHEMA
-from examples.official_document_workflow.domain.calendar.relative_dates import (
-    ReceiptContext, add_days, period_matches, ESTIMATE_NOTICE,
+from examples.official_document_workflow.domain.calendar.contracts import (
+    CALENDAR_REVIEW_SCHEMA,
 )
+from examples.official_document_workflow.domain.calendar.relative_dates import add_days
+from examples.official_document_workflow.domain.calendar.relative_dates import ESTIMATE_NOTICE
+from examples.official_document_workflow.domain.calendar.relative_dates import period_matches
+from examples.official_document_workflow.domain.calendar.relative_dates import ReceiptContext
+from examples.shared.runtime.modules import ModuleReference
+
+_workflow_application = ModuleReference('examples.official_document_workflow.application')
 
 REFERENCE = fixtures.payload()['document']['reference_number']
 
 
 def spec(**changes):
-    return {'anchor': 'receipt', 'days': 7, 'day_type': 'calendar_days',
-            'include_anchor_day': False, **changes}
+    return {
+        'anchor': 'receipt', 'days': 7, 'day_type': 'calendar_days',
+        'include_anchor_day': False, **changes,
+    }
 
 
 class RelativeDeadlineTests(unittest.IsolatedAsyncioTestCase):
@@ -35,16 +44,20 @@ class RelativeDeadlineTests(unittest.IsolatedAsyncioTestCase):
         data = fixtures.payload()
         event = data['events'][0]
         event.update(status=status, start_date=None, tentative_schedule=None)
-        event['assignment'] = {'executor': None, 'date_basis': 'relative', 'anchor_date': None,
-                               'relative_deadline': spec() if relative is None else relative}
+        event['assignment'] = {
+            'executor': None, 'date_basis': 'relative', 'anchor_date': None,
+            'relative_deadline': spec() if relative is None else relative,
+        }
         self.sources['S2'] = fixtures.M.CloudSemanticSource(clause, 'native_pdf_text')
         self.pipe.semantic_source.side_effect = list(self.sources.values())
         self.pipe.analyze_text.return_value = data
         return data
 
     def saved_rows(self):
-        request = next(c.kwargs for c in self.pipe.store_output.await_args_list
-                       if c.kwargs['kind'] == 'calendar_csv')
+        request = next(
+            c.kwargs for c in self.pipe.store_output.await_args_list
+            if c.kwargs['kind'] == 'calendar_csv'
+        )
         return list(csv.DictReader(io.StringIO(request['payload'].decode('utf-8-sig'))))
 
     async def test_verified_matching_receipt_date_is_used_before_issue_date(self):
@@ -127,13 +140,19 @@ class RelativeDeadlineTests(unittest.IsolatedAsyncioTestCase):
             if schema != CALENDAR_REVIEW_SCHEMA:
                 return copy.deepcopy(analysis)
             requests.append(data)
-            return {'issues': [], 'checks': [{'index': 0, 'decision': 'keep', 'target': None,
+            return {
+                'issues': [], 'checks': [{
+                    'index': 0, 'decision': 'keep', 'target': None,
                     'reason': '本項工作及七日期間與原文一致，日期已標示推估。',
-                    'evidence_spans': [{'source_id': 'S2', 'start_line': 1, 'end_line': 1}]}]}
+                    'evidence_spans': [{'source_id': 'S2', 'start_line': 1, 'end_line': 1}],
+                }],
+            }
 
         self.pipe.analyze_text.side_effect = model
-        with patch('examples.official_document_workflow.application.multi_agent.review_calendar',
-                   side_effect=calendar_review.review_calendar):
+        with patch(
+            'examples.official_document_workflow.application.multi_agent.review_calendar',
+            side_effect=calendar_review.review_calendar,
+        ):
             result = await self.run_group()
         self.assertTrue(result['complete'], result['errors'])
         self.assertEqual(requests[0]['date_calculations'][0]['anchor_source'], 'EIP 收文日期')
@@ -166,20 +185,28 @@ class RelativeDeadlineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(add_days('2026-09-04', spec(days=1, include_anchor_day=True)), '2026-09-04')
 
     def test_form_date_validation_does_not_treat_folder_timestamp_as_receipt(self):
-        context = ReceiptContext.from_detail('10', {'fields': [
-            {'label': '發文字號', 'value': REFERENCE},
-            {'label': '收文日期', 'value': '115年9月1日'},
-        ]})
+        context = ReceiptContext.from_detail(
+            '10', {
+                'fields': [
+                    {'label': '發文字號', 'value': REFERENCE},
+                    {'label': '收文日期', 'value': '115年9月1日'},
+                ],
+            },
+        )
         self.assertEqual(context.received_date, '2026-09-01')
-        missing = ReceiptContext.from_detail('10', {'fields': [
-            {'label': '文件匣時間', 'value': '115年9月1日'},
-        ]})
+        missing = ReceiptContext.from_detail(
+            '10', {
+                'fields': [
+                    {'label': '文件匣時間', 'value': '115年9月1日'},
+                ],
+            },
+        )
         self.assertIsNone(missing.received_date)
 
 
 class RetainedExportTests(unittest.IsolatedAsyncioTestCase):
     async def test_reuse_requires_owner_source_set_and_identical_bytes(self):
-        from examples.official_document_workflow.application import integration
+        integration = _workflow_application.attribute('integration')
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'document.pdf'
             path.write_bytes(b'%PDF-original')

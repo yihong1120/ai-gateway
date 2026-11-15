@@ -1,6 +1,7 @@
 """Simplified exception paths still reject bad input and release resources."""
 from __future__ import annotations
 
+import binascii
 import io
 import json
 import subprocess
@@ -18,9 +19,9 @@ from company_agent.runtime.completion import review_evidence
 from company_agent.runtime.middleware import visible_sources
 from company_agent.runtime.results import execution_summary
 from company_agent.services.eip.client import document_link
+from company_agent.services.files.errors import RecoverableToolError
 from company_agent.services.files.nas import NASClient
 from company_agent.services.files.operations import worker
-from company_agent.services.files.errors import RecoverableToolError
 from company_agent.services.office.documents import spreadsheet_books
 from company_agent.services.office.revision import require_inspected
 from company_agent.services.research.web import tavily_request
@@ -153,7 +154,6 @@ class WorkerBoundaryTests(unittest.TestCase):
         invoke.assert_called_once()
 
     def test_protocol_failures_propagate_without_retry(self):
-        import binascii
         for payload, error in ((b'not json', json.JSONDecodeError), (b'\xff', UnicodeDecodeError), (b'{"binary":"@@"}', binascii.Error), (b'{}', KeyError)):
             run = SimpleNamespace(returncode=0, stdout=payload)
             with patch('company_agent.services.files.operations.subprocess.run', return_value=run) as invoke:

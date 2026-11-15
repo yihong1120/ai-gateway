@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from examples.identity.runtime import get_settings
-from examples.identity.settings.bff import get_bff_options
-
 import hmac
 from typing import Literal
 from typing import TypedDict
@@ -12,8 +9,8 @@ from fastapi import Request
 from fastapi import Response
 
 from examples.identity.runtime import get_identity
-
-
+from examples.identity.runtime import get_settings
+from examples.identity.settings.bff import get_bff_options
 
 
 class _SessionCookieOptions(TypedDict):

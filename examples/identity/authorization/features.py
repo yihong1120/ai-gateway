@@ -196,4 +196,3 @@ async def feature_names_for_group(
     )
 
     return [r.feature_name for r in rows]
-

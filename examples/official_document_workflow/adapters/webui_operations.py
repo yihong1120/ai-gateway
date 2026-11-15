@@ -3,6 +3,7 @@
 Application code should use explicit service objects. Keep these aliases only for
 installed WebUI functions and existing overrides until their callers migrate.
 """
+from __future__ import annotations
 
 COMPATIBILITY_OPERATIONS = {
     'values': (

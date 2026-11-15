@@ -1,8 +1,11 @@
 """Prepare analysis/calendar operations; execution requires personal confirmation."""
+from __future__ import annotations
+
 from pydantic import Field
 
-from company_agent.services.eip.schemas import CalendarPrepare, EIPProcess
 from .common import Workspace
+from company_agent.services.eip.schemas import CalendarPrepare
+from company_agent.services.eip.schemas import EIPProcess
 
 
 class Plan(Workspace, CalendarPrepare):

@@ -15,11 +15,13 @@ from openai import APIConnectionError
 from openai import APITimeoutError
 from openai import RateLimitError
 
-from examples.identity.providers.subjects import linked_subject
-
-from examples.identity.adapters import webui as webui_identity
 from company_agent.runtime.gemini import provider_tools
 from company_agent.runtime.gemini import signed_history
+from examples.identity.adapters import webui as webui_identity
+from examples.identity.providers.subjects import linked_subject
+from examples.shared.runtime.modules import ModuleReference
+
+_model_limits = ModuleReference('examples.shared.runtime.concurrency')
 
 
 def model_failure_message(failure):
@@ -91,10 +93,10 @@ class UserBilledModel:
 
     def checked(self, runnable):
         """Web bindings add per-invocation identity verification at this boundary."""
-        from examples.shared.runtime.concurrency import MODELS
+        model_slots = _model_limits.attribute('MODELS')
 
         async def limited(messages, config):
-            async with MODELS:
+            async with model_slots:
                 return await runnable.ainvoke(messages, config=config)
 
         return RunnableLambda(limited)

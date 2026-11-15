@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from examples.identity.runtime import get_settings
-from examples.identity.accounts.passwords import hash_password_async
-
 from typing import Any
 from uuid import UUID
 
@@ -12,13 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
+from examples.identity.accounts.password_policy import validate_password_minimum
+from examples.identity.accounts.passwords import hash_password_async
 from examples.identity.models import User
 from examples.identity.models import USER_STATUS_ACTIVE
 from examples.identity.models import USER_STATUS_VALUES
 from examples.identity.models import UserIdentity
 from examples.identity.models import UserProfile
 from examples.identity.providers.keycloak_users import find_keycloak_user_subject
-from examples.identity.accounts.password_policy import validate_password_minimum
+from examples.identity.runtime import get_settings
 
 
 # Keycloak is the only password verifier for accounts created after the OIDC

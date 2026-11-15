@@ -1,16 +1,20 @@
 """Production upgrade boundaries: existing network policy, source and rollback."""
+from __future__ import annotations
+
 import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
 import zipfile
+from pathlib import Path
 
 import pytest
 
 
-spec = importlib.util.spec_from_file_location('company_ai_upgrade', Path(__file__).resolve().parents[1] /
-    'examples/company_ai_access/deployment/production/upgrade.py')
+spec = importlib.util.spec_from_file_location(
+    'company_ai_upgrade', Path(__file__).resolve().parents[1] /
+    'examples/company_ai_access/deployment/production/upgrade.py',
+)
 upgrade = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(upgrade)
 
@@ -26,7 +30,8 @@ def test_launcher_route_preserves_live_network_and_other_locations():
     original = 'location /unrelated { return 404; }\n' + helper + '\n'
     result = upgrade.launcher_route(original)
     assert original.replace(helper, '') == result.replace(helper, '').replace(
-        '\n\n' + helper.replace('Get-CompanyAIKey.ps1', 'Start-CompanyCodex.ps1'), '')
+        '\n\n' + helper.replace('Get-CompanyAIKey.ps1', 'Start-CompanyCodex.ps1'), '',
+    )
     assert helper.replace('Get-CompanyAIKey.ps1', 'Start-CompanyCodex.ps1') in result
     assert result.count('allow 10.99.18.2/32;') == 2
     assert upgrade.launcher_route(result) == result
@@ -35,23 +40,27 @@ def test_launcher_route_preserves_live_network_and_other_locations():
 
 
 def test_installer_route_clones_existing_download_provenance_and_is_idempotent():
-    original='''location = /company-ai/downloads/Get-CompanyAIKey.ps1 {
+    original = '''location = /company-ai/downloads/Get-CompanyAIKey.ps1 {
     deny 192.168.1.1/32;
     allow 192.168.1.0/24;
     deny all;
     proxy_pass http://127.0.0.1:8013;
     proxy_set_header X-Forwarded-For $remote_addr;
 }'''
-    updated=upgrade.installer_route(original)
+    updated = upgrade.installer_route(original)
     assert original in updated
-    assert original.replace('Get-CompanyAIKey.ps1','changdar-ai-setup.exe') in updated
-    assert upgrade.installer_route(updated)==updated
+    assert original.replace('Get-CompanyAIKey.ps1', 'changdar-ai-setup.exe') in updated
+    assert upgrade.installer_route(updated) == updated
 
 
 def make_archive(path, entries, version='1.1.3'):
-    manifest = {'version': version, 'portal': 'https://changdar-server.mooo.com',
-                'files': [{'name': name, 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
-                          for name, data in entries.items()]}
+    manifest = {
+        'version': version, 'portal': 'https://changdar-server.mooo.com',
+        'files': [
+            {'name': name, 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+            for name, data in entries.items()
+        ],
+    }
     with zipfile.ZipFile(path, 'w') as archive:
         for name, data in entries.items():
             archive.writestr(name, data)

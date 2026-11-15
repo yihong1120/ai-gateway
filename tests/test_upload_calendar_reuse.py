@@ -2,27 +2,34 @@
 from __future__ import annotations
 
 import importlib
-from pathlib import Path
 import sys
 import tempfile
-from types import ModuleType, SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, Mock, patch
+from pathlib import Path
+from types import ModuleType
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from unittest.mock import Mock
+from unittest.mock import patch
 
-from fastapi import FastAPI
 import httpx
+from fastapi import FastAPI
 
-from tests.test_eip_pipeline_integration import CalendarRemote, OwnedFiles
 from examples.official_document_workflow.application import integration
-from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT, CALENDAR_CSV_FORMAT_KEY
+from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT
+from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT_KEY
 from examples.official_document_workflow.infrastructure.eip.calendar_csv import export_eip_csv
 from examples.official_document_workflow.infrastructure.eip.netask import Netask
-from examples.official_document_workflow.infrastructure.storage.state import Journal, Link
+from examples.official_document_workflow.infrastructure.storage.state import Journal
+from examples.official_document_workflow.infrastructure.storage.state import Link
 from examples.official_document_workflow.services.exports import DocumentExports
 from examples.official_document_workflow.services.ocr import DocumentOCR
 from examples.official_document_workflow.services.transport import ModelTransport
 from tests.eip_postgres import EIPPostgresTestCase
-from tests.test_eip_connector import row, verified
+from tests.test_eip_connector import row
+from tests.test_eip_connector import verified
+from tests.test_eip_pipeline_integration import CalendarRemote
+from tests.test_eip_pipeline_integration import OwnedFiles
 
 
 class UploadCalendarReuseTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
@@ -58,11 +65,40 @@ class UploadCalendarReuseTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTest
         # Each public expensive boundary is guarded, in addition to blocking a
         # second document pipeline. Calendar readback and the journal stay real.
         self.unused = [
-            self.enterContext(patch.object(integration, 'process', AsyncMock(side_effect=AssertionError('CSV must not run document processing.')))),
-            self.enterContext(patch.object(integration, 'configured_pipe', AsyncMock(side_effect=AssertionError('CSV must not load a document processor.')))),
-            self.enterContext(patch.object(ModelTransport, 'analyze_text', AsyncMock(side_effect=AssertionError('CSV must not analyze the original PDF.')))),
-            self.enterContext(patch.object(DocumentOCR, '_paddleocr_vl_single_request', Mock(side_effect=AssertionError('CSV must not run OCR.')))),
-            self.enterContext(patch.object(DocumentExports, 'render_word', Mock(side_effect=AssertionError('CSV must not render Word.')))),
+            self.enterContext(
+                patch.object(
+                    integration, 'process', AsyncMock(
+                        side_effect=AssertionError('CSV must not run document processing.'),
+                    ),
+                ),
+            ),
+            self.enterContext(
+                patch.object(
+                    integration, 'configured_pipe', AsyncMock(
+                        side_effect=AssertionError('CSV must not load a document processor.'),
+                    ),
+                ),
+            ),
+            self.enterContext(
+                patch.object(
+                    ModelTransport, 'analyze_text', AsyncMock(
+                        side_effect=AssertionError('CSV must not analyze the original PDF.'),
+                    ),
+                ),
+            ),
+            self.enterContext(
+                patch.object(
+                    DocumentOCR, '_paddleocr_vl_single_request',
+                    Mock(side_effect=AssertionError('CSV must not run OCR.')),
+                ),
+            ),
+            self.enterContext(
+                patch.object(
+                    DocumentExports, 'render_word', Mock(
+                        side_effect=AssertionError('CSV must not render Word.'),
+                    ),
+                ),
+            ),
         ]
         self.source = await self.files.store(
             user_id='alice', payload=b'%PDF-1.7\nsynthetic original upload', display_name='公文.pdf',

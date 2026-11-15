@@ -4,6 +4,9 @@ from __future__ import annotations
 import hashlib
 import re
 
+from . import calendar_verification
+from .netask import csv_minutes
+from .netask import import_line
 from examples.official_document_workflow.domain.calendar.deduplication import (
     stable_event_facts,
 )
@@ -12,9 +15,11 @@ from examples.official_document_workflow.domain.calendar.match_review import (
 )
 from examples.official_document_workflow.infrastructure.eip import calendar_csv
 from examples.shared.runtime.io import run_sync
+from examples.shared.runtime.modules import ModuleReference
 
-from . import calendar_verification
-from .netask import csv_minutes, import_line
+_workflow_calendar_reconciliation = ModuleReference(
+    'examples.official_document_workflow.infrastructure.eip.calendar_reconciliation',
+)
 
 ASCII_UPPER = str.maketrans('abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ')
 TRANSPORT_FIELDS = (
@@ -80,7 +85,7 @@ def verified_events(rows, staged, user_id, journal):
             old_line = import_line(prior, user_id)
             interval_aliases.update(import_aliases(journal, user_id, old_line))
         aliases = import_aliases(journal, user_id, line)
-        from .calendar_reconciliation import incoming_snapshot
+        incoming_snapshot = _workflow_calendar_reconciliation.attribute('incoming_snapshot')
         signature = stable_event_facts(incoming_snapshot(line.split(',')))
         if signature is not None:
             aliases.append(journal.key(user_id, {'calendar_event_facts': signature}))
@@ -109,7 +114,11 @@ def event_states(events, journal):
     Unknown dominates done even when an old preview chose another key. This
     runs again inside the database-wide discovery/create/share lock.
     """
-    states = journal.statuses([key for event in events for key in dict.fromkeys((event['key'], *event.get('aliases', ())))])
+    states = journal.statuses([
+        key for event in events for key in dict.fromkeys(
+            (event['key'], *event.get('aliases', ())),
+        )
+    ])
     result = {}
     for event in events:
         keys = list(dict.fromkeys((event['key'], *event.get('aliases', ()))))
@@ -144,7 +153,7 @@ async def check_existing_events(events, journal, read_matches, *, block_conflict
 
 
 async def write_events(adapter, events, journal, allowed=object, *, reviewer=None):
-    if not await run_sync(allowed,):
+    if not await run_sync(allowed):
         raise ValueError('自動處理已暫停或綁定變更，未繼續寫入。')
     if any(status == 'unknown' for status in (await run_sync(event_states, events, journal)).values()):
         raise ValueError('先前匯入結果不明，已停止重送；請到 EIP 核對。')
@@ -154,7 +163,7 @@ async def write_events(adapter, events, journal, allowed=object, *, reviewer=Non
 
 async def _write_events_locked(adapter, events, journal, allowed, *, reviewer=None):
     created = skipped = 0
-    if not await run_sync(allowed,):
+    if not await run_sync(allowed):
         raise ValueError('自動處理已暫停或綁定變更，未繼續寫入。')
     if any(e.get('row', {}).get('_eip_origin') and not e.get('source_batch') for e in events):
         raise ValueError('尚未完成原始來源重跑核對，未匯入。')
@@ -163,24 +172,28 @@ async def _write_events_locked(adapter, events, journal, allowed, *, reviewer=No
         raise ValueError('先前匯入結果不明，已停止重送；請到 EIP 核對。')
     reconcile = getattr(adapter, 'reconcile_calendar', None)
     if reconcile is not None and events:
-        await reconcile(journal, allowed=allowed, keys=list(dict.fromkeys(
-            key for event in events for key in (event['key'], *event.get('aliases', ()))
-        )))
+        await reconcile(
+            journal, allowed=allowed, keys=list(
+                dict.fromkeys(
+                    key for event in events for key in (event['key'], *event.get('aliases', ()))
+                ),
+            ),
+        )
     states = await check_existing_events(events, journal, adapter.calendar_import_matches, block_conflicts=True, reviewer=reviewer)
-    if not await run_sync(allowed,):
+    if not await run_sync(allowed):
         raise ValueError('自動處理已暫停或綁定變更，未繼續寫入。')
     for batch in {e['source_batch'] for e in events if e.get('source_batch')}:
-        await run_sync(journal.reserve_source_batch,*batch)
+        await run_sync(journal.reserve_source_batch, *batch)
     for event in events:
-        if not await run_sync(allowed,):
+        if not await run_sync(allowed):
             raise ValueError('自動處理已暫停或綁定變更，未繼續寫入。')
         if created and event['key'] not in states:
             # The previous network write took time; do not rely on the older
             # batch snapshot for later rows. Read failures leave no reservation.
             await check_existing_events([event], journal, adapter.calendar_import_matches, block_conflicts=True, reviewer=reviewer)
-            if not await run_sync(allowed,):
+            if not await run_sync(allowed):
                 raise ValueError('自動處理已暫停或綁定變更，未繼續寫入。')
-        state = await run_sync(journal.reserve_event,event['key'], event.get('aliases', ()))
+        state = await run_sync(journal.reserve_event, event['key'], event.get('aliases', ()))
         if state == 'done':
             skipped += 1
             continue
@@ -188,7 +201,7 @@ async def _write_events_locked(adapter, events, journal, allowed, *, reviewer=No
             raise ValueError('先前匯入結果不明，已停止重送；請到 EIP 核對。')
         match = event.get('existing_match', {})
         if match.get('status') == 'existing':
-            await run_sync(journal.done,event['key'], aliases=event.get('aliases', ()), receipt=match['receipt'])
+            await run_sync(journal.done, event['key'], aliases=event.get('aliases', ()), receipt=match['receipt'])
             event['existing_receipt'] = match['receipt']
             skipped += 1
             continue
@@ -199,7 +212,7 @@ async def _write_events_locked(adapter, events, journal, allowed, *, reviewer=No
         track = getattr(adapter, 'record_calendar_creation', None)
         if track is not None:
             await track(event['line'], event['key'], receipt, aliases=event.get('aliases', ()))
-        await run_sync(journal.done,event['key'], aliases=event.get('aliases', ()), receipt=receipt)
+        await run_sync(journal.done, event['key'], aliases=event.get('aliases', ()), receipt=receipt)
         # Kept only in the in-process event object for the immediately
         # following attachment stage; do not change the public import result.
         event['receipt'] = receipt
@@ -228,7 +241,7 @@ async def write_project_assignments(adapter, events, journal, allowed=object):
             private += 1
             decisions.append({'status': status, 'document_project': decision.get('document_project')})
             continue
-        if not await run_sync(allowed,):
+        if not await run_sync(allowed):
             raise ValueError('自動處理已暫停或綁定變更，未繼續設定行事曆專案。')
         calendar_verification.validate_wire(event['line'], adapter.user_id)
         event_id = receipt.get('event_id')
@@ -245,7 +258,7 @@ async def write_project_assignments(adapter, events, journal, allowed=object):
                 },
             },
         )
-        state = await run_sync(journal.reserve_event,key)
+        state = await run_sync(journal.reserve_event, key)
         if state == 'done':
             skipped += 1
             event['project_assignment_receipt'] = {'event_id': event_id, 'project_id': project_id, 'sharing': sharing}
@@ -254,7 +267,7 @@ async def write_project_assignments(adapter, events, journal, allowed=object):
         if state != 'reserved':
             raise ValueError('行事曆專案設定結果不明，請到 EIP 核對；未重送。')
         receipt = await adapter.assign_calendar_project(event_id, event['line'], project_id, sharing=sharing)
-        await run_sync(journal.done,key, receipt=receipt)
+        await run_sync(journal.done, key, receipt=receipt)
         event['project_assignment_receipt'] = receipt
         assigned += 1
         decisions.append({'status': 'assigned', 'project': project})
@@ -284,7 +297,7 @@ async def write_attachments(adapter, events, files, journal, allowed=object):
             # operator action and a fresh event-detail verification.
             skipped += 1
             continue
-        if not await run_sync(allowed,):
+        if not await run_sync(allowed):
             raise ValueError('自動處理已暫停或綁定變更，未繼續夾帶附件。')
         calendar_verification.validate_wire(event['line'], adapter.user_id)
         event_id = receipt.get('event_id')
@@ -295,7 +308,7 @@ async def write_attachments(adapter, events, files, journal, allowed=object):
                 },
             },
         )
-        state = await run_sync(journal.reserve_event,key)
+        state = await run_sync(journal.reserve_event, key)
         if state == 'done':
             skipped += 1
             continue
@@ -310,7 +323,7 @@ async def write_attachments(adapter, events, files, journal, allowed=object):
             )
         else:
             attachment_receipt = await adapter.attach_calendar_files(event_id, event['line'], files)
-        await run_sync(journal.done,key, receipt={'event_id': event_id, 'detail_verified': True})
+        await run_sync(journal.done, key, receipt={'event_id': event_id, 'detail_verified': True})
         event['attachment_receipt'] = attachment_receipt
         attached += 1
     return {'attached_events': attached, 'skipped_events': skipped}

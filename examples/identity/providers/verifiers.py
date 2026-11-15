@@ -1,17 +1,19 @@
 """Application-owned ProviderVerifier dependencies and operations."""
-
 from __future__ import annotations
-from examples.identity.settings.social import SocialSettings
+
 import asyncio
 from collections.abc import Sequence
 from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
+
 import jwt
 from fastapi import HTTPException
 from pydantic import ValidationError
+
 from examples.identity.schemas.auth import AppleTokenExchangeResponse
 from examples.identity.schemas.auth import ProviderClaims
+from examples.identity.settings.social import SocialSettings
 
 GOOGLE_ISSUERS = ('accounts.google.com', 'https://accounts.google.com')
 GOOGLE_JWKS_URL = 'https://www.googleapis.com/oauth2/v3/certs'
@@ -23,7 +25,7 @@ APPLE_TOKEN_URL = 'https://appleid.apple.com/auth/token'
 class ProviderVerifier:
     def __init__(self, settings: SocialSettings, http_clients):
         self.settings, self.http_clients = (settings, http_clients)
-        self._jwks = {}
+        self._jwks: dict[str, jwt.PyJWKClient] = {}
 
     def _configured_google_client_ids(self) -> list[str]:
         """Return configured Google OAuth audience identifiers.
@@ -78,7 +80,7 @@ class ProviderVerifier:
             return ProviderClaims.model_validate(payload)
         except ValidationError as exc:
             raise HTTPException(
-                status_code=401, detail='Invalid provider token'
+                status_code=401, detail='Invalid provider token',
             ) from exc
 
     def _jwks_client(self, jwks_url: str) -> jwt.PyJWKClient:
@@ -121,7 +123,7 @@ class ProviderVerifier:
             )
         except jwt.PyJWTError as exc:
             raise HTTPException(
-                status_code=401, detail='Invalid provider token'
+                status_code=401, detail='Invalid provider token',
             ) from exc
         return self._provider_claims(payload)
 
@@ -159,7 +161,7 @@ class ProviderVerifier:
             raise HTTPException(status_code=401, detail='Google email is not verified')
         if require_verified_email and (not self.normalise_email(claims.email)):
             raise HTTPException(
-                status_code=401, detail='Google account did not return an email address'
+                status_code=401, detail='Google account did not return an email address',
             )
         return claims
 
@@ -179,7 +181,7 @@ class ProviderVerifier:
             with open(settings.apple_private_key_path, encoding='utf-8') as file:
                 return file.read()
         raise HTTPException(
-            status_code=500, detail='Apple client secret is not configured'
+            status_code=500, detail='Apple client secret is not configured',
         )
 
     def _build_apple_client_secret(self, client_id: str) -> str:
@@ -194,7 +196,7 @@ class ProviderVerifier:
         settings = self.settings
         if not settings.apple_team_id or not settings.apple_key_id:
             raise HTTPException(
-                status_code=500, detail='Apple client secret is not configured'
+                status_code=500, detail='Apple client secret is not configured',
             )
         now = datetime.now(timezone.utc)
         return jwt.encode(
@@ -236,17 +238,17 @@ class ProviderVerifier:
                     APPLE_JWKS_URL,
                     client_ids,
                     (APPLE_ISSUER,),
-                )
+                ),
             )
             client_id = payload.aud
             if client_id not in client_ids:
                 raise HTTPException(status_code=401, detail='Invalid provider token')
             token_response = await self._exchange_apple_authorization_code(
-                authorization_code, [client_id]
+                authorization_code, [client_id],
             )
         else:
             token_response = await self._exchange_apple_authorization_code(
-                authorization_code, self._apple_exchange_client_id_candidates()
+                authorization_code, self._apple_exchange_client_id_candidates(),
             )
         token_response = AppleTokenExchangeResponse.model_validate(token_response)
         if token_response.id_token is not None:
@@ -257,7 +259,7 @@ class ProviderVerifier:
                     APPLE_JWKS_URL,
                     client_ids,
                     (APPLE_ISSUER,),
-                )
+                ),
             )
             if payload is None:
                 payload = exchanged_payload
@@ -285,7 +287,7 @@ class ProviderVerifier:
         return deduped
 
     async def _exchange_apple_authorization_code(
-        self, authorization_code: str, client_ids: Sequence[str]
+        self, authorization_code: str, client_ids: Sequence[str],
     ) -> AppleTokenExchangeResponse:
         """Validate an Apple authorisation code against an allowed client ID.
 
@@ -301,21 +303,21 @@ class ProviderVerifier:
             try:
                 return AppleTokenExchangeResponse.model_validate(
                     await self._exchange_apple_authorization_code_once(
-                        authorization_code, client_id
-                    )
+                        authorization_code, client_id,
+                    ),
                 )
             except HTTPException as exc:
                 last_error = exc
             except ValidationError as exc:
                 raise HTTPException(
-                    status_code=401, detail='Invalid provider token'
+                    status_code=401, detail='Invalid provider token',
                 ) from exc
         if last_error is not None:
             raise last_error
         raise HTTPException(status_code=500, detail='Apple client not configured')
 
     async def _exchange_apple_authorization_code_once(
-        self, authorization_code: str, client_id: str
+        self, authorization_code: str, client_id: str,
     ) -> AppleTokenExchangeResponse:
         """Exchange an Apple authorisation code for provider tokens once.
 
@@ -343,5 +345,5 @@ class ProviderVerifier:
             return AppleTokenExchangeResponse.model_validate(response.json())
         except (ValueError, ValidationError) as exc:
             raise HTTPException(
-                status_code=401, detail='Invalid provider token'
+                status_code=401, detail='Invalid provider token',
             ) from exc

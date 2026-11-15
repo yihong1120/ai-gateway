@@ -6,6 +6,7 @@ LiteLLM, PaddleOCR, storage, or a database.
 from __future__ import annotations
 
 import asyncio
+import copy
 import csv
 import importlib.util
 import inspect
@@ -15,10 +16,23 @@ import sys
 import types
 import unittest
 from pathlib import Path
+from threading import Event
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
 from urllib.parse import unquote_plus
+
+import examples.official_document_workflow.application.upload_batch as _upload_batch_imports
+import examples.official_document_workflow.infrastructure.eip.calendar_csv as _calendar_csv_imports
+import examples.official_document_workflow.infrastructure.eip.netask as _netask_imports
+from examples.official_document_workflow.application.upload_batch import AttachmentGroups
+from examples.official_document_workflow.application.upload_batch import UploadAnalysis
+from examples.official_document_workflow.domain.calendar.contracts import GROUP_ANALYSIS_SCHEMA
+from examples.official_document_workflow.domain.calendar.contracts import SINGLE_ANALYSIS_SCHEMA
+from examples.shared.runtime.modules import ModuleReference
+
+_workflow_pending = ModuleReference('examples.official_document_workflow.application.pending')
+_workflow_services = ModuleReference('examples.official_document_workflow.services')
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -73,7 +87,7 @@ def _load_pipe_module() -> types.ModuleType:
         spec.loader.exec_module(module)
         # Services may already be imported by another test entry point. Bind
         # their host adapters to the same explicit fakes in either import order.
-        from examples.official_document_workflow.services import sources, exports, processor
+        sources, exports, processor = _workflow_services.attributes('sources', 'exports', 'processor')
         for boundary in (sources, exports, processor):
             if hasattr(boundary, 'Files'):
                 boundary.Files = Files
@@ -90,12 +104,14 @@ def _load_pipe_module() -> types.ModuleType:
 
 
 PIPE_MODULE = _load_pipe_module()
-from examples.official_document_workflow.application.pending import PendingClarificationStore
+PendingClarificationStore = _workflow_pending.attribute('PendingClarificationStore')
 
 
 class Pipe(PIPE_MODULE.Pipe):
     def __init__(self, *, pending=None):
         super().__init__(pending=pending if pending is not None else PendingClarificationStore())
+
+
 PIPE_MODULE.Pipe = Pipe
 Deadline = PIPE_MODULE.Deadline
 DocumentDate = PIPE_MODULE.DocumentDate
@@ -297,8 +313,6 @@ class CalendarCsvTests(unittest.TestCase):
         self.assertEqual(row['Subject'], "'+unsafe")
 
     def test_generated_download_is_direct_eip_format_even_with_legacy_valves(self):
-        from examples.official_document_workflow.infrastructure.eip.calendar_csv import parse_csv
-        from examples.official_document_workflow.infrastructure.eip.netask import csv_minutes
 
         self.pipe.valves = Pipe.Valves(include_template_translation_row=True)
         payload = self.pipe.calendar_csv([{
@@ -315,9 +329,9 @@ class CalendarCsvTests(unittest.TestCase):
         self.assertEqual(set(direct[0]), set(PIPE_MODULE.CALENDAR_HEADERS))
         self.assertEqual(direct[0]['Start Date'], '2026/10/07')
         self.assertEqual(direct[0]['Start Time'], '下午02:00:00')
-        self.assertEqual(csv_minutes(direct[0]['End Time']), '900')
+        self.assertEqual(_netask_imports.csv_minutes(direct[0]['End Time']), '900')
         self.assertIn('2K+500', direct[0]['Subject'])
-        rows, _ = parse_csv(payload, csv_format=PIPE_MODULE.CALENDAR_CSV_FORMAT)
+        rows, _ = _calendar_csv_imports.parse_csv(payload, csv_format=PIPE_MODULE.CALENDAR_CSV_FORMAT)
         self.assertEqual(rows[0]['Subject'], direct[0]['Subject'])
         self.assertEqual(rows[0]['Description'], direct[0]['Description'])
 
@@ -521,16 +535,13 @@ class CanonicalSourceTests(unittest.TestCase):
         run_text.assert_called_once_with(['pdftotext', '-raw', 'native.pdf', '-'], timeout_seconds=30)
 
     def test_native_blank_pages_keep_physical_numbers_without_trailing_phantom_page(self):
-        from examples.official_document_workflow.application.upload_batch import source_pages
         structural = set()
         text = self.pipe._page_tagged_cloud_text('first\f\fthird\f', structural_lines=structural)
         source = PIPE_MODULE.CloudSemanticSource(text, 'native_pdf_text', frozenset(structural))
-        self.assertEqual(list(source_pages({'S1': source})), ['S1:P1', 'S1:P2', 'S1:P3'])
+        self.assertEqual(list(_upload_batch_imports.source_pages({'S1': source})), ['S1:P1', 'S1:P2', 'S1:P3'])
         self.assertNotIn('<page index="4">', text)
 
     def test_ocr_blank_page_still_has_a_physical_page_marker(self):
-        import copy
-        from examples.official_document_workflow.application.upload_batch import source_pages
         response = _layout_response()
         blank = copy.deepcopy(response['result']['layoutParsingResults'][0])
         blank['prunedResult']['parsing_res_list'] = []
@@ -538,7 +549,7 @@ class CanonicalSourceTests(unittest.TestCase):
         structural = set()
         text = self.pipe._paddleocr_vl_cloud_text(response, structural_lines=structural)
         source = PIPE_MODULE.CloudSemanticSource(text, 'paddle_layout_ocr', frozenset(structural))
-        self.assertEqual(list(source_pages({'S1': source})), ['S1:P1', 'S1:P2'])
+        self.assertEqual(list(_upload_batch_imports.source_pages({'S1': source})), ['S1:P1', 'S1:P2'])
 
     def test_scan_or_mixed_pdf_requires_paddle_layout_text(self) -> None:
         with self.assertRaises(ProcessingError):
@@ -604,9 +615,6 @@ class CanonicalSourceTests(unittest.TestCase):
 
 class CloudRequestTests(unittest.IsolatedAsyncioTestCase):
     async def test_new_model_outputs_must_decide_tentative_schedule_without_changing_legacy_schemas(self):
-        from examples.official_document_workflow.application.upload_batch import UploadAnalysis
-        from examples.official_document_workflow.domain.calendar.contracts import GROUP_ANALYSIS_SCHEMA
-        from examples.official_document_workflow.domain.calendar.contracts import SINGLE_ANALYSIS_SCHEMA
 
         for schema, event_type in (
             (GROUP_ANALYSIS_SCHEMA, 'CalendarEvent'),
@@ -632,7 +640,6 @@ class CloudRequestTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(json.dumps(schema, sort_keys=True), before)
 
     async def test_gemini_models_send_configured_thinking_and_parse_only_answer(self):
-        from examples.official_document_workflow.application.upload_batch import AttachmentGroups
         schema = AttachmentGroups.model_json_schema()
         for model in ('gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-4-argon'):
             with self.subTest(model=model):
@@ -1095,7 +1102,10 @@ class PendingCalendarClarificationPipeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNotNone(response)
         self.assertIn('更新後行事曆 CSV', response or '')
-        self.assertIn('/api/v1/files/' + self.pipe.exports.store_output.await_args.kwargs['output_id'] + '/content', response or '')
+        self.assertIn(
+            '/api/v1/files/' +
+            self.pipe.exports.store_output.await_args.kwargs['output_id'] + '/content', response or '',
+        )
         self.pipe._resolve_pending_reminder_choice.assert_awaited_once_with(
             '全部都加', ('2026/09/10', '2026/09/11'),
         )
@@ -1104,10 +1114,13 @@ class PendingCalendarClarificationPipeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.pipe.clarifications.pending.get(self.scope))
 
     async def test_cancelled_choice_restores_original_scope_and_expiry(self):
-        import asyncio
         payload, source_file = self._pending_payload()
         store = self.pipe.clarifications.pending
-        store.put(self.scope, attachment_fingerprint=self.pipe._attachment_fingerprint((source_file,)), payload=payload, ttl_seconds=60)
+        store.put(
+            self.scope, attachment_fingerprint=self.pipe._attachment_fingerprint(
+                (source_file,),
+            ), payload=payload, ttl_seconds=60,
+        )
         original_expiry = store.get(self.scope).expires_at
         entered = asyncio.Event()
 
@@ -1117,9 +1130,11 @@ class PendingCalendarClarificationPipeTests(unittest.IsolatedAsyncioTestCase):
 
         self.pipe._resolve_pending_reminder_choice = wait
         with patch.object(PIPE_MODULE.Files, 'get_file_by_id_and_user_id', AsyncMock(return_value=source_file), create=True):
-            task = asyncio.create_task(self.pipe.clarifications.complete(
-                body={'messages': [{'role': 'user', 'content': '全部'}]}, user_id='user', scope=self.scope, request=None,
-            ))
+            task = asyncio.create_task(
+                self.pipe.clarifications.complete(
+                    body={'messages': [{'role': 'user', 'content': '全部'}]}, user_id='user', scope=self.scope, request=None,
+                ),
+            )
             await asyncio.wait_for(entered.wait(), 2)
             task.cancel()
             with self.assertRaises(asyncio.CancelledError):
@@ -1129,12 +1144,16 @@ class PendingCalendarClarificationPipeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restored.expires_at, original_expiry)
 
     async def test_cancel_during_database_claim_drains_and_restores_it(self):
-        from threading import Event
         payload, source_file = self._pending_payload()
         store = self.pipe.clarifications.pending
-        store.put(self.scope, attachment_fingerprint=self.pipe._attachment_fingerprint((source_file,)), payload=payload, ttl_seconds=60)
+        store.put(
+            self.scope, attachment_fingerprint=self.pipe._attachment_fingerprint(
+                (source_file,),
+            ), payload=payload, ttl_seconds=60,
+        )
         entered, release = Event(), Event()
         original = store.claim
+
         def claim(*args, **kwargs):
             entered.set()
             if not release.wait(3):
@@ -1143,9 +1162,11 @@ class PendingCalendarClarificationPipeTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(store, 'claim', side_effect=claim), patch.object(
             PIPE_MODULE.Files, 'get_file_by_id_and_user_id', AsyncMock(return_value=source_file), create=True,
         ):
-            task = asyncio.create_task(self.pipe.clarifications.complete(
-                body={'messages': [{'role': 'user', 'content': '全部'}]}, user_id='user', scope=self.scope, request=None,
-            ))
+            task = asyncio.create_task(
+                self.pipe.clarifications.complete(
+                    body={'messages': [{'role': 'user', 'content': '全部'}]}, user_id='user', scope=self.scope, request=None,
+                ),
+            )
             self.assertTrue(await asyncio.to_thread(entered.wait, 2))
             task.cancel()
             release.set()
@@ -1159,7 +1180,9 @@ class PendingCalendarClarificationPipeTests(unittest.IsolatedAsyncioTestCase):
             self.scope, attachment_fingerprint=self.pipe._attachment_fingerprint((source_file,)),
             payload=payload, ttl_seconds=60,
         )
-        self.pipe._resolve_pending_reminder_choice = AsyncMock(return_value=PIPE_MODULE.PendingReminderResolution(decision='all_verified_deadlines'))
+        self.pipe._resolve_pending_reminder_choice = AsyncMock(
+            return_value=PIPE_MODULE.PendingReminderResolution(decision='all_verified_deadlines'),
+        )
         self.pipe.exports.delivery.writer = AsyncMock(side_effect=lambda spec: types.SimpleNamespace(id=spec.id))
         self.pipe.exports.store_output = AsyncMock(wraps=self.pipe.exports.store_output)
         self.pipe.owned_sources = AsyncMock(side_effect=AssertionError('must not repeat file processing'))

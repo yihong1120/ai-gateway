@@ -4,7 +4,9 @@ from __future__ import annotations
 import os
 import unittest
 
-from company_agent.evals.sandbox import checkpointer, make_state_directory, isolated_schemas
+from company_agent.evals.sandbox import checkpointer
+from company_agent.evals.sandbox import isolated_schemas
+from company_agent.evals.sandbox import make_state_directory
 
 __all__ = ['PostgreSQLTestCase', 'checkpointer', 'make_state_directory']
 

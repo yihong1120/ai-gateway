@@ -13,20 +13,25 @@ import math
 import re
 from pathlib import Path
 
-
 from openpyxl import load_workbook
 from openpyxl.utils.cell import coordinate_to_tuple
 
 from company_agent.services.office.sandbox import office_worker
 from company_agent.services.office.worker import formula_valid
+from examples.shared.runtime.modules import ModuleReference
+
+_openpyxl = ModuleReference('openpyxl')
+_openpyxl_chart = ModuleReference('openpyxl.chart')
 
 
 VERSION = 'company-data-artifact-audit-v1'
 
 
 def same_number(actual, expected):
-    return (isinstance(actual, (int, float)) and not isinstance(actual, bool)
-            and math.isclose(actual, expected, rel_tol=1e-9, abs_tol=1e-10))
+    return (
+        isinstance(actual, (int, float)) and not isinstance(actual, bool)
+        and math.isclose(actual, expected, rel_tol=1e-9, abs_tol=1e-10)
+    )
 
 
 def chart_reference(value, sheet, cells):
@@ -37,8 +42,10 @@ def chart_reference(value, sheet, cells):
 
 
 def static_chart_checks(book):
-    checks = {'sum_function': False, 'average_function': False, 'bar_chart': False,
-              'chart_title': False, 'chart_category_range': False, 'chart_value_range': False}
+    checks = {
+        'sum_function': False, 'average_function': False, 'bar_chart': False,
+        'chart_title': False, 'chart_category_range': False, 'chart_value_range': False,
+    }
     if '報表' not in book.sheetnames:
         return checks
     sheet = book['報表']
@@ -48,8 +55,11 @@ def static_chart_checks(book):
         return checks
     chart = sheet._charts[0]
     checks['bar_chart'] = 'BarChart' in type(chart).__name__
-    title = ''.join(node.text or '' for node in chart.title.to_tree().iter(
-        '{http://schemas.openxmlformats.org/drawingml/2006/main}t')) if chart.title else ''
+    title = ''.join(
+        node.text or '' for node in chart.title.to_tree().iter(
+            '{http://schemas.openxmlformats.org/drawingml/2006/main}t',
+        )
+    ) if chart.title else ''
     checks['chart_title'] = title.strip() == '各工區數量'
     if len(chart.series) != 1:
         return checks
@@ -82,12 +92,18 @@ def challenges(case, source):
     sheet = source['工程']
     if case == 'D11':
         a, b, c = (sheet[f'B{i}'].value for i in (2, 3, 4))
-        return [('換算', {'B3': b + 7}, {'D2': a, 'D3': (b + 7) * 1000,
-                                      'D4': c * 10000, 'D5': a + (b + 7) * 1000 + c * 10000})]
+        return [(
+            '換算', {'B3': b + 7}, {
+                'D2': a, 'D3': (b + 7) * 1000,
+                'D4': c * 10000, 'D5': a + (b + 7) * 1000 + c * 10000,
+            },
+        )]
     if case == 'D12':
         a, b, x, y = (sheet[cell].value for cell in ('B2', 'B3', 'C2', 'C3'))
-        return [('加權', {'B2': a + 300}, {'B5': ((a + 300) * x + b * y) / (a + 300 + b)}),
-                ('加權', {'C2': x + 0.17}, {'B5': (a * (x + 0.17) + b * y) / (a + b)})]
+        return [
+            ('加權', {'B2': a + 300}, {'B5': ((a + 300) * x + b * y) / (a + 300 + b)}),
+            ('加權', {'C2': x + 0.17}, {'B5': (a * (x + 0.17) + b * y) / (a + b)}),
+        ]
     if case == 'D13':
         numbers = [sheet[f'B{i}'].value for i in range(2, 6)]
         return [('報表', {'B2': numbers[0] + 17}, {'B7': sum(numbers) + 17, 'B8': (sum(numbers) + 17) / 4})]
@@ -107,16 +123,18 @@ def audit(case, artifact, source_bytes):
         calculation, data = office_worker('report', **req)
         values = load_workbook(io.BytesIO(data), data_only=True)
         passed = all(same_number(values[sheet][cell].value, value) for cell, value in expected.items())
-        probes.append({'sheet': sheet, 'changed_inputs': changes, 'expected': expected,
-                       'actual': {cell: values[sheet][cell].value for cell in expected},
-                       'passed': passed, 'engine': calculation['engine']})
+        probes.append({
+            'sheet': sheet, 'changed_inputs': changes, 'expected': expected,
+            'actual': {cell: values[sheet][cell].value for cell in expected},
+            'passed': passed, 'engine': calculation['engine'],
+        })
     checks['formula_outputs_follow_changed_inputs'] = bool(probes) and all(probe['passed'] for probe in probes)
     return {'checks': checks, 'probes': probes, 'passed': all(checks.values())}
 
 
 def self_test():
-    from openpyxl import Workbook
-    from openpyxl.chart import BarChart, Reference
+    Workbook = _openpyxl.attribute('Workbook')
+    BarChart, Reference = _openpyxl_chart.attributes('BarChart', 'Reference')
     source = Workbook()
     source.active.title = '工程'
     for row in [['工區', '數量'], ['甲', 10], ['乙', 20], ['丙', 30], ['丁', 40]]:
@@ -186,13 +204,17 @@ def main():
                 item.update(status='audit_inconclusive', error_type=type(error).__name__, passed=None)
             assert artifact.read_bytes() == before
         results.append(item)
-    value = {'version': VERSION, 'script_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-             'scope': 'secondary audit; primary grades unchanged; synthetic generated reports only',
-             'primary_source_sha256': report['source_sha256'], 'runs': results,
-             'counts': {status: sum(row['status'] == status for row in results)
-                        for status in ('audited', 'artifact_missing', 'audit_inconclusive')},
-             'strict_passed': sum(row['passed'] is True for row in results),
-             'strict_failed': sum(row['passed'] is False for row in results)}
+    value = {
+        'version': VERSION, 'script_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        'scope': 'secondary audit; primary grades unchanged; synthetic generated reports only',
+        'primary_source_sha256': report['source_sha256'], 'runs': results,
+        'counts': {
+            status: sum(row['status'] == status for row in results)
+            for status in ('audited', 'artifact_missing', 'audit_inconclusive')
+        },
+        'strict_passed': sum(row['passed'] is True for row in results),
+        'strict_failed': sum(row['passed'] is False for row in results),
+    }
     args.output.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
     print(json.dumps({key: value[key] for key in ('version', 'counts', 'strict_passed', 'strict_failed')}))
 

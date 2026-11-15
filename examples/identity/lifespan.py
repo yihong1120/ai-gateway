@@ -3,17 +3,20 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncGenerator
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack
 
 from fastapi import FastAPI
-from examples.shared.runtime.workers import WorkerHealth, supervise
-from examples.identity.migrations import require_schema, upgrade
 
 from examples.identity import models
 from examples.identity.cache import rate_limiter_service
+from examples.identity.migrations import require_schema
+from examples.identity.migrations import upgrade
+from examples.identity.redis_pool import RedisClient
 from examples.identity.runtime import identity_scope
 from examples.identity.sessions.scheduler import start_jwt_scheduler
-from examples.identity.redis_pool import RedisClient
+from examples.shared.runtime.workers import supervise
+from examples.shared.runtime.workers import WorkerHealth
 logger = logging.getLogger(__name__)
 
 
@@ -48,10 +51,11 @@ async def global_lifespan(app: FastAPI) -> AsyncGenerator[None]:
                     await conn.run_sync(models.Base.metadata.create_all)
                 await upgrade(database.engine)
             await require_schema(database.engine)
+
             async def recover_accounts():
                 async with database.session() as db:
-                    await resources.recovery.drain_revocations(db,redis_conn)
+                    await resources.recovery.drain_revocations(db, redis_conn)
             account_stop = asyncio.Event()
-            account_worker = asyncio.create_task(supervise(recover_accounts,WorkerHealth(),interval=5))
-            cleanup.push_async_callback(_stop_cleanup,account_worker,account_stop)
+            account_worker = asyncio.create_task(supervise(recover_accounts, WorkerHealth(), interval=5))
+            cleanup.push_async_callback(_stop_cleanup, account_worker, account_stop)
             yield

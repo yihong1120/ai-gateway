@@ -1,14 +1,21 @@
 """Crash recovery and deduplication across filesystem and PostgreSQL boundaries."""
 from __future__ import annotations
 
+import os
+import sys
+import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-import os
-import time
+from types import ModuleType
+from types import SimpleNamespace
 from unittest.mock import patch
 
+import company_agent.api.service as _service_imports
 from company_agent.api.queue import WorkQueue
 from company_agent.api.service import Service
+from company_agent.api.source_snapshots import SourceSnapshots
+from company_agent.config import Settings
 from company_agent.runtime.storage import Store
 from company_agent.tests.test_agent import Fixture
 
@@ -31,10 +38,13 @@ class SubmissionTests(Fixture):
     def test_every_filesystem_sync_precedes_the_database_mutation_lock(self):
         sync = os.fsync
         observed = []
+
         def probe(descriptor):
             with self.store.db() as db:
-                available = db.execute('SELECT pg_try_advisory_xact_lock(%s)',
-                                       (self.store.lock_id('mutations'),)).fetchone()[0]
+                available = db.execute(
+                    'SELECT pg_try_advisory_xact_lock(%s)',
+                    (self.store.lock_id('mutations'),),
+                ).fetchone()[0]
             observed.append(available)
             return sync(descriptor)
         with patch('company_agent.api.source_snapshots.os.fsync', side_effect=probe):
@@ -69,6 +79,7 @@ class SubmissionTests(Fixture):
 
     def test_commit_timeout_preserves_sources_and_recovery_checks_committed_database_state(self):
         original = self.queue.store.db
+
         @contextmanager
         def uncertain(*args, **kwargs):
             with original(*args, **kwargs) as db:
@@ -90,6 +101,7 @@ class SubmissionTests(Fixture):
 
     def test_rollback_orphans_are_reclaimed_but_legacy_and_recent_directories_are_protected(self):
         original = self.queue.store.db
+
         @contextmanager
         def rollback(*args, **kwargs):
             with original(*args, **kwargs) as db:
@@ -131,13 +143,14 @@ class SubmissionTests(Fixture):
         self.assertEqual(self.queue.snapshots.sweep()['removed'], 1)
 
     def test_another_database_namespace_cannot_reclaim_the_same_directory(self):
-        from types import SimpleNamespace
-        from company_agent.api.source_snapshots import SourceSnapshots
         with self.queue.snapshots.prepare([('source.txt', b'owned')]) as (key, _):
             directory = self.queue.sources / key
             self.age(directory)
-        other = SourceSnapshots(self.queue.sources, SimpleNamespace(
-            dsn=self.store.dsn, schema='company_agent_other', db=lambda: self.fail('must not query a different database')))
+        other = SourceSnapshots(
+            self.queue.sources, SimpleNamespace(
+                dsn=self.store.dsn, schema='company_agent_other', db=lambda: self.fail('must not query a different database'),
+            ),
+        )
         self.assertEqual(other.sweep()['removed'], 0)
         self.assertTrue(directory.exists())
         self.assertEqual(self.queue.snapshots.sweep()['removed'], 1)
@@ -147,7 +160,9 @@ class SubmissionTests(Fixture):
         with self.store.db() as db:
             db.execute('DROP TRIGGER web_job_chat_changed ON web_jobs')
             db.execute('ALTER TABLE web_jobs DROP COLUMN error_code')
-            db.execute('CREATE TRIGGER web_job_chat_changed BEFORE UPDATE OF status ON web_jobs FOR EACH ROW EXECUTE FUNCTION bump_web_job_chat_version()')
+            db.execute(
+                'CREATE TRIGGER web_job_chat_changed BEFORE UPDATE OF status ON web_jobs FOR EACH ROW EXECUTE FUNCTION bump_web_job_chat_version()',
+            )
             db.execute('DELETE FROM schema_migrations WHERE version>=4')
             db.execute('DROP TABLE mcp_grants,mcp_workspaces,mcp_operations,mcp_request_limits')
             db.execute('DROP INDEX nas_bindings_owner_revision')
@@ -186,10 +201,6 @@ class DurableFailureTests(Fixture):
 
 class DeploymentSnapshotTests(Fixture):
     def test_application_captures_database_gateway_and_model_settings_without_environment_mutation(self):
-        import sys
-        from types import ModuleType, SimpleNamespace
-        from company_agent.api.service import create_service
-        from company_agent.config import Settings
         data = self.base / 'app'
         data.mkdir()
         host = ModuleType('open_webui.env')
@@ -197,26 +208,31 @@ class DeploymentSnapshotTests(Fixture):
         config = self.base / 'application.json'
         config.write_text(Settings(state_dir=str(self.private), model_name='first').model_dump_json())
         dsn = os.environ['COMPANY_AGENT_DATABASE_URL']
-        with patch.dict(os.environ, {'DATABASE_URL': dsn, 'COMPANY_AGENT_CONFIG': str(config),
-                                   'OPENAI_API_BASE_URLS': 'http://127.0.0.1:14002/v1', 'OPENAI_API_KEYS': 'synthetic-first'}), \
+        with patch.dict(
+            os.environ, {
+                'DATABASE_URL': dsn, 'COMPANY_AGENT_CONFIG': str(config),
+                'OPENAI_API_BASE_URLS': 'http://127.0.0.1:14002/v1', 'OPENAI_API_KEYS': 'synthetic-first',
+            },
+        ), \
                 patch.dict(sys.modules, {'open_webui.env': host}):
             os.environ.pop('COMPANY_AGENT_DATABASE_URL')
-            current = create_service()
+            current = _service_imports.create_service()
             self.assertNotIn('COMPANY_AGENT_DATABASE_URL', os.environ)
             self.assertEqual(current.queue.store.dsn, dsn)
             config.write_text(Settings(state_dir=str(self.private), model_name='second').model_dump_json())
             os.environ.update(OPENAI_API_KEYS='synthetic-second', COMPANY_AGENT_MODEL='second')
             selected = current.settings_factory({'id': 'job', 'owner': 'alice', 'payload': {}})
             self.assertEqual(selected.model_name, 'first')
-            with patch('company_agent.api.service.gateway_for_verified_user',
-                       return_value=SimpleNamespace(owner='alice', subject='sub', client=None)) as model:
+            with patch(
+                'company_agent.api.service.gateway_for_verified_user',
+                return_value=SimpleNamespace(owner='alice', subject='sub', client=None),
+            ) as model:
                 current.model_factory({'id': 'alice'}, selected.model_name)
             self.assertEqual(model.call_args.args[1:], ('http://127.0.0.1:14002/v1', 'synthetic-first', 'first'))
 
 
 class BoundedRecoveryTests(Fixture):
     def test_invalid_candidates_and_large_history_do_not_starve_later_pending_files(self):
-        import uuid
         queue = WorkQueue(self.private, self.base / 'bounded-uploads')
         self.addCleanup(queue.snapshots.close)
         history = []
@@ -227,23 +243,27 @@ class BoundedRecoveryTests(Fixture):
         for _ in range(40):
             marker = queue.snapshots.pending / (str(uuid.uuid4()) + '.json')
             marker.write_text('corrupt marker')
-            os.utime(marker, (0,0))
-        with queue.snapshots.prepare([('source.txt',b'pending')]) as (key, _):
+            os.utime(marker, (0, 0))
+        with queue.snapshots.prepare([('source.txt', b'pending')]) as (key, _):
             pass
-        os.utime(queue.snapshots.marker(key), (0,0))
+        os.utime(queue.snapshots.marker(key), (0, 0))
         observations = []
         # Directory enumeration order is filesystem-dependent. Supply the
         # adversarial order with the valid candidate behind every bad marker.
         original_scan = os.scandir
         with original_scan(queue.snapshots.pending) as scan:
             entries = sorted(scan, key=lambda entry: entry.name == key + '.json')
+
         class OrderedScan:
             def __init__(self):
                 self.entries = iter(entries)
+
             def __next__(self):
                 return next(self.entries)
+
             def close(self):
                 pass
+
         def scandir(path):
             return OrderedScan() if path == queue.snapshots.pending else original_scan(path)
         with patch('company_agent.api.source_snapshots.os.scandir', side_effect=scandir):

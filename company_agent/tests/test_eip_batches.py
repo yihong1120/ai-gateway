@@ -8,12 +8,16 @@ from unittest.mock import patch
 from langchain_core.messages import AIMessage
 from langchain_core.messages import ToolMessage
 
+import company_agent.api.pipe as _pipe_imports
 from company_agent.api.progress import progress_text
 from company_agent.runtime.execution import DocumentAgent
 from company_agent.tests.test_agent import call
 from company_agent.tests.test_agent import Fixture
 from company_agent.tests.test_enterprise_completion import finish
 from company_agent.tests.test_enterprise_completion import RawRoleModel
+from examples.shared.runtime.modules import ModuleReference
+
+_fixture_postgres_fixture = ModuleReference('company_agent.tests.postgres_fixture')
 
 
 def batch(folders):
@@ -176,8 +180,7 @@ class EIPBatchTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertEqual(query.await_count, 1)
 
     async def test_query_does_not_append_unselected_documents_to_answer(self):
-        from company_agent.api.pipe import markdown
-        from company_agent.tests.postgres_fixture import checkpointer
+        checkpointer = _fixture_postgres_fixture.attribute('checkpointer')
 
         prefix = '/agents/eip/11111111-1111-4111-8111-111111111111/'
         related = {'subject': '測試甲工程施工日誌', 'date': '2026-09-18', 'view_url': prefix + 'a' * 32}
@@ -195,7 +198,7 @@ class EIPBatchTests(unittest.IsolatedAsyncioTestCase, Fixture):
                         patch('company_agent.services.eip.client.binding', AsyncMock()):
                     result = await DocumentAgent(self.config, model).run('alice', '查測試甲工程')
                 self.assertEqual(result['answer'], answer)
-                rendered = markdown({**result, 'id': result['job_id']})
+                rendered = _pipe_imports.markdown({**result, 'id': result['job_id']})
                 self.assertNotIn(unrelated['subject'], rendered)
                 self.assertNotIn(unrelated['view_url'], rendered)
                 self.assertNotIn('可直接開啟的 EIP 公文', rendered)

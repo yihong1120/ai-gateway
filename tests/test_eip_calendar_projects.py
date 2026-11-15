@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock
 
+import examples.official_document_workflow.infrastructure.eip.calendar_attachments as _calendar_attachments_imports
 from .test_eip_calendar_verification import EVENT
 from .test_eip_calendar_verification import fixture
 from examples.official_document_workflow.infrastructure.eip.calendar_projects import assign_project
@@ -12,15 +13,18 @@ from examples.official_document_workflow.infrastructure.eip.calendar_projects im
 from examples.official_document_workflow.infrastructure.eip.calendar_projects import project_assignment_parameters
 from examples.official_document_workflow.infrastructure.eip.calendar_projects import project_name_from_description
 from examples.official_document_workflow.infrastructure.eip.calendar_projects import verify_project_assignment_detail
-from examples.official_document_workflow.infrastructure.eip.calendar_sync import write_project_assignments
-from examples.official_document_workflow.infrastructure.eip.netask import JSArrayResponseParser
+from examples.official_document_workflow.infrastructure.eip.calendar_sync import (
+    write_project_assignments,
+)
+from examples.official_document_workflow.infrastructure.eip.netask import (
+    JSArrayResponseParser,
+)
 from examples.official_document_workflow.infrastructure.storage.state import Journal
 from tests.eip_postgres import EIPPostgresTestCase
 
 
 class ProjectMatchingTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
     def test_midnight_end_survives_project_and_attachment_parameters(self):
-        from examples.official_document_workflow.infrastructure.eip.calendar_attachments import attachment_parameters
         line, detail, _ = fixture()
         fields = line.split(',')
         fields[2] = '1260'
@@ -31,7 +35,7 @@ class ProjectMatchingTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase
         params = project_assignment_parameters(detail, line, '1709', EVENT, '77')
         self.assertEqual((params['start_time'], params['end_time']), ('1260', '1440'))
         detail[0][4] = '77'
-        params = attachment_parameters(
+        params = _calendar_attachments_imports.attachment_parameters(
             detail, line, '1709', EVENT, '765',
             [{'id': '123', 'filename': '改名後.pdf', 'url': '/fo/v/123', 'size': 3}], project_id='77',
         )

@@ -1,17 +1,29 @@
 """Live dev-only WebUI chats for the local Gemma friend persona."""
+from __future__ import annotations
+
 import argparse
 import asyncio
-from datetime import datetime, timedelta, timezone
 import json
-from pathlib import Path
 import re
+import sys
+from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
+from pathlib import Path
 
 import httpx
 import yaml
-import sys
+
+from examples.shared.runtime.modules import ModuleReference
+
+_examples_deployment_dev_run = ModuleReference('examples.deployment.dev.run')
+_webui_models = ModuleReference('open_webui.models.models')
+_webui_users = ModuleReference('open_webui.models.users')
+_webui_auth = ModuleReference('open_webui.utils.auth')
+_webui_mfa = ModuleReference('open_webui.utils.mfa')
 if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from examples.deployment.dev.run import load_environment, CONFIG
+load_environment, CONFIG = _examples_deployment_dev_run.attributes('load_environment', 'CONFIG')
 
 
 async def main():
@@ -25,19 +37,26 @@ async def main():
     route = next(x for x in gateway['model_list'] if x['model_name'] == 'gemma-4-12b')
     assert route['litellm_params']['api_base'] == 'http://127.0.0.1:5003/v1'
     assert route['litellm_params']['input_cost_per_token'] == route['litellm_params']['output_cost_per_token'] == 0
-    from open_webui.models.users import Users
-    from open_webui.models.models import Models
-    from open_webui.utils.mfa import get_auth
-    from open_webui.utils.auth import create_token
+    Users = _webui_users.attribute('Users')
+    Models = _webui_models.attribute('Models')
+    get_auth = _webui_mfa.attribute('get_auth')
+    create_token = _webui_auth.attribute('create_token')
     user = await Users.get_first_user()
     auth = await get_auth(user.id)
-    token = create_token({'id': user.id, 'typ': 'automation', 'session_stamp': auth.session_stamp}, timedelta(minutes=5))
+    token = create_token(
+        {
+            'id': user.id, 'typ': 'automation',
+            'session_stamp': auth.session_stamp,
+        }, timedelta(minutes=5),
+    )
     saved = await Models.get_model_by_id('love_brain_friend')
     assert saved.base_model_id == 'gemma-4-12b'
     prompt_source = Path(__file__).resolve().parent / 'personas/love_brain_friend.prompt.txt'
     assert saved.params.system == prompt_source.read_text(), 'Saved persona prompt is stale.'
-    results = {'environment': 'dev', 'model_id': saved.id, 'name': saved.name,
-               'base_model_id': saved.base_model_id, 'checked_at': datetime.now(timezone.utc).isoformat(), 'cases': []}
+    results = {
+        'environment': 'dev', 'model_id': saved.id, 'name': saved.name,
+        'base_model_id': saved.base_model_id, 'checked_at': datetime.now(timezone.utc).isoformat(), 'cases': [],
+    }
     async with httpx.AsyncClient(timeout=180, trust_env=False) as client:
         headers = {'Authorization': 'Bearer ' + token}
         response = await client.get('http://127.0.0.1:18082/api/models', headers=headers)
@@ -61,13 +80,19 @@ async def main():
         ]
         histories = {}
         for label, prompt in cases:
-            parent = {'banter': 'roast', 'banter_continuity': 'banter',
-                      'comfort_continuity': 'comfort'}.get(label)
+            parent = {
+                'banter': 'roast', 'banter_continuity': 'banter',
+                'comfort_continuity': 'comfort',
+            }.get(label)
             messages = histories.get(parent, []) + [{'role': 'user', 'content': prompt}]
             answer, reasoning, done, usage = '', '', False, None
-            async with client.stream('POST', 'http://127.0.0.1:18082/api/chat/completions', headers=headers,
-                json={'model': saved.id, 'messages': messages, 'stream': True,
-                      'stream_options': {'include_usage': True}}) as response:
+            async with client.stream(
+                'POST', 'http://127.0.0.1:18082/api/chat/completions', headers=headers,
+                json={
+                    'model': saved.id, 'messages': messages, 'stream': True,
+                    'stream_options': {'include_usage': True},
+                },
+            ) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
                     if not line.startswith('data:'):
@@ -92,19 +117,27 @@ async def main():
                 assert 'AI' in answer and 'Gemma' in answer and '12B' in answer
             if label == 'personality':
                 assert answer != results['cases'][0]['answer'], 'Personality question repeated the introduction.'
-            banter_cases = {'roast', 'strong_roast', 'unequal_effort', 'banter',
-                            'banter_continuity', 'meta_complaint', 'casual'}
+            banter_cases = {
+                'roast', 'strong_roast', 'unequal_effort', 'banter',
+                'banter_continuity', 'meta_complaint', 'casual',
+            }
             if label in banter_cases:
                 assert len(answer) <= 140, 'Banter turned into a speech: ' + repr(answer)
-                assert not any(phrase in answer for phrase in (
-                    '我理解你的感受', '你值得更好的', '先深呼吸', '把手機放遠',
-                    '給自己一點時間', '你想聽哪種風格', '作為 AI',
-                )), 'Banter slipped into a standard advice response: ' + repr(answer)
+                assert not any(
+                    phrase in answer for phrase in (
+                        '我理解你的感受', '你值得更好的', '先深呼吸', '把手機放遠',
+                        '給自己一點時間', '你想聽哪種風格', '作為 AI',
+                    )
+                ), 'Banter slipped into a standard advice response: ' + repr(answer)
             if label in ('banter', 'banter_continuity', 'sendable_message'):
-                assert ('\n' not in answer.strip() and len(answer) <= 120
-                        and len(re.findall(r'[。！？!?]+', answer)) <= 1), 'Expected a single sentence: ' + repr(answer)
-            result = {'case': label, 'prompt': prompt, 'answer': answer, 'http_status': 200,
-                      'done': done, 'reasoning_chars': len(reasoning), 'usage': usage}
+                assert (
+                    '\n' not in answer.strip() and len(answer) <= 120
+                    and len(re.findall(r'[。！？!?]+', answer)) <= 1
+                ), 'Expected a single sentence: ' + repr(answer)
+            result = {
+                'case': label, 'prompt': prompt, 'answer': answer, 'http_status': 200,
+                'done': done, 'reasoning_chars': len(reasoning), 'usage': usage,
+            }
             results['cases'].append(result)
             print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
             if usage and usage.get('cost') is not None:
@@ -113,7 +146,9 @@ async def main():
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(results, ensure_ascii=False, indent=2) + '\n')
-    print(f'Passed: saved persona, dev model list, {len(cases)} local WebUI streams, concise banter, character introduction, honest identity and zero cloud cost.')
+    print(
+        f'Passed: saved persona, dev model list, {len(cases)} local WebUI streams, concise banter, character introduction, honest identity and zero cloud cost.',
+    )
 
 
 if __name__ == '__main__':

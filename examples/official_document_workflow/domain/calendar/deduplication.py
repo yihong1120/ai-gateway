@@ -85,8 +85,10 @@ def same_source_duty(left, right, *, exact_work=True):
     if not a or a != b or not compatible_facts(left, right):
         return False
     parsed = [split_ai_title(event['title']) for event in (left, right)]
-    projects = [identity.text(p[1] or '') if p else facts(event).get('工程名稱', '')
-                for p, event in zip(parsed, (left, right))]
+    projects = [
+        identity.text(p[1] or '') if p else facts(event).get('工程名稱', '')
+        for p, event in zip(parsed, (left, right))
+    ]
     project = projects[0] or projects[1]
     if not project or (all(projects) and projects[0] != projects[1]):
         return False
@@ -143,11 +145,13 @@ def stable_event_facts(event):
         return None
     # Keep actual assignments, locations, slots and all document fields; only
     # generated prose/formatting is excluded from this durable alias.
-    return {'contract': 'calendar-source-work-v1', 'project': title[2], 'work': work(event),
-            'source_sha256': hashlib.sha256(quoted.encode()).hexdigest(), 'facts': facts(event),
-            'dates': [event['start_date'], event['end_date']], 'all_day': event['all_day'],
-            'times': [] if event['all_day'] == '1' else [event['start_time'], event['end_time']],
-            'custom_fields': [identity.text(value) for value in event['custom_fields']]}
+    return {
+        'contract': 'calendar-source-work-v1', 'project': title[2], 'work': work(event),
+        'source_sha256': hashlib.sha256(quoted.encode()).hexdigest(), 'facts': facts(event),
+        'dates': [event['start_date'], event['end_date']], 'all_day': event['all_day'],
+        'times': [] if event['all_day'] == '1' else [event['start_time'], event['end_time']],
+        'custom_fields': [identity.text(value) for value in event['custom_fields']],
+    }
 
 
 def original_schedule_days(event):
@@ -161,7 +165,8 @@ def original_schedule_days(event):
         raise ValueError('改期來源的原訂日期不完整，請人工核對；未新增行程。')
     for match in matches:
         year, month, day = (int(match[key]) for key in ('year', 'month', 'day'))
-        try: previous = date(year + 1911 if year < 1911 else year, month, day)
+        try:
+            previous = date(year + 1911 if year < 1911 else year, month, day)
         except ValueError:
             raise ValueError('來源中的原訂日期無效，請先核對；未新增行程。') from None
         if abs((actual-previous).days) > 366:
@@ -183,8 +188,10 @@ def difference_proven(incoming, existing, evidence):
         for quote, event in ((proof.incoming_quote, incoming), (proof.existing_quote, existing)):
             if not any(quote in event[key] for key in ('title', 'description')):
                 raise ValueError('不同事項的差異證據引用不在原文中，未新增。')
-    projects = [identity.title(event['title'])[2] if split_ai_title(event['title']) else facts(event).get('工程名稱', '')
-                for event in (incoming, existing)]
+    projects = [
+        identity.title(event['title'])[2] if split_ai_title(event['title']) else facts(event).get('工程名稱', '')
+        for event in (incoming, existing)
+    ]
     project = projects[0] or projects[1]
     left_work, right_work = (work(event, project) for event in (incoming, existing))
     if not all(concrete_work(value) for value in (left_work, right_work)):
@@ -193,15 +200,19 @@ def difference_proven(incoming, existing, evidence):
         a, b = facts(incoming), facts(existing)
         if proof.kind == 'work':
             left, right = left_work, right_work
-            if (all(concrete_work(v) for v in (left, right)) and left != right
-                    and _INSTANCE.sub('', left) != _INSTANCE.sub('', right)
-                    and all(v in (source(e) or '') for v, e in ((left, incoming), (right, existing)))
-                    and left in proof.incoming_quote and right in proof.existing_quote):
+            if (
+                all(concrete_work(v) for v in (left, right)) and left != right
+                and _INSTANCE.sub('', left) != _INSTANCE.sub('', right)
+                and all(v in (source(e) or '') for v, e in ((left, incoming), (right, existing)))
+                and left in proof.incoming_quote and right in proof.existing_quote
+            ):
                 return 'work'
         elif proof.kind == 'instance':
             left, right = (set(_INSTANCE.findall(event['title'])) for event in (incoming, existing))
-            if (not revision_documented(incoming, existing) and left and right and left.isdisjoint(right)
-                    and any(v in proof.incoming_quote for v in left) and any(v in proof.existing_quote for v in right)):
+            if (
+                not revision_documented(incoming, existing) and left and right and left.isdisjoint(right)
+                and any(v in proof.incoming_quote for v in left) and any(v in proof.existing_quote for v in right)
+            ):
                 return 'instance'
         elif proof.kind in ('party', 'location'):
             key = '辦理人／單位' if proof.kind == 'party' else '地點'

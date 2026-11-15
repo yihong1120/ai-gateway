@@ -1,25 +1,27 @@
 """One independent semantic check after literal validation, before CSV export."""
 from __future__ import annotations
 
-from examples.official_document_workflow.domain import documents as module
-
 import json
 from copy import deepcopy
 from operator import itemgetter
-from examples.official_document_workflow.services.analysis_reuse import analyze_content, neutral_event
 
 from .prompts import REVIEW_PROMPT
+from examples.official_document_workflow.domain import documents as module
 from examples.official_document_workflow.domain.calendar.calendar_semantics import resolve_spans
 from examples.official_document_workflow.domain.calendar.calendar_semantics import verify_event_date
 from examples.official_document_workflow.domain.calendar.contracts import CALENDAR_REVIEW_SCHEMA
 from examples.official_document_workflow.domain.calendar.relative_dates import RelativeDateProof
 from examples.official_document_workflow.domain.calendar.tracking_reminders import TrackingReminderProof
+from examples.official_document_workflow.services.analysis_reuse import analyze_content
+from examples.official_document_workflow.services.analysis_reuse import neutral_event
 
 
 async def review_calendar(pipe,  request, events, sources):
     current = [e for e in events if e.get('status') == 'current']
-    data = {'sources': request['sources'],
-            'events': [{key: value for key, value in e.items() if not key.startswith('_')} for e in current]}
+    data = {
+        'sources': request['sources'],
+        'events': [{key: value for key, value in e.items() if not key.startswith('_')} for e in current],
+    }
     calculations = [
         {'index': n, **event['_relative_date_proof'].audit()}
         for n, event in enumerate(current) if isinstance(event.get('_relative_date_proof'), RelativeDateProof)
@@ -28,24 +30,30 @@ async def review_calendar(pipe,  request, events, sources):
         {'index': n, **event['_tracking_reminder_proof'].audit()}
         for n, event in enumerate(current) if isinstance(event.get('_tracking_reminder_proof'), TrackingReminderProof)
     ]
-    prompt = (REVIEW_PROMPT + '\n行事曆只收錄本帳號確實需要安排、參與或追蹤的具體事項。'
-              '公文的發文或收文日期本身不是行程。單純通知、知悉、備查、轉知、背景，'
-              '以及無關或已完成事項均須 reject；其他單位的時程也須有本帳號需要追蹤的具體依據。'
-              '若是否需要本人處理或追蹤的來源不明確，須 reject 並保留核對，不能因公文存在就保留。')
+    prompt = (
+        REVIEW_PROMPT + '\n行事曆只收錄本帳號確實需要安排、參與或追蹤的具體事項。'
+        '公文的發文或收文日期本身不是行程。單純通知、知悉、備查、轉知、背景，'
+        '以及無關或已完成事項均須 reject；其他單位的時程也須有本帳號需要追蹤的具體依據。'
+        '若是否需要本人處理或追蹤的來源不明確，須 reject 並保留核對，不能因公文存在就保留。'
+    )
     if calculations:
         data['date_calculations'] = calculations
-        prompt += ('\ndate_calculations 是系統根據原文明示相對期間及收文／發文日期試算的追蹤提醒。'
-                   '核對原文工作、起算條件、天數與計日方式，不要求計算後日期逐字出現在原文。'
-                   '發文日暫代送達日及假日規則未確認均已標為推估，不可聲稱送達已確認或法定期限已核定。'
-                   '推估日期不會讓未核定提案、取消、或無關的工作成立；仍須 reject。')
+        prompt += (
+            '\ndate_calculations 是系統根據原文明示相對期間及收文／發文日期試算的追蹤提醒。'
+            '核對原文工作、起算條件、天數與計日方式，不要求計算後日期逐字出現在原文。'
+            '發文日暫代送達日及假日規則未確認均已標為推估，不可聲稱送達已確認或法定期限已核定。'
+            '推估日期不會讓未核定提案、取消、或無關的工作成立；仍須 reject。'
+        )
     if tracking:
         data['tracking_reminders'] = tracking
-        prompt += ('\ntracking_reminders 是 AI 建議的追蹤提醒，並非公文明定期限。'
-                   '對清單中的 index，start_date 僅供追蹤，程式已依核對過的收文／發文日期及 AI 建議間隔計算。'
-                   '不要求這個日期或間隔逐字出現在原文，不能僅以原文未載明追蹤日期或期限為由 reject。'
-                   '請依完整語境核對本人或本公司是否有具體工作、會議、稽查或待辦，且確有安排或追蹤必要；'
-                   '不以「儘速」等單一字詞作判斷條件。一般通知、備查、知悉、轉知、純背景、沒有具體追蹤必要的籠統依規定辦理，'
-                   '以及提案未核定、工作有歧義、已完成、取消或無關的項目均須 reject。')
+        prompt += (
+            '\ntracking_reminders 是 AI 建議的追蹤提醒，並非公文明定期限。'
+            '對清單中的 index，start_date 僅供追蹤，程式已依核對過的收文／發文日期及 AI 建議間隔計算。'
+            '不要求這個日期或間隔逐字出現在原文，不能僅以原文未載明追蹤日期或期限為由 reject。'
+            '請依完整語境核對本人或本公司是否有具體工作、會議、稽查或待辦，且確有安排或追蹤必要；'
+            '不以「儘速」等單一字詞作判斷條件。一般通知、備查、知悉、轉知、純背景、沒有具體追蹤必要的籠統依規定辦理，'
+            '以及提案未核定、工作有歧義、已完成、取消或無關的項目均須 reject。'
+        )
     model_data = data
     if getattr(pipe, 'analysis_results', None) is not None:
         model_data = deepcopy(data)
@@ -53,10 +61,13 @@ async def review_calendar(pipe,  request, events, sources):
         private_dates = {'anchor_date', 'anchor_source', 'deadline', 'reminder_date', 'receipt_date_recorded'}
         for name in ('date_calculations', 'tracking_reminders'):
             if name in model_data:
-                model_data[name] = [{k: v for k, v in item.items() if k not in private_dates} for item in model_data[name]]
-        prompt += ('\n共用核對只判斷公文原文的工作與期間規格；個別收文日期與試算日期不提供給模型。'
-                   '具有 date_calculations 或 tracking_reminders 的項目由程式另外核對並計算個人日期，'
-                   '不要僅因該項 start_date=null 而拒絕已成立且有原文期間依據的工作。')
+                model_data[name] = [{k: v for k, v in item.items() if k not in private_dates}
+                                    for item in model_data[name]]
+        prompt += (
+            '\n共用核對只判斷公文原文的工作與期間規格；個別收文日期與試算日期不提供給模型。'
+            '具有 date_calculations 或 tracking_reminders 的項目由程式另外核對並計算個人日期，'
+            '不要僅因該項 start_date=null 而拒絕已成立且有原文期間依據的工作。'
+        )
     result = await analyze_content(
         pipe,
         module.CloudSemanticSource(
@@ -116,12 +127,16 @@ async def review_calendar(pipe,  request, events, sources):
         event = data['events'][check['index']]
         if check['decision'] == 'keep' and event.get('start_date'):
             parts = resolved[check['index']]
-            proof = current[check['index']].get('_relative_date_proof') or current[check['index']].get('_tracking_reminder_proof')
+            proof = current[check['index']].get(
+                '_relative_date_proof',
+            ) or current[check['index']].get('_tracking_reminder_proof')
             evidence = '\n'.join(p[3] for p in parts)
             verified = (
                 proof.supports(event['start_date'], evidence) if isinstance(proof, (RelativeDateProof, TrackingReminderProof))
-                else verify_event_date(event['start_date'], evidence,
-                                       [sources[sid].text for sid in {p[0] for p in parts}])
+                else verify_event_date(
+                    event['start_date'], evidence,
+                    [sources[sid].text for sid in {p[0] for p in parts}],
+                )
             )
             if verified and isinstance(proof, TrackingReminderProof):
                 action_refs = (current[check['index']].get('evidence_spans') or {}).get('action') or []

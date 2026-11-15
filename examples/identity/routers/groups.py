@@ -6,21 +6,21 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from examples.identity.database import get_db
-from examples.identity.models import Group
-from examples.identity.models import User
-from examples.identity.dependencies import ensure_admin_with_group
-from examples.identity.dependencies import is_super_admin
-from examples.identity.dependencies import require_admin
-from examples.identity.dependencies import require_super_admin
-from examples.identity.schemas.group import GroupCreate
-from examples.identity.schemas.group import GroupDelete
-from examples.identity.schemas.group import GroupRead
-from examples.identity.schemas.group import GroupUpdate
 from examples.identity.authorization.groups import create_group
 from examples.identity.authorization.groups import delete_group
 from examples.identity.authorization.groups import list_groups
 from examples.identity.authorization.groups import update_group
+from examples.identity.database import get_db
+from examples.identity.dependencies import ensure_admin_with_group
+from examples.identity.dependencies import is_super_admin
+from examples.identity.dependencies import require_admin
+from examples.identity.dependencies import require_super_admin
+from examples.identity.models import Group
+from examples.identity.models import User
+from examples.identity.schemas.group import GroupCreate
+from examples.identity.schemas.group import GroupDelete
+from examples.identity.schemas.group import GroupRead
+from examples.identity.schemas.group import GroupUpdate
 
 router = APIRouter(tags=['group-mgmt'])
 

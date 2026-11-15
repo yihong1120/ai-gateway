@@ -3,7 +3,6 @@
 These limits belong to the single application process. EIP session locks and
 durable write receipts still protect account operations independently.
 """
-
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +14,9 @@ from dataclasses import dataclass
 from functools import wraps
 from inspect import signature
 
-from examples.shared.runtime.usage import document_subject, verified_subject
+import examples.identity.adapters.webui as _webui_imports
+from examples.shared.runtime.usage import document_subject
+from examples.shared.runtime.usage import verified_subject
 
 
 class ModelNotStarted(ValueError):
@@ -126,10 +127,9 @@ def model_request(invoke):
         owner = getattr(args[0], '_usage_owner', None) if args else None
         token = None
         if owner:
-            from examples.identity.adapters.webui import verified_user
 
             try:
-                user = await verified_user(owner)
+                user = await _webui_imports.verified_user(owner)
                 if user.get('id') != owner:
                     raise ValueError('公文使用者身分不符，未呼叫模型。')
                 subject = verified_subject(user)

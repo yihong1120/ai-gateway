@@ -1,9 +1,10 @@
 """Explicit, fail-closed configuration of the resource server (not model keys)."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from ipaddress import ip_network
 import os
+from dataclasses import dataclass
+from dataclasses import field
+from ipaddress import ip_network
 from urllib.parse import urlsplit
 
 
@@ -29,8 +30,10 @@ class Configuration:
     def __post_init__(self):
         for value in (self.origin, self.issuer):
             url = urlsplit(value)
-            if (url.scheme != 'https' or not url.hostname or url.username or url.password
-                    or url.query or url.fragment or value.endswith('/')):
+            if (
+                url.scheme != 'https' or not url.hostname or url.username or url.password
+                or url.query or url.fragment or value.endswith('/')
+            ):
                 raise ValueError('Company MCP needs fixed HTTPS origins/issuer without credentials or trailing slash.')
         if urlsplit(self.origin).path or not self.clients or len(set(self.clients)) != len(self.clients):
             raise ValueError('Company MCP requires an origin and distinct approved OAuth clients.')

@@ -4,12 +4,16 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import re
 import unicodedata
+from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 import pymupdf
+from PIL import Image
+from PIL import ImageDraw
+from PIL import ImageEnhance
+from PIL import ImageFilter
+from PIL import ImageFont
 
 FONT = '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
 
@@ -29,10 +33,12 @@ def build(destination, repository):
     def save(name, image, text, fields, kind, cells=None):
         image_path = destination / (name + '.png')
         image.save(image_path)
-        cases.append({'id': name, 'kind': kind, 'image': str(image_path),
-                      'sha256': hashlib.sha256(image_path.read_bytes()).hexdigest(),
-                      'ground_truth': text, 'critical_fields': fields,
-                      'table_cells': cells or []})
+        cases.append({
+            'id': name, 'kind': kind, 'image': str(image_path),
+            'sha256': hashlib.sha256(image_path.read_bytes()).hexdigest(),
+            'ground_truth': text, 'critical_fields': fields,
+            'table_cells': cells or [],
+        })
 
     lines = [
         '澄川工程股份有限公司 函',
@@ -57,9 +63,11 @@ def build(destination, repository):
     draw = ImageDraw.Draw(image)
     for i, line in enumerate(lines):
         draw.text((90, 110 + i * 112), line, font=font(38 if i else 52), fill='black')
-    fields = ['115年10月14日', '1150014327', '115年11月5日', '09時30分',
-              '11時00分', '115年10月28日', '876,543', '曾婉瑜', '2501-6789',
-              '澄川工程股份有限公司', '宏宇營造股份有限公司', '臺北市中山區建國北路二段168號7樓']
+    fields = [
+        '115年10月14日', '1150014327', '115年11月5日', '09時30分',
+        '11時00分', '115年10月28日', '876,543', '曾婉瑜', '2501-6789',
+        '澄川工程股份有限公司', '宏宇營造股份有限公司', '臺北市中山區建國北路二段168號7樓',
+    ]
     save('synthetic-letter', image, '\n'.join(lines), fields, 'letter')
     degraded = ImageEnhance.Contrast(image).enhance(.55).filter(ImageFilter.GaussianBlur(.7))
     degraded = degraded.rotate(1.7, resample=Image.Resampling.BICUBIC, expand=True, fillcolor='white')
@@ -67,12 +75,14 @@ def build(destination, repository):
 
     title = '工程材料數量與經費彙整表'
     headers = ['項次', '材料名稱', '數量', '單價（元）', '小計（元）']
-    rows = [['1', '熱浸鍍鋅護欄', '12', '1,250', '15,000'],
-            ['2', '鋼管施工鷹架', '48', '2,375', '114,000'],
-            ['3', '反光施工圍籬', '36', '865', '31,140'],
-            ['4', '全身背負安全帶', '17', '3,480', '59,160'],
-            ['5', '耐衝擊安全帽', '29', '625', '18,125'],
-            ['6', '防墜安全母索', '83', '415', '34,445']]
+    rows = [
+        ['1', '熱浸鍍鋅護欄', '12', '1,250', '15,000'],
+        ['2', '鋼管施工鷹架', '48', '2,375', '114,000'],
+        ['3', '反光施工圍籬', '36', '865', '31,140'],
+        ['4', '全身背負安全帶', '17', '3,480', '59,160'],
+        ['5', '耐衝擊安全帽', '29', '625', '18,125'],
+        ['6', '防墜安全母索', '83', '415', '34,445'],
+    ]
     image = Image.new('RGB', (1654, 1900), 'white')
     draw = ImageDraw.Draw(image)
     draw.text((100, 90), title, font=font(52), fill='black')
@@ -88,49 +98,67 @@ def build(destination, repository):
             draw.text((xs[col] + 16, top + row_index * height + 50), value, font=font(36), fill='black')
     footer = '合計：新臺幣271,870元　覆核：陳韋廷'
     draw.text((100, 1600), footer, font=font(38), fill='black')
-    table_text = '\n'.join([title, '編號：TC-2026-014 填表日期：115年10月14日',
-                            *[' '.join(row) for row in [headers, *rows]], footer])
+    table_text = '\n'.join([
+        title, '編號：TC-2026-014 填表日期：115年10月14日',
+        *[' '.join(row) for row in [headers, *rows]], footer,
+    ])
     cells = [value for row in rows for value in row[1:]]
     save('synthetic-table', image, table_text, ['TC-2026-014', '271,870', '陳韋廷'], 'table', cells)
-    save('synthetic-table-scan', image.filter(ImageFilter.GaussianBlur(1.0)).resize((1240, 1425)),
-         table_text, ['TC-2026-014', '271,870', '陳韋廷'], 'degraded-table', cells)
+    save(
+        'synthetic-table-scan', image.filter(ImageFilter.GaussianBlur(1.0)).resize((1240, 1425)),
+        table_text, ['TC-2026-014', '271,870', '陳韋廷'], 'degraded-table', cells,
+    )
 
-    left = ['施工安全檢查要點', '第一章 現場管理', '一、進場人員均應配戴安全帽。',
-            '二、高處作業應使用全身背負安全帶。', '三、施工圍籬不得任意拆除或移動。',
-            '四、臨時電源應裝設漏電斷路器。', '五、工具使用後應歸位並檢查損傷。',
-            '六、吊掛作業應設專人指揮。', '七、鷹架應於使用前完成安全查驗。']
-    right = ['第二章 異常改善', '八、發現缺失應立即停止危險作業。',
-             '九、改善期限為115年10月28日。', '十、複查日期為115年11月2日。',
-             '十一、改善報告應附施工前後照片。', '十二、紀錄編號為QA-2026-0198。',
-             '十三、確認責任單位與承辦人。', '十四、全部完成後始得恢復作業。', '主管簽核：許庭瑄']
+    left = [
+        '施工安全檢查要點', '第一章 現場管理', '一、進場人員均應配戴安全帽。',
+        '二、高處作業應使用全身背負安全帶。', '三、施工圍籬不得任意拆除或移動。',
+        '四、臨時電源應裝設漏電斷路器。', '五、工具使用後應歸位並檢查損傷。',
+        '六、吊掛作業應設專人指揮。', '七、鷹架應於使用前完成安全查驗。',
+    ]
+    right = [
+        '第二章 異常改善', '八、發現缺失應立即停止危險作業。',
+        '九、改善期限為115年10月28日。', '十、複查日期為115年11月2日。',
+        '十一、改善報告應附施工前後照片。', '十二、紀錄編號為QA-2026-0198。',
+        '十三、確認責任單位與承辦人。', '十四、全部完成後始得恢復作業。', '主管簽核：許庭瑄',
+    ]
     image = Image.new('RGB', (1800, 1700), 'white')
     draw = ImageDraw.Draw(image)
     for x, column in ((70, left), (950, right)):
         for i, line in enumerate(column):
             draw.text((x, 100 + i * 150), line, font=font(31), fill='black')
     draw.line((900, 80, 900, 1570), fill='gray', width=2)
-    save('synthetic-columns', image, '\n'.join(left + right),
-         ['115年10月28日', '115年11月2日', 'QA-2026-0198', '許庭瑄'], 'two-columns')
+    save(
+        'synthetic-columns', image, '\n'.join(left + right),
+        ['115年10月28日', '115年11月2日', 'QA-2026-0198', '許庭瑄'], 'two-columns',
+    )
 
-    lines = ['小字與易混淆字元辨識測試', '案件編號：O0I1-L5S8-B6G9-2026',
-             '承辦人：龔韋翰；覆核人：鍾毓璇；聯絡人：鄒鈺婷',
-             '地點：臺中市烏日區榮泉路258巷16弄3號',
-             '保固期間：115年12月31日至118年12月30日',
-             '採購金額：NT$1,234,567.89；稅率：5%；數量：0.75公噸',
-             '識別代碼：AB-01928-ZX；版本：R2.07；設備：IP68',
-             '注意：釐清權責、核實數據、逐項複查，勿擅自變更內容。']
+    lines = [
+        '小字與易混淆字元辨識測試', '案件編號：O0I1-L5S8-B6G9-2026',
+        '承辦人：龔韋翰；覆核人：鍾毓璇；聯絡人：鄒鈺婷',
+        '地點：臺中市烏日區榮泉路258巷16弄3號',
+        '保固期間：115年12月31日至118年12月30日',
+        '採購金額：NT$1,234,567.89；稅率：5%；數量：0.75公噸',
+        '識別代碼：AB-01928-ZX；版本：R2.07；設備：IP68',
+        '注意：釐清權責、核實數據、逐項複查，勿擅自變更內容。',
+    ]
     lines += [f'檢核項目{n:02d}：確認材料規格、施工位置與改善照片；紀錄碼C{n:03d}。' for n in range(1, 15)]
     image = Image.new('RGB', (1654, 1900), 'white')
     draw = ImageDraw.Draw(image)
     for i, line in enumerate(lines):
         draw.text((70, 80 + i * 75), line, font=font(25), fill='black')
-    save('synthetic-small-print', image, '\n'.join(lines),
-         ['O0I1-L5S8-B6G9-2026', '龔韋翰', '鍾毓璇', '鄒鈺婷',
-          '1,234,567.89', '0.75', 'AB-01928-ZX', 'R2.07', 'IP68'], 'small-print')
+    save(
+        'synthetic-small-print', image, '\n'.join(lines),
+        [
+            'O0I1-L5S8-B6G9-2026', '龔韋翰', '鍾毓璇', '鄒鈺婷',
+            '1,234,567.89', '0.75', 'AB-01928-ZX', 'R2.07', 'IP68',
+        ], 'small-print',
+    )
 
-    real_names = ['fb431d7d-9228-4240-b939-20a59b171d69.pdf',
-                  '7f45c447-c2ae-4b98-b1bb-f5473e8c22ea.pdf',
-                  '劦字第1150013326號.pdf', '劦字第1150013525號.pdf']
+    real_names = [
+        'fb431d7d-9228-4240-b939-20a59b171d69.pdf',
+        '7f45c447-c2ae-4b98-b1bb-f5473e8c22ea.pdf',
+        '劦字第1150013326號.pdf', '劦字第1150013525號.pdf',
+    ]
     for index, name in enumerate(real_names, 1):
         with pymupdf.open(repository / 'example_files' / name) as doc:
             page = doc[0]

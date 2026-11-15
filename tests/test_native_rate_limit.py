@@ -1,17 +1,19 @@
 """Concurrent fixed-window limits against a private disposable Redis process."""
-
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
-from fastapi import HTTPException, Request
+from pathlib import Path
+
+from fastapi import HTTPException
+from fastapi import Request
 from redis.asyncio import Redis
-from examples.identity.settings.native import NativeSettings
+
 from examples.identity.providers.native_transactions import NativeTransactions
+from examples.identity.settings.native import NativeSettings
 
 
 class AtomicRateLimitTests(unittest.IsolatedAsyncioTestCase):
@@ -52,7 +54,7 @@ class AtomicRateLimitTests(unittest.IsolatedAsyncioTestCase):
             self.fail('disposable Redis did not start')
         self.service = NativeTransactions(NativeSettings())
         self.request = Request(
-            {'type': 'http', 'client': ('192.0.2.1', 1), 'headers': []}
+            {'type': 'http', 'client': ('192.0.2.1', 1), 'headers': []},
         )
         self.key = self.service._rate_limit_key(self.request)
 

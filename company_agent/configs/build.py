@@ -1,5 +1,4 @@
 """Generate complete candidate settings; runtime never resolves inheritance."""
-
 from __future__ import annotations
 
 import argparse

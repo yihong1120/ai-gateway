@@ -1,20 +1,27 @@
 from __future__ import annotations
-from fastapi import HTTPException, Request, Response
+
+from fastapi import HTTPException
+from fastapi import Request
+from fastapi import Response
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
-from examples.db_management.schemas.playback import (
-    PlaybackSessionRequest,
-    PlaybackWallRequest,
-    PlaybackRenewRequest,
-    StreamingPlaybackBatchResponse,
-    StreamingPlaybackItem,
-)
 
+from .identity import PlaybackIdentity
 from .identity import PlaybackPrincipal
 from .media import _streaming_session_descriptors
-from .rendering import _normalise_profile, _playback_endpoints, _wall_upstream_payload
+from .media import MediaSessions
+from .rendering import _normalise_profile
+from .rendering import _playback_endpoints
+from .rendering import _wall_upstream_payload
+from .rendering import PlaybackResponses
+from .upstream import PlaybackUpstream
+from examples.db_management.schemas.playback import PlaybackRenewRequest
+from examples.db_management.schemas.playback import PlaybackSessionRequest
+from examples.db_management.schemas.playback import PlaybackWallRequest
+from examples.db_management.schemas.playback import StreamingPlaybackBatchResponse
+from examples.db_management.schemas.playback import StreamingPlaybackItem
 
 
 class PlaybackService:
@@ -278,10 +285,6 @@ class PlaybackService:
 
 def create_playback_service(resources):
     """Bind the host's identity and transport dependencies once at app creation."""
-    from .identity import PlaybackIdentity
-    from .media import MediaSessions
-    from .rendering import PlaybackResponses
-    from .upstream import PlaybackUpstream
 
     return PlaybackService(
         PlaybackIdentity(resources.jwt_access, resources.bff),

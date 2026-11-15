@@ -8,6 +8,7 @@ import unittest
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
+from threading import Event
 from unittest.mock import AsyncMock
 from unittest.mock import patch
 
@@ -17,8 +18,13 @@ from . import test_official_upload_groups as fixtures
 from .eip_postgres import EIPPostgresTestCase
 from .test_eip_group_processing import payload
 from .test_official_document_processor_pipe import PIPE_MODULE as M
-from examples.official_document_workflow.infrastructure.storage.automation_store import AutomationStore
+from examples.official_document_workflow.infrastructure.storage.automation_store import (
+    AutomationStore,
+)
 from examples.official_document_workflow.infrastructure.storage.processing_cache import active_requests
+from examples.official_document_workflow.infrastructure.storage.processing_cache import CachedRequests
+from examples.official_document_workflow.infrastructure.storage.processing_cache import ProcessingCache
+from examples.official_document_workflow.infrastructure.storage.processing_cache import upload_outcome
 
 
 class UploadCacheTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
@@ -32,6 +38,7 @@ class UploadCacheTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         fixtures.UploadGroupTests.setUp(self)
         self.pipe.valves.document_analysis_cache_enabled = True
         self.db = AutomationStore(Path(self.tmp.name) / 'key')
+
         async def verified_user(owner):
             return {'id': owner, 'role': 'user', 'oauth': {'oidc': {'sub': f'oidc-{owner}'}}}
 
@@ -62,7 +69,6 @@ class UploadCacheTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_cache_commit_failure_preserves_document_success_and_downloads(self):
-        from examples.official_document_workflow.infrastructure.storage.processing_cache import CachedRequests, upload_outcome
         report = {'status': 'error'}
         token = upload_outcome.set(report)
         try:
@@ -77,7 +83,6 @@ class UploadCacheTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(active_requests.get())
 
     async def test_unavailable_cache_read_or_setup_falls_back_to_validated_processing(self):
-        from examples.official_document_workflow.infrastructure.storage.processing_cache import ProcessingCache
         with patch.object(ProcessingCache, 'get', side_effect=OSError('cache read unavailable')):
             self.assertIn('整理為 1 組', await self.run_pipe())
         with patch('examples.official_document_workflow.infrastructure.storage.automation_store.store', side_effect=OSError('cache setup unavailable')):
@@ -85,7 +90,6 @@ class UploadCacheTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.client.post.await_count, 2)
 
     async def test_batch_cache_write_rolls_back_all_entries_on_failure(self):
-        from examples.official_document_workflow.infrastructure.storage.processing_cache import ProcessingCache
         with self.db.db() as db:
             db.execute("""CREATE FUNCTION reject_cache_entry() RETURNS trigger LANGUAGE plpgsql AS $$
                 BEGIN IF NEW.key='broken' THEN RAISE EXCEPTION 'injected failure'; END IF; RETURN NEW; END $$;
@@ -96,12 +100,15 @@ class UploadCacheTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             self.assertEqual(db.execute('SELECT count(*) AS n FROM processing_chunks').fetchone()['n'], 0)
         self.assertTrue(cache.put_many({'a': {'x': 1}, 'b': {'x': 2}}))
         with self.db.db() as db:
-            self.assertEqual(db.execute('SELECT count(DISTINCT updated) AS n FROM processing_chunks').fetchone()['n'], 1)
+            self.assertEqual(
+                db.execute(
+                    'SELECT count(DISTINCT updated) AS n FROM processing_chunks',
+                ).fetchone()['n'], 1,
+            )
 
     async def test_cancelled_cache_commit_is_drained_before_releasing_the_batch(self):
-        from threading import Event
-        from examples.official_document_workflow.infrastructure.storage.processing_cache import CachedRequests
         entered, release = Event(), Event()
+
         def commit():
             entered.set()
             if not release.wait(4):

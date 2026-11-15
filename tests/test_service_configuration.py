@@ -1,13 +1,20 @@
 """Applications load only their service settings before building resources."""
+from __future__ import annotations
 
 import os
 import unittest
 from unittest.mock import patch
 
+from examples.ai_usage.config import AiUsageSettings
+from examples.company_ai_access.config import Settings
+from examples.shared.runtime.modules import ModuleReference
+
+_management_app = ModuleReference('examples.db_management.app')
+_identity_config = ModuleReference('examples.identity.config')
+
 
 class ServiceConfigurationTests(unittest.TestCase):
     def test_ai_usage_loads_its_section_before_validation(self):
-        from examples.ai_usage.config import AiUsageSettings
 
         values = {
             'AI_USAGE_LITELLM_BASE_URL': 'http://usage.test',
@@ -23,7 +30,6 @@ class ServiceConfigurationTests(unittest.TestCase):
         self.assertEqual(settings.litellm_base_url, 'http://usage.test')
 
     def test_company_ai_loads_its_section_before_database_validation(self):
-        from examples.company_ai_access.config import Settings
 
         values = {
             'AI_ACCESS_DATABASE_URL': 'postgresql://synthetic@127.0.0.1/test',
@@ -45,8 +51,8 @@ class ServiceConfigurationTests(unittest.TestCase):
 
     def test_identity_explicit_settings_skip_configuration_file(self):
         with patch.dict(os.environ, {'PYTHON_DOTENV_DISABLED': '1', 'JWT_SECRET_KEY': 'synthetic'}, clear=True):
-            from examples.db_management.app import create_app
-            from examples.identity.config import Settings
+            create_app = _management_app.attribute('create_app')
+            Settings = _identity_config.attribute('Settings')
 
             explicit = Settings()
             with patch('examples.shared.config.load_service') as load:
@@ -56,7 +62,7 @@ class ServiceConfigurationTests(unittest.TestCase):
 
     def test_identity_default_settings_load_before_building_resources(self):
         with patch.dict(os.environ, {'PYTHON_DOTENV_DISABLED': '1', 'JWT_SECRET_KEY': 'synthetic'}, clear=True):
-            from examples.db_management.app import create_app
+            create_app = _management_app.attribute('create_app')
 
             def configure(service):
                 os.environ['APP_PUBLIC_URL'] = 'https://identity.test'

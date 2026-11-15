@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import unittest
+
 import httpx
 
 from examples.official_document_workflow.application.output_receipts import OutputReceipt
@@ -12,7 +13,10 @@ from examples.official_document_workflow.application.output_review import WebUIO
 class OutputVerificationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.data = b'Subject,Date\nVerified,2026-11-08\n'
-        self.receipt = OutputReceipt('output-id', 'owner', 'unknown', 'file.csv', hashlib.sha256(self.data).hexdigest(), 'source')
+        self.receipt = OutputReceipt(
+            'output-id', 'owner', 'unknown', 'file.csv',
+            hashlib.sha256(self.data).hexdigest(), 'source',
+        )
         self.role, self.status, self.owner, self.content = 'admin', 200, 'owner', self.data
         self.paths = []
 
@@ -22,9 +26,16 @@ class OutputVerificationTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, json={'id': 'verified-admin', 'role': self.role})
         if request.url.path.endswith('/content'):
             return httpx.Response(200, content=self.content)
-        return httpx.Response(self.status, json={'id': self.receipt.id, 'user_id': self.owner, 'meta': {
-            'name': self.receipt.name, 'file_hash': self.receipt.sha256, 'data': {'source_file_id': 'source',
-                'kind': 'calendar_csv_pending_reminder', 'generated_by': 'official_document_processor_pipe'}}})
+        return httpx.Response(
+            self.status, json={
+                'id': self.receipt.id, 'user_id': self.owner, 'meta': {
+                    'name': self.receipt.name, 'file_hash': self.receipt.sha256, 'data': {
+                        'source_file_id': 'source',
+                        'kind': 'calendar_csv_pending_reminder', 'generated_by': 'official_document_processor_pipe',
+                    },
+                },
+            },
+        )
 
     async def verify(self):
         async with httpx.AsyncClient(base_url='http://webui.test', transport=httpx.MockTransport(self.request)) as client:

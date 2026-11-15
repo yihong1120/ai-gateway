@@ -6,8 +6,8 @@ import os
 import tempfile
 import unittest
 import zipfile
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
 from unittest.mock import patch
@@ -18,12 +18,17 @@ from examples.official_document_workflow.infrastructure.office import office_inp
 from examples.official_document_workflow.infrastructure.office.office_input import to_pdf
 from examples.official_document_workflow.infrastructure.office.office_input import validate
 from examples.official_document_workflow.runtime import current_resources
+from examples.shared.runtime.modules import ModuleReference
 from tests.eip_postgres import EIPPostgresTestCase
 from tests.test_official_document_processor_pipe import PIPE_MODULE as M
 
+_docx = ModuleReference('docx')
+_fitz = ModuleReference('fitz')
+_pymupdf = ModuleReference('pymupdf')
+
 
 def docx_bytes():
-    from docx import Document
+    Document = _docx.attribute('Document')
     out = io.BytesIO()
     doc = Document()
     doc.add_paragraph('Editable Word attachment 2026-09-06')
@@ -153,7 +158,7 @@ class OfficeInputTests(unittest.IsolatedAsyncioTestCase):
 
     @unittest.skipUnless(os.getenv('TEST_EIP_OFFICE') == '1', 'requires installed isolated office image')
     async def test_real_docx_to_pdf_text(self):
-        import fitz
+        fitz = _fitz.load()
         payload, name = await to_pdf(stream(docx_bytes()), '測試.docx')
         self.assertEqual(name, '測試.pdf')
         with fitz.open(stream=payload.read(), filetype='pdf') as doc:
@@ -218,7 +223,12 @@ class SharedOfficeSourceTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestC
             file = self.files.get(file_id)
             return file if file is not None and file.user_id == owner else None
 
-        self.enterContext(patch.object(M.Files, 'get_file_by_id_and_user_id', AsyncMock(side_effect=owned), create=True))
+        self.enterContext(
+            patch.object(
+                M.Files, 'get_file_by_id_and_user_id',
+                AsyncMock(side_effect=owned), create=True,
+            ),
+        )
         self.local = self.enterContext(patch.object(M.Storage, 'get_file', side_effect=lambda path: path, create=True))
 
     def upload(self, owner):
@@ -239,7 +249,7 @@ class SharedOfficeSourceTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestC
 
     @staticmethod
     def pdf(pages=1):
-        import pymupdf
+        pymupdf = _pymupdf.load()
         with pymupdf.open() as pdf:
             for number in range(pages):
                 pdf.new_page().insert_text((30, 30), f'Synthetic page {number + 1}')

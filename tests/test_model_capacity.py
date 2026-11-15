@@ -1,10 +1,12 @@
 """Capacity workloads select their own model without real network access."""
+from __future__ import annotations
 
 import io
 import json
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
+from unittest.mock import patch
 
 from examples.deployment.diagnostics import model_capacity
 
@@ -22,13 +24,17 @@ class ModelCapacityTests(unittest.TestCase):
         for model in ('first-local-model', 'another-local-model'):
             with self.subTest(model=model):
                 opener = Mock()
-                event = {'choices': [{'delta': {'content': 'result'}, 'finish_reason': 'stop'}],
-                         'usage': {'completion_tokens': 2}}
+                event = {
+                    'choices': [{'delta': {'content': 'result'}, 'finish_reason': 'stop'}],
+                    'usage': {'completion_tokens': 2},
+                }
                 opener.open.return_value = Response(b'data: ' + json.dumps(event).encode() + b'\n\ndata: [DONE]\n')
-                workload = {'profile': 'synthetic', 'model': model, 'requests': [{
-                    'label': 'short', 'messages': [{'role': 'user', 'content': 'synthetic'}],
-                    'max_tokens': 2, 'input_tokens_tokenizer': 1,
-                }]}
+                workload = {
+                    'profile': 'synthetic', 'model': model, 'requests': [{
+                        'label': 'short', 'messages': [{'role': 'user', 'content': 'synthetic'}],
+                        'max_tokens': 2, 'input_tokens_tokenizer': 1,
+                    }],
+                }
                 with patch.object(model_capacity, 'read_service', return_value=values), \
                         patch.object(model_capacity.urllib.request, 'build_opener', return_value=opener):
                     report = model_capacity.run(workload, Path('/unused-model-capacity-root'))

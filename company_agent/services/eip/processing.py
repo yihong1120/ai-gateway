@@ -1,7 +1,5 @@
 """Reuse EIP document workers with an explicit user-billed semantic adapter."""
 from __future__ import annotations
-from examples.official_document_workflow.services.output_delivery import output_part
-from examples.shared.runtime.io import run_sync
 
 import asyncio
 import hashlib
@@ -12,15 +10,31 @@ from langchain_core.messages import HumanMessage
 from langchain_core.messages import SystemMessage
 from openai import RateLimitError
 
+import examples.official_document_workflow.application.multi_agent as _multi_agent_imports
+import examples.official_document_workflow.infrastructure.eip.sessions as _sessions_imports
+import examples.official_document_workflow.runtime as _runtime_imports
 from company_agent.runtime.models import analysis_model
 from company_agent.runtime.models import billed_analysis
 from company_agent.runtime.models import select_profile
+from company_agent.runtime.models import UserBilledModel
 from company_agent.services.eip.client import attachment_list
 from company_agent.services.eip.client import binding
 from company_agent.services.eip.client import source
-from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT_KEY
+from examples.official_document_workflow.application.prompts import (
+    INSTRUCTION_PLANNER_PROMPT,
+)
+from examples.official_document_workflow.domain.calendar.csv_schema import (
+    CALENDAR_CSV_FORMAT_KEY,
+)
 from examples.official_document_workflow.infrastructure.eip import calendar_csv
-from examples.official_document_workflow.application.prompts import INSTRUCTION_PLANNER_PROMPT
+from examples.official_document_workflow.services.output_delivery import output_part
+from examples.shared.runtime.io import run_sync
+from examples.shared.runtime.modules import ModuleReference
+
+_workflow_application = ModuleReference('examples.official_document_workflow.application')
+_workflow_integration = ModuleReference('examples.official_document_workflow.application.integration')
+_webui_files = ModuleReference('open_webui.models.files')
+_webui_provider = ModuleReference('open_webui.storage.provider')
 
 
 class BilledPipeAdapter:
@@ -77,14 +91,14 @@ class BilledPipeAdapter:
 
 
 async def billed_pipe(ctx, model_profile=None):
-    from examples.official_document_workflow.application.integration import configured_pipe
-    from examples.official_document_workflow.runtime import current_resources
+    configured_pipe = _workflow_integration.attribute('configured_pipe')
 
     pipe = await configured_pipe()
     pipe._usage_owner = ctx.owner
-    pipe.content_cache = await run_sync(lambda: current_resources().shared_content)
+    pipe.content_cache = await run_sync(lambda: _runtime_imports.current_resources().shared_content)
     pipe.evidence_cache = None
-    pipe.analysis_results = current_resources().analysis_results if pipe.content_cache is not None and pipe.valves.document_analysis_cache_enabled else None
+    pipe.analysis_results = _runtime_imports.current_resources(
+    ).analysis_results if pipe.content_cache is not None and pipe.valves.document_analysis_cache_enabled else None
     adapter = BilledPipeAdapter(ctx, pipe, model_profile)
     pipe._analysis_authorize = adapter.authorize
     pipe._analysis_declined_errors = (RateLimitError,)
@@ -110,8 +124,8 @@ def read_output(path):
 
 
 async def owned_bytes(owner, file_id):
-    from open_webui.models.files import Files
-    from open_webui.storage.provider import Storage
+    Files = _webui_files.attribute('Files')
+    Storage = _webui_provider.attribute('Storage')
 
     item = await Files.get_file_by_id_and_user_id(file_id, owner)
     if not item:
@@ -128,12 +142,8 @@ async def owned_bytes(owner, file_id):
 
 
 async def process(ctx, args, emitter=None):
-    from examples.official_document_workflow.application import integration
-    from examples.official_document_workflow.application.multi_agent import process_with_team
-    from examples.official_document_workflow.infrastructure.eip.sessions import manual_session
-    from examples.official_document_workflow.runtime import current_resources
-    state = current_resources().state
-    from company_agent.runtime.models import UserBilledModel
+    integration = _workflow_application.attribute('integration')
+    state = _runtime_imports.current_resources().state
 
     if not ctx.settings.enable_eip_processing:
         raise ValueError('此入口未啟用 EIP 附件處理。')
@@ -142,7 +152,7 @@ async def process(ctx, args, emitter=None):
     if args.model_profile:
         select_profile(ctx.model, args.model_profile)
     db = await binding(ctx)
-    selected = [await run_sync(source,ctx, h, 'attachment') for h in args.handles]
+    selected = [await run_sync(source, ctx, h, 'attachment') for h in args.handles]
     if any(
         Path(s['attachment']['name']).suffix.lower() not in {'.pdf', '.docx', '.doc'}
         for s in selected
@@ -155,7 +165,8 @@ async def process(ctx, args, emitter=None):
         ).encode(),
     ).hexdigest()
     key = 'eip_process:' + fingerprint
-    cached = await run_sync(ctx.store.begin_tool,
+    cached = await run_sync(
+        ctx.store.begin_tool,
         ctx.owner,
         ctx.job,
         key,
@@ -171,7 +182,7 @@ async def process(ctx, args, emitter=None):
         ids = []
         groups = {}
         total = 0
-        async with manual_session(ctx.owner, state, db) as current:
+        async with _sessions_imports.manual_session(ctx.owner, state, db) as current:
             fresh = {}
             for item in selected:
                 doc = item['doc']
@@ -201,7 +212,7 @@ async def process(ctx, args, emitter=None):
                 groups.setdefault(group, []).append(f.id)
         await binding(ctx)
         pipe = await billed_pipe(ctx, args.model_profile)
-        result = await process_with_team(
+        result = await _multi_agent_imports.process_with_team(
             pipe,
 
             ctx.owner,
@@ -239,5 +250,5 @@ async def process(ctx, args, emitter=None):
             'workspace': '/agents',
             'notice': 'CSV 下載旁可預覽並由本人確認行事曆；尚未寫入 EIP。沒有期限不會建立行程。',
         }
-    await run_sync(ctx.store.finish_tool,ctx.owner, ctx.job, key, output)
+    await run_sync(ctx.store.finish_tool, ctx.owner, ctx.job, key, output)
     return output

@@ -1,12 +1,13 @@
 """One Compose selects isolated services without starting Docker or loading models."""
+from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 
 import yaml
 
@@ -61,14 +62,23 @@ class ComposeProfileTests(unittest.TestCase):
 
     def test_dev_database_keeps_its_project_volume_and_generated_credentials(self):
         with tempfile.TemporaryDirectory(prefix='dev bootstrap ') as folder:
-            Path(folder, 'postgres.env').write_text('POSTGRES_USER=dev_bootstrap\nPOSTGRES_PASSWORD=generated-test-password\n')
-            rendered = self.render('dev-db', project='ai-gateway-dev', DEV_CONFIG_DIR=folder,
-                                   POSTGRES_PASSWORD='unrelated-shell-password')
+            Path(folder, 'postgres.env').write_text(
+                'POSTGRES_USER=dev_bootstrap\nPOSTGRES_PASSWORD=generated-test-password\n',
+            )
+            rendered = self.render(
+                'dev-db', project='ai-gateway-dev', DEV_CONFIG_DIR=folder,
+                POSTGRES_PASSWORD='unrelated-shell-password',
+            )
         self.assertEqual(set(rendered['services']), {'postgres'})
         self.assertEqual(rendered['volumes']['postgres']['name'], 'ai-gateway-dev_postgres')
         service = rendered['services']['postgres']
         self.assertNotIn('container_name', service)
-        self.assertEqual(service['environment'], {'POSTGRES_USER': 'dev_bootstrap', 'POSTGRES_PASSWORD': 'generated-test-password'})
+        self.assertEqual(
+            service['environment'], {
+                'POSTGRES_USER': 'dev_bootstrap',
+                'POSTGRES_PASSWORD': 'generated-test-password',
+            },
+        )
         self.assertEqual(service['ports'][0]['host_ip'], '127.0.0.1')
         self.assertEqual(service['ports'][0]['published'], '15432')
         self.assertEqual(service['ports'][0]['target'], 5432)
@@ -81,8 +91,10 @@ class ComposeProfileTests(unittest.TestCase):
     def test_ocr_uses_native_config_read_only_with_independent_gpu_and_loopback_port(self):
         with tempfile.TemporaryDirectory(prefix='ocr models ') as folder:
             config = ROOT / 'examples/official_document_workflow/deployment/ocr/vllm.example.yaml'
-            rendered = self.render('ocr', OCR_MODEL_PATH=folder, OCR_INFERENCE_CONFIG_PATH=str(config),
-                                   OCR_GPU_ID='2', OCR_HOST_PORT='18115')
+            rendered = self.render(
+                'ocr', OCR_MODEL_PATH=folder, OCR_INFERENCE_CONFIG_PATH=str(config),
+                OCR_GPU_ID='2', OCR_HOST_PORT='18115',
+            )
             service = rendered['services']['paddleocr-vl16-vllm']
             mounts = {mount['target']: mount for mount in service['volumes']}
             self.assertEqual(mounts['/models/model']['source'], folder)
@@ -104,8 +116,10 @@ class ComposeProfileTests(unittest.TestCase):
         self.assertEqual(default['ports'][0]['published'], '18080')
         self.assertEqual(default['volumes'][0]['source'], '/mnt/data')
         with tempfile.TemporaryDirectory() as folder:
-            selected = self.render('files', FILESERVER_ROOT=folder, FILESERVER_HOST='127.0.0.1',
-                                   FILESERVER_PORT='18081')['services']['fileserver']
+            selected = self.render(
+                'files', FILESERVER_ROOT=folder, FILESERVER_HOST='127.0.0.1',
+                FILESERVER_PORT='18081',
+            )['services']['fileserver']
         self.assertEqual(selected['ports'][0]['host_ip'], '127.0.0.1')
         self.assertEqual(selected['ports'][0]['published'], '18081')
         self.assertEqual(selected['volumes'][0]['source'], folder)

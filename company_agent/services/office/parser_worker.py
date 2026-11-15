@@ -8,8 +8,10 @@ import sys
 
 from langchain_core.tools import ToolException
 
-from company_agent.services.office import documents
+import company_agent.services.delivery.validation as _validation_imports
+import company_agent.services.office.spreadsheet_edit as _spreadsheet_edit_imports
 from company_agent.services.files.errors import RecoverableToolError
+from company_agent.services.office import documents
 
 
 def main():
@@ -21,11 +23,9 @@ def main():
     args = request['args']
     if 'data' in args:
         args['data'] = base64.b64decode(args['data'], validate=True)
-    from company_agent.services.office.spreadsheet_edit import edit_spreadsheet
-    from company_agent.services.delivery.validation import validate_file
 
     funcs = {
-        'edit_spreadsheet': edit_spreadsheet,
+        'edit_spreadsheet': _spreadsheet_edit_imports.edit_spreadsheet,
         'extract': documents.extract,
         'edit': documents.edit,
         'word': documents.create_word,
@@ -33,7 +33,7 @@ def main():
         'spreadsheet': documents.create_spreadsheet,
         'read_spreadsheet': documents.read_spreadsheet,
         'analyze_spreadsheet': documents.analyze_spreadsheet,
-        'validate_delivery_file': validate_file,
+        'validate_delivery_file': _validation_imports.validate_file,
     }
     try:
         result = funcs[operation](**args)

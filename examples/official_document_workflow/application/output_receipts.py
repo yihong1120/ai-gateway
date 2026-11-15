@@ -1,11 +1,13 @@
 """Typed output identities and receipt transitions, with an in-memory test adapter."""
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from threading import RLock
-from typing import Literal, Protocol
 import time
 import uuid
+from dataclasses import dataclass
+from dataclasses import replace
+from threading import RLock
+from typing import Literal
+from typing import Protocol
 
 from examples.official_document_workflow.domain.documents import OutputUncertain
 
@@ -62,6 +64,7 @@ class OutputReceipts(Protocol):
 
 class MemoryOutputReceipts:
     """Test adapter with the same stale-snapshot and lease checks as PostgreSQL."""
+
     def __init__(self):
         self._records, self._lock, self._reviews = {}, RLock(), {}
 
@@ -82,8 +85,10 @@ class MemoryOutputReceipts:
             if old is not None and old.owner != owner:
                 raise ValueError('Output receipt ownership mismatch.')
             if old is None or old.state == 'not_written':
-                record = OutputReceipt(key, owner, 'writing', name, digest, source, kind, job, size,
-                                       revision=old.revision if old else 0)
+                record = OutputReceipt(
+                    key, owner, 'writing', name, digest, source, kind, job, size,
+                    revision=old.revision if old else 0,
+                )
                 self._reviews[key] = {'at': time.time()+30, 'until': 0, 'token': None, 'failures': 0}
                 return self._save(record), True
             return old, False
@@ -101,17 +106,22 @@ class MemoryOutputReceipts:
             current = self._current(record)
             if current is None or current.revision != record.revision or current.state not in WRITE_PENDING:
                 return current
-            result = self._save(current, state=state, projection_pending=bool(current.job and state == 'stored'),
-                                review_required=False if state == 'stored' else current.review_required)
+            result = self._save(
+                current, state=state, projection_pending=bool(current.job and state == 'stored'),
+                review_required=False if state == 'stored' else current.review_required,
+            )
             self._reviews[result.id]['at'] = 0 if result.projection_pending else time.time()+30
             return result
 
     def request_delete(self, record, path):
         with self._lock:
             current = self._current(record)
-            if current is None or current.revision != record.revision or current.state in {'not_written','deleted'}:
+            if current is None or current.revision != record.revision or current.state in {'not_written', 'deleted'}:
                 return None
-            result = self._save(current, state='deleting', path=path, projection_pending=bool(current.job), review_required=False)
+            result = self._save(
+                current, state='deleting', path=path,
+                projection_pending=bool(current.job), review_required=False,
+            )
             self._reviews[result.id]['at'] = time.time()+30
             return result
 
@@ -126,16 +136,23 @@ class MemoryOutputReceipts:
 
     def for_jobs(self, owner, jobs):
         with self._lock:
-            return [r for r in self._records.values() if r.owner == owner and r.job in jobs
-                    and r.state in {'stored','deleting','delete_unknown','deleted'}]
+            return [
+                r for r in self._records.values() if r.owner == owner and r.job in jobs
+                and r.state in {'stored', 'deleting', 'delete_unknown', 'deleted'}
+            ]
 
     def claim_reviews(self, limit=32):
         with self._lock:
             claims, now = [], time.time()
-            for key, review in sorted(self._reviews.items(), key=lambda pair: (pair[1]['at'],pair[0])):
+            for key, review in sorted(self._reviews.items(), key=lambda pair: (pair[1]['at'], pair[0])):
                 record = self._records[key]
-                if ((record.review_required or record.state not in WRITE_PENDING | DELETE_PENDING) and not record.projection_pending
-                        or review['at'] > now or review['until'] > now):
+                if (
+                    (
+                        record.review_required or record.state not in WRITE_PENDING |
+                        DELETE_PENDING
+                    ) and not record.projection_pending
+                    or review['at'] > now or review['until'] > now
+                ):
                     continue
                 token = str(uuid.uuid4())
                 review.update(token=token, until=now+60)
@@ -147,8 +164,10 @@ class MemoryOutputReceipts:
     def _claimed(self, claim):
         current = self.get(claim.record.id, claim.record.owner)
         review = self._reviews.get(claim.record.id, {})
-        return (current is not None and current.revision == claim.record.revision
-                and review.get('token') == claim.token and review.get('until',0) > time.time())
+        return (
+            current is not None and current.revision == claim.record.revision
+            and review.get('token') == claim.token and review.get('until', 0) > time.time()
+        )
 
     def renew_review(self, claim):
         with self._lock:
@@ -167,9 +186,13 @@ class MemoryOutputReceipts:
             review['mismatches'] = review.get('mismatches', 0)+1 if mismatch else 0
             if verification is not None:
                 review.update(outcome=verification.outcome, reason=verification.reason)
-            record = self._save(claim.record, state=state,
-                                review_required=review['mismatches'] >= 3,
-                                projection_pending=claim.record.projection_pending or bool(claim.record.job and state in {'stored','deleted'}))
+            record = self._save(
+                claim.record, state=state,
+                review_required=review['mismatches'] >= 3,
+                projection_pending=claim.record.projection_pending or bool(
+                    claim.record.job and state in {'stored', 'deleted'},
+                ),
+            )
             return ReviewClaim(record, claim.token)
 
     def finish_review(self, claim, *, published=False):
@@ -182,12 +205,16 @@ class MemoryOutputReceipts:
             review = self._reviews[record.id]
             retry = (not record.review_required and record.state in WRITE_PENDING | DELETE_PENDING) or pending
             review['failures'] = review['failures']+1 if retry else 0
-            review.update(at=time.time()+min(300,2**min(review['failures'],9)) if retry else 0,
-                          until=0, token=None)
+            review.update(
+                at=time.time()+min(300, 2**min(review['failures'], 9)) if retry else 0,
+                until=0, token=None,
+            )
             return True
 
 
 def validate_review_transition(before, after):
-    if not (before in WRITE_PENDING and after in {'stored','unknown'}
-            or before in DELETE_PENDING and after in {'deleted','delete_unknown'}):
+    if not (
+        before in WRITE_PENDING and after in {'stored', 'unknown'}
+        or before in DELETE_PENDING and after in {'deleted', 'delete_unknown'}
+    ):
         raise ValueError('Invalid read-only review transition.')

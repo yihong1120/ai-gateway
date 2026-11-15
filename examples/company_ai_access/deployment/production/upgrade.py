@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
 import pwd
 import re
 import shutil
@@ -16,6 +14,9 @@ import tempfile
 import time
 import urllib.request
 import zipfile
+from datetime import datetime
+from datetime import timezone
+from pathlib import Path
 
 
 OWNER = 'changdar02'
@@ -34,8 +35,11 @@ def launcher_route(text):
     route = 'location = /company-ai/downloads/Start-CompanyCodex.ps1 {'
     if route in text:
         return text
-    matches = list(re.finditer(
-        r'(?ms)^location = /company-ai/downloads/Get-CompanyAIKey\.ps1 \{\n.*?^\}', text))
+    matches = list(
+        re.finditer(
+            r'(?ms)^location = /company-ai/downloads/Get-CompanyAIKey\.ps1 \{\n.*?^\}', text,
+        ),
+    )
     if len(matches) != 1 or 'proxy_pass http://127.0.0.1:8013;' not in matches[0].group():
         raise RuntimeError('Expected one existing private helper download route.')
     match = matches[0]
@@ -87,13 +91,14 @@ def unpack(archive, output, expected, expected_version='1.1.3'):
 
 
 def installer_route(text):
-    route='location = /company-ai/downloads/changdar-ai-setup.exe {'
-    if route in text:return text
-    matches=list(re.finditer(r'(?ms)^location = /company-ai/downloads/Get-CompanyAIKey\.ps1 \{\n.*?^\}',text))
-    if len(matches)!=1 or 'proxy_pass http://127.0.0.1:8013;' not in matches[0].group():
+    route = 'location = /company-ai/downloads/changdar-ai-setup.exe {'
+    if route in text:
+        return text
+    matches = list(re.finditer(r'(?ms)^location = /company-ai/downloads/Get-CompanyAIKey\.ps1 \{\n.*?^\}', text))
+    if len(matches) != 1 or 'proxy_pass http://127.0.0.1:8013;' not in matches[0].group():
         raise RuntimeError('Expected the existing private helper download route.')
-    match=matches[0]
-    block=match.group().replace('Get-CompanyAIKey.ps1','changdar-ai-setup.exe')
+    match = matches[0]
+    block = match.group().replace('Get-CompanyAIKey.ps1', 'changdar-ai-setup.exe')
     return text[:match.end()]+'\n\n'+block+text[match.end():]
 
 
@@ -178,13 +183,17 @@ def main():
     if CONFIG.is_symlink() or CONFIG.stat().st_mode & 0o077:
         raise RuntimeError('Expected the existing private production configuration.')
     values = json.loads(CONFIG.read_text())
-    if (values.get('AI_ACCESS_ENVIRONMENT') != 'production' or
-            values.get('AI_ACCESS_ORIGIN') != 'https://changdar-server.mooo.com' or
-            values.get('AI_ACCESS_LITELLM_URL') != 'http://127.0.0.1:4000' or
-            values.get('AI_ACCESS_MODELS') != MODELS):
+    if (
+        values.get('AI_ACCESS_ENVIRONMENT') != 'production' or
+        values.get('AI_ACCESS_ORIGIN') != 'https://changdar-server.mooo.com' or
+        values.get('AI_ACCESS_LITELLM_URL') != 'http://127.0.0.1:4000' or
+        values.get('AI_ACCESS_MODELS') != MODELS
+    ):
         raise RuntimeError('Production environment/model policy differs from the prepared deployment.')
     if not values.get('AI_ACCESS_DATABASE_URL'):
-        raise RuntimeError('Migrate the access registry to local PostgreSQL and configure AI_ACCESS_DATABASE_URL before upgrading.')
+        raise RuntimeError(
+            'Migrate the access registry to local PostgreSQL and configure AI_ACCESS_DATABASE_URL before upgrading.',
+        )
     state = Path(values['AI_ACCESS_STATE_DIR'])
     if state != HOME / '.local/share/company-ai-access' or not (state / 'access.key').is_file():
         raise RuntimeError('Expected the existing production registry and encryption key.')
@@ -217,21 +226,28 @@ def main():
     smoke_user = validation_dir / 'smoke.py'
     atomic(smoke_user, smoke.read_bytes(), uid=identity.pw_uid, gid=identity.pw_gid, mode=0o600)
     new_values = dict(values)
-    new_values.update(AI_ACCESS_CODEX_RELEASE=args.codex_release,
-                      AI_ACCESS_CODEX_CATALOG=str(release / 'examples/company_ai_access/codex-models.example.json'))
+    new_values.update(
+        AI_ACCESS_CODEX_RELEASE=args.codex_release,
+        AI_ACCESS_CODEX_CATALOG=str(release / 'examples/company_ai_access/codex-models.example.json'),
+    )
     candidate = validation_dir / 'candidate-config.json'
-    atomic(candidate, (json.dumps(new_values, indent=2) + '\n').encode(),
-           uid=identity.pw_uid, gid=identity.pw_gid, mode=0o600)
+    atomic(
+        candidate, (json.dumps(new_values, indent=2) + '\n').encode(),
+        uid=identity.pw_uid, gid=identity.pw_gid, mode=0o600,
+    )
     validation_code = (
         'import sys,os,json;sys.path.insert(0,sys.argv[1]);'
         'os.environ.update(json.load(open(sys.argv[2])));'
         'from examples.company_ai_access.config import Settings;'
         's=Settings.from_env();assert s.codex_models==s.models and len(s.models)==3;'
-        'from examples.company_ai_access.app import create_app;create_app()')
+        'from examples.company_ai_access.app import create_app;create_app()'
+    )
     run('runuser', '-u', OWNER, '--', str(PYTHON), '-B', '-c', validation_code, str(release), str(candidate))
     updated_nginx = installer_route(launcher_route(NGINX.read_text())).encode()
-    unit = ('[Service]\nWorkingDirectory=' + str(release) + '\nExecStart=\nExecStart=' +
-            str(PYTHON) + ' ' + str(release / 'examples/company_ai_access/deployment/production/run.py') + '\n')
+    unit = (
+        '[Service]\nWorkingDirectory=' + str(release) + '\nExecStart=\nExecStart=' +
+        str(PYTHON) + ' ' + str(release / 'examples/company_ai_access/deployment/production/run.py') + '\n'
+    )
     receipts = save_receipts((CONFIG, NGINX, DROPIN), backup)
     original_key = hashlib.sha256((state / 'access.key').read_bytes()).digest()
     stopped = False
@@ -250,7 +266,8 @@ def main():
             'e.update({m[k]:x for k,x in conninfo_to_dict(v["AI_ACCESS_DATABASE_URL"]).items()});'
             'r=subprocess.run(["pg_dump","--format=custom","--schema",'
             'v.get("AI_ACCESS_DB_SCHEMA","company_ai_access")],env=e,stdout=subprocess.PIPE,stderr=subprocess.PIPE);'
-            'r.check_returncode();open(sys.argv[2],"xb").write(r.stdout)')
+            'r.check_returncode();open(sys.argv[2],"xb").write(r.stdout)'
+        )
         run(str(PYTHON), '-c', backup_code, str(CONFIG), str(backup / 'registry.dump'))
         atomic(CONFIG, candidate.read_bytes(), uid=identity.pw_uid, gid=identity.pw_gid, mode=0o600)
         atomic(DROPIN, unit.encode(), uid=0, gid=0, mode=0o644)
@@ -258,20 +275,26 @@ def main():
         run('systemctl', 'start', SERVICE)
         healthy()
         run('systemctl', 'reload', 'nginx')
-        output = run('runuser', '-u', OWNER, '--', str(PYTHON), '-B', str(smoke_user),
-                     '--require-codex', '--model-call', '--source-root', str(release),
-                     '--operator-file', str(LEGACY / 'operator.json'), '--output-dir', str(validation_dir))
+        output = run(
+            'runuser', '-u', OWNER, '--', str(PYTHON), '-B', str(smoke_user),
+            '--require-codex', '--model-call', '--source-root', str(release),
+            '--operator-file', str(LEGACY / 'operator.json'), '--output-dir', str(validation_dir),
+        )
         result = json.loads(output)
-        if (not result['disposable_device_revoked_and_key_deleted'] or
-                not all(result['checks'].values()) or
-                hashlib.sha256((state / 'access.key').read_bytes()).digest() != original_key):
+        if (
+            not result['disposable_device_revoked_and_key_deleted'] or
+            not all(result['checks'].values()) or
+            hashlib.sha256((state / 'access.key').read_bytes()).digest() != original_key
+        ):
             raise RuntimeError('Production acceptance or registry preservation failed.')
-        receipt = {'version': manifest['version'], 'codex_release': args.codex_release,
-                   'release': str(release), 'backup': str(backup), 'validation': str(validation_dir),
-                   'source_sha256': args.sha256, 'registry_encryption_key_preserved': True,
-                   'smoke_sha256': hashlib.sha256(smoke.read_bytes()).hexdigest(),
-                   'checks': result['checks'], 'model_calls': result['model_calls'],
-                   'windows_native_acceptance': 'pending', 'windows_scripts_signed': manifest['signed']}
+        receipt = {
+            'version': manifest['version'], 'codex_release': args.codex_release,
+            'release': str(release), 'backup': str(backup), 'validation': str(validation_dir),
+            'source_sha256': args.sha256, 'registry_encryption_key_preserved': True,
+            'smoke_sha256': hashlib.sha256(smoke.read_bytes()).hexdigest(),
+            'checks': result['checks'], 'model_calls': result['model_calls'],
+            'windows_native_acceptance': 'pending', 'windows_scripts_signed': manifest['signed'],
+        }
         (backup / 'deployment.json').write_text(json.dumps(receipt, indent=2) + '\n')
         print(json.dumps(receipt, indent=2), flush=True)
     except BaseException:
@@ -292,4 +315,7 @@ if __name__ == '__main__':
     try:
         main()
     except Exception as exc:
-        raise SystemExit('Company AI upgrade failed: ' + (str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__)) from None
+        raise SystemExit(
+            'Company AI upgrade failed: ' +
+            (str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__),
+        ) from None

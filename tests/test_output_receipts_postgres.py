@@ -1,10 +1,10 @@
 """Durable output reservations serialize writers and survive continuation expiry."""
-
 from __future__ import annotations
-from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from examples.official_document_workflow.infrastructure.storage.automation_store import (
     AutomationStore,
@@ -26,7 +26,7 @@ class OutputReceiptTests(EIPPostgresTestCase, unittest.TestCase):
 
     def begin(self):
         return self.repo.begin(
-            'output-id', 'owner', 'private-title.csv', 'hash', 'source-id'
+            'output-id', 'owner', 'private-title.csv', 'hash', 'source-id',
         )
 
     def test_concurrent_workers_reserve_one_writer_and_encrypt_metadata(self):
@@ -39,7 +39,7 @@ class OutputReceiptTests(EIPPostgresTestCase, unittest.TestCase):
             data = bytes(
                 db.execute('SELECT payload FROM clarification_outputs').fetchone()[
                     'payload'
-                ]
+                ],
             )
         self.assertNotIn(b'private-title', data)
 
@@ -55,7 +55,7 @@ class OutputReceiptTests(EIPPostgresTestCase, unittest.TestCase):
         retry, _ = self.repo.begin('retry-id', 'owner', 'x.csv', 'hash', 'source')
         self.repo.mark(retry, 'not_written')
         self.assertTrue(
-            self.repo.begin('retry-id', 'owner', 'x.csv', 'new-hash', 'source')[1]
+            self.repo.begin('retry-id', 'owner', 'x.csv', 'new-hash', 'source')[1],
         )
 
     def test_receipts_are_kept_and_a_lost_key_is_not_replaced(self):
@@ -71,8 +71,10 @@ class OutputReceiptTests(EIPPostgresTestCase, unittest.TestCase):
     def test_manual_reviews_are_encrypted_and_do_not_reopen_unknown_writes(self):
         record, _ = self.begin()
         self.repo.mark(record, 'unknown')
-        review_id = self.repo.record_review(record, actor='operator', method='manual',
-                                           outcome='reported_missing', note='private investigation note')
+        review_id = self.repo.record_review(
+            record, actor='operator', method='manual',
+            outcome='reported_missing', note='private investigation note',
+        )
         self.assertGreater(review_id, 0)
         self.assertEqual(self.repo.get(record.id, 'owner').state, 'unknown')
         self.assertFalse(self.begin()[1])
@@ -89,13 +91,17 @@ class OutputReceiptTests(EIPPostgresTestCase, unittest.TestCase):
             db.execute('DELETE FROM pending_clarifications')
         with self.assertRaises(ValueError):
             self.repo.record_review(record, actor='admin', method='webui_sha256', outcome='verified')
-        self.repo.record_review(record, actor='admin', method='webui_sha256', outcome='verified',
-                                proof={'sha256': record.sha256, 'bytes': 12})
+        self.repo.record_review(
+            record, actor='admin', method='webui_sha256', outcome='verified',
+            proof={'sha256': record.sha256, 'bytes': 12},
+        )
         self.assertEqual(self.repo.get(record.id, 'owner').state, 'stored')
         retry, _ = self.repo.begin('retry-id', 'owner', 'a.csv', 'old-hash', 'source')
         self.repo.mark(retry, 'not_written')
         self.repo.begin('retry-id', 'owner', 'a.csv', 'new-hash', 'source')
         with self.assertRaises(ValueError):
-            self.repo.record_review(retry, actor='admin', method='webui_sha256', outcome='verified',
-                                    proof={'sha256': 'old-hash', 'bytes': 12})
+            self.repo.record_review(
+                retry, actor='admin', method='webui_sha256', outcome='verified',
+                proof={'sha256': 'old-hash', 'bytes': 12},
+            )
         self.assertEqual(self.repo.reviews('retry-id', 'owner'), [])

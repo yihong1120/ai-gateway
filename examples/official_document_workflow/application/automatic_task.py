@@ -4,23 +4,21 @@ from __future__ import annotations
 import hashlib
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 
+from . import integration
 from examples.official_document_workflow.domain.calendar.relative_dates import (
     ReceiptContext,
 )
-from examples.official_document_workflow.domain.calendar.scheduling import (
-    EIP_REVIEW_NOTICE,
-    TENTATIVE_NOTICE,
-)
+from examples.official_document_workflow.domain.calendar.scheduling import EIP_REVIEW_NOTICE
+from examples.official_document_workflow.domain.calendar.scheduling import TENTATIVE_NOTICE
 from examples.official_document_workflow.domain.limits import MAX_EIP_ATTACHMENTS
-from examples.official_document_workflow.infrastructure.eip import (
-    calendar_csv,
-    calendar_identity,
-    calendar_sync,
-)
+from examples.official_document_workflow.infrastructure.eip import calendar_csv
+from examples.official_document_workflow.infrastructure.eip import calendar_identity
+from examples.official_document_workflow.infrastructure.eip import calendar_sync
 from examples.official_document_workflow.infrastructure.eip.automatic_session import (
     AutomaticSession,
 )
@@ -31,13 +29,9 @@ from examples.official_document_workflow.infrastructure.storage.automation_store
     AutomationStore,
 )
 from examples.official_document_workflow.infrastructure.storage.state import Journal
-from examples.official_document_workflow.services.output_delivery import (
-    output_job,
-    output_part,
-)
+from examples.official_document_workflow.services.output_delivery import output_job
+from examples.official_document_workflow.services.output_delivery import output_part
 from examples.shared.runtime.io import run_sync
-
-from . import integration
 
 
 def partial_calendar_ready(output):
@@ -48,8 +42,10 @@ def partial_calendar_ready(output):
         not output.get('complete') and output.get('calendar_ready')
         and output.get('csv_ids') and pending and errors
         and not output.get('calendar_errors') and not output.get('warnings')
-        and all(isinstance(error, str) and re.sub(r'^第 \d+ 組：', '', error) in pending
-                for error in errors)
+        and all(
+            isinstance(error, str) and re.sub(r'^第 \d+ 組：', '', error) in pending
+            for error in errors
+        ),
     )
 
 
@@ -99,7 +95,7 @@ class AutomaticTask:
             if self.slots is None:
                 raise RuntimeError('Automatic task requires an owned processing slot service.')
             async with self.slots.slot(self.owner):
-                if not await run_sync(self.allowed,) or not await self.verify(self.owner):
+                if not await run_sync(self.allowed) or not await self.verify(self.owner):
                     self.stopped = True
                     return False
                 if self.task['phase'] == 'discovered' and not await self.download():
@@ -117,7 +113,7 @@ class AutomaticTask:
             return False
 
     async def download(self):
-        await run_sync(self.db.save_task,self.task, 'downloading', self.payload)
+        await run_sync(self.db.save_task, self.task, 'downloading', self.payload)
         doc = self.payload['document']
         self.stage = 'attachments'
         detail = await self.adapter.read('document_detail', doc['id'], doc['folder'])
@@ -130,13 +126,13 @@ class AutomaticTask:
                     '未將 EIP 表單網頁當成公文處理，已結束自動補件檢查。'
                     '後續若補上附件，請由 EIP 手動處理重新啟動。'
                 )
-                await run_sync(self.db.save_task,self.task, 'no_pdf_final', self.payload)
+                await run_sync(self.db.save_task, self.task, 'no_pdf_final', self.payload)
             else:
                 self.payload['notice'] = (
                     '沒有 PDF／DOCX／DOC 附件；未將 EIP 表單網頁當成公文處理。'
                     '一小時後將再確認一次是否補件；仍無附件即不再自動掃描。'
                 )
-                await run_sync(self.db.save_task,self.task, 'no_pdf', self.payload)
+                await run_sync(self.db.save_task, self.task, 'no_pdf', self.payload)
             return False
         if len(attachments) > MAX_EIP_ATTACHMENTS:
             self.payload['input_issue'] = {
@@ -148,12 +144,12 @@ class AutomaticTask:
                 f'本件有 {len(attachments)} 個 PDF／Word 附件，超過每件最多 {MAX_EIP_ATTACHMENTS} 個附件的限制；'
                 '請至工作台分批選取處理。其他文件繼續自動處理。'
             )
-            await run_sync(self.db.save_task,self.task, 'needs_review', self.payload)
+            await run_sync(self.db.save_task, self.task, 'needs_review', self.payload)
             return False
         self.payload['source_ids'] = []
         cache = self.payload.setdefault('source_files', {})
         for attachment in attachments:
-            if not await run_sync(self.allowed,):
+            if not await run_sync(self.allowed):
                 raise ValueError('已暫停自動處理。')
             key = hashlib.sha256((attachment['url'] + '\0' + attachment['name']).encode()).hexdigest()
             if key not in cache:
@@ -164,15 +160,15 @@ class AutomaticTask:
                     f = await integration.source_file(self.owner, pdf, attachment['name'])
                 cache[key] = f.id
             self.payload['source_ids'].append(cache[key])
-            await run_sync(self.db.save_task,self.task, 'downloading', self.payload)
-        await run_sync(self.db.save_task,self.task, 'downloaded', self.payload)
+            await run_sync(self.db.save_task, self.task, 'downloading', self.payload)
+        await run_sync(self.db.save_task, self.task, 'downloaded', self.payload)
         return True
 
     async def analyze(self):
-        if not await run_sync(self.allowed,):
+        if not await run_sync(self.allowed):
             self.stopped = True
             return False
-        await run_sync(self.db.save_task,self.task, 'processing', self.payload)
+        await run_sync(self.db.save_task, self.task, 'processing', self.payload)
         self.stage = 'processing'
         source_ids = self.payload['source_ids']
         saved_context = self.payload.get('date_context')
@@ -183,7 +179,10 @@ class AutomaticTask:
             self.payload['date_context'] = saved_context
         if saved_context['flow_id'] != self.task['document_id']:
             raise ValueError('EIP 收文日期所屬文件不符，未處理。')
-        date_context = ReceiptContext(saved_context['flow_id'], saved_context['reference_number'], saved_context['received_date'])
+        date_context = ReceiptContext(
+            saved_context['flow_id'],
+            saved_context['reference_number'], saved_context['received_date'],
+        )
         recheck = self.payload.get('relative_date_recheck') or {}
         retained = None
         if recheck.get('revision') == 'eip-relative-date-estimate-v1':
@@ -204,7 +203,7 @@ class AutomaticTask:
                 '本件公文欄位或原文依據未通過驗證，已保留來源檔案，請人工確認；'
                 '未產生或匯入未驗證的行程。其他文件繼續自動處理。'
             )
-            await run_sync(self.db.save_task,self.task, 'needs_review', self.payload)
+            await run_sync(self.db.save_task, self.task, 'needs_review', self.payload)
             return False
         if retained is not None:
             await integration.retained_document_exports(
@@ -222,10 +221,10 @@ class AutomaticTask:
                     '文件處理尚有待核對項目，已確認完成的檔案已保留供下載；'
                     '未匯入行事曆，不會自動重送未完成或結果不明的輸出。'
                 )
-                await run_sync(self.db.save_task,self.task, 'needs_review', self.payload)
+                await run_sync(self.db.save_task, self.task, 'needs_review', self.payload)
                 return False
             raise ValueError('公文處理未完成，本輪已中止；可用輸出已保留，未匯入行事曆。')
-        await run_sync(self.db.save_task,self.task, 'converted', self.payload)
+        await run_sync(self.db.save_task, self.task, 'converted', self.payload)
         return True
 
     async def prepare_calendar(self):
@@ -240,7 +239,7 @@ class AutomaticTask:
             csv_ids,
             start=1,
         ):
-            if not await run_sync(self.allowed,):
+            if not await run_sync(self.allowed):
                 raise ValueError('已暫停自動處理。')
             self.stage = 'csv_validation'
             rows, csv_bytes = await integration.read_csv(self.owner, file_id, default_duration_minutes=duration)
@@ -252,7 +251,7 @@ class AutomaticTask:
         for group_index, rows, csv_bytes in calendars:
             self.stage = 'calendar_preview'
             staged = await self.adapter.read('stage', csv_bytes)
-            group_events = await run_sync(calendar_sync.verified_events,rows, staged, self.adapter.user_id, self.journal)
+            group_events = await run_sync(calendar_sync.verified_events, rows, staged, self.adapter.user_id, self.journal)
             self.stage = 'calendar_replay_check'
             await calendar_identity.prepare_source_replay(
                 group_events,
@@ -293,7 +292,7 @@ class AutomaticTask:
                     raise ValueError('已啟用行事曆附件，但本組沒有可用的原始 PDF；未新增行程。')
                 files = await integration.read_calendar_attachments(self.owner, pdfs)
                 attachment_groups.append((fresh, files))
-        if not await run_sync(self.allowed,) or not await self.verify(self.owner):
+        if not await run_sync(self.allowed) or not await self.verify(self.owner):
             self.stopped = True
             return False
         # Read the participant-project list immediately before
@@ -323,7 +322,7 @@ class AutomaticTask:
     async def _commit_calendar_locked(self, events, attachment_groups):
         # Durable phase before first network write; unknown outcomes
         # remain blocked by the shared journal across restarts.
-        await run_sync(self.db.save_task,self.task, 'importing', self.payload)
+        await run_sync(self.db.save_task, self.task, 'importing', self.payload)
         self.stage = 'calendar_write'
         self.payload['import'] = await calendar_sync.write_events(
             self.adapter, events, self.journal, self.allowed,
@@ -338,7 +337,7 @@ class AutomaticTask:
         # following the private import.  No match remains
         # private; guesses and previously imported events are
         # never changed by the hourly worker.
-        await run_sync(self.db.save_task,self.task, 'assigning_projects', self.payload)
+        await run_sync(self.db.save_task, self.task, 'assigning_projects', self.payload)
         self.stage = 'calendar_project_write'
         self.payload['calendar_project_assignments'] = await calendar_sync.write_project_assignments(
             self.adapter,
@@ -353,7 +352,7 @@ class AutomaticTask:
         attachment_result = {'attached_events': 0, 'skipped_events': 0}
         if self.config.get('calendar_attach_renamed_pdf'):
             for group_events, files in attachment_groups:
-                await run_sync(self.db.save_task,self.task, 'attaching', self.payload)
+                await run_sync(self.db.save_task, self.task, 'attaching', self.payload)
                 self.stage = 'calendar_attachment_write'
                 result = await calendar_sync.write_attachments(
                     self.adapter, group_events, files, self.journal, self.allowed,

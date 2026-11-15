@@ -1,9 +1,9 @@
 """Exercise locked installation boundaries without installing or contacting services."""
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -11,8 +11,10 @@ ROOT = Path(__file__).resolve().parents[1]
 class DependencyProfileTests(unittest.TestCase):
     def selected(self, *selection):
         result = subprocess.run(
-            ['uv', 'export', '--frozen', '--no-dev', '--no-header', '--no-hashes',
-             '--no-annotate', '--no-emit-project', *selection],
+            [
+                'uv', 'export', '--frozen', '--no-dev', '--no-header', '--no-hashes',
+                '--no-annotate', '--no-emit-project', *selection,
+            ],
             cwd=ROOT, capture_output=True, text=True, check=True,
         )
         return {
@@ -34,7 +36,10 @@ class DependencyProfileTests(unittest.TestCase):
     def test_independent_mcp_edge_does_not_install_vault_database_or_model_stacks(self):
         selected = self.selected('--extra', 'company-mcp')
         self.assertEqual(selected['mcp'], '2.3.0')
-        self.assertFalse({'psycopg', 'psycopg-binary', 'langgraph', 'pymupdf', 'openai', 'sqlalchemy'} & selected.keys())
+        self.assertFalse({
+            'psycopg', 'psycopg-binary', 'langgraph',
+            'pymupdf', 'openai', 'sqlalchemy',
+        } & selected.keys())
         incompatible = subprocess.run(
             ['uv', 'export', '--frozen', '--extra', 'company-mcp', '--group', 'litellm'],
             cwd=ROOT, capture_output=True, text=True,

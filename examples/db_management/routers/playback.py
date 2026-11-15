@@ -8,12 +8,12 @@ from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from examples.identity.database import get_db
-from examples.shared.host import integrations
-from examples.identity.redis_pool import get_redis_pool
 from examples.db_management.schemas.playback import PlaybackRenewRequest
 from examples.db_management.schemas.playback import PlaybackSessionRequest
 from examples.db_management.schemas.playback import PlaybackWallRequest
+from examples.identity.database import get_db
+from examples.identity.redis_pool import get_redis_pool
+from examples.shared.host import integrations
 
 router = APIRouter(prefix='/api/playback', tags=['playback'], dependencies=[Depends(integrations.require_streaming)])
 

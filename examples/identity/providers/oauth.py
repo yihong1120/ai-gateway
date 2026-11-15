@@ -1,18 +1,20 @@
 """Stable route API for the application-owned identity service."""
-
 from __future__ import annotations
+
 from typing import Literal
+
 from fastapi import Request
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from examples.identity.accounts.legal import SignupConsentPayload
 from examples.identity.deployment_context import DeploymentBinding
 from examples.identity.models import User
+from examples.identity.runtime import get_identity
 from examples.identity.schemas.auth import IdentityListResponse
 from examples.identity.schemas.auth import IdentityRead
 from examples.identity.schemas.auth import ProviderClaims
 from examples.identity.schemas.auth import TokenPairData
-from examples.identity.accounts.legal import SignupConsentPayload
-from examples.identity.runtime import get_identity
 
 Provider = Literal['google', 'apple']
 
@@ -36,7 +38,7 @@ async def verify_apple_identity_token(
     expected_nonce: str | None = None,
 ) -> ProviderClaims:
     return await get_identity().providers.verify_apple_identity_token(
-        identity_token, authorization_code, expected_nonce
+        identity_token, authorization_code, expected_nonce,
     )
 
 
@@ -125,18 +127,18 @@ async def list_user_identities(user: User, db: AsyncSession) -> IdentityListResp
 
 
 async def link_provider_identity(
-    user: User, provider: Provider, claims: ProviderClaims, db: AsyncSession
+    user: User, provider: Provider, claims: ProviderClaims, db: AsyncSession,
 ) -> IdentityRead:
     return await get_identity().provider_accounts.link_provider_identity(
-        user, provider, claims, db
+        user, provider, claims, db,
     )
 
 
 async def link_google_identity(
-    user: User, id_token: str, db: AsyncSession
+    user: User, id_token: str, db: AsyncSession,
 ) -> IdentityRead:
     return await get_identity().provider_accounts.link_google_identity(
-        user, id_token, db
+        user, id_token, db,
     )
 
 
@@ -148,11 +150,11 @@ async def link_apple_identity(
     nonce: str | None = None,
 ) -> IdentityRead:
     return await get_identity().provider_accounts.link_apple_identity(
-        user, identity_token, authorization_code, db, nonce
+        user, identity_token, authorization_code, db, nonce,
     )
 
 
 async def unlink_identity(
-    user: User, identity_id: int, db: AsyncSession
+    user: User, identity_id: int, db: AsyncSession,
 ) -> dict[str, str]:
     return await get_identity().provider_accounts.unlink_identity(user, identity_id, db)

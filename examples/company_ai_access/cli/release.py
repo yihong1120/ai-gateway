@@ -4,9 +4,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import re
 import zipfile
+from pathlib import Path
 
 
 EXTRA_FILES = (
@@ -65,18 +65,22 @@ EXTRA_FILES = (
     'tests/windows/Test-CompanyAICodex.ps1',
     'tests/windows/Test-CompanyAICodexDownload.ps1',
 )
-PORTALS = ('https://ai-dev.changdar-server.mooo.com', 'https://ai.changdar-server.mooo.com',
-           'https://changdar-server.mooo.com')
+PORTALS = (
+    'https://ai-dev.changdar-server.mooo.com', 'https://ai.changdar-server.mooo.com',
+    'https://changdar-server.mooo.com',
+)
 
 
 def build(root: Path, output: Path, version: str, portal: str):
     if not re.fullmatch(r'\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?', version) or portal not in PORTALS:
         raise ValueError('Use a release version and approved exact HTTPS portal.')
     package = root / 'examples/company_ai_access'
-    files = sorted(set([path for path in package.rglob('*.py') if path.is_file() and 'deployment' not in path.relative_to(package).parts] +
-                   [package / name for name in ('README.md', 'codex-models.example.json')] +
-                   list((package / 'windows').glob('*.ps1')) + list((package / 'ui').glob('*.html')) +
-                   list((package / 'ui').glob('*.js')) + [root / name for name in EXTRA_FILES]))
+    files = sorted(
+        set([path for path in package.rglob('*.py') if path.is_file() and 'deployment' not in path.relative_to(package).parts] +
+            [package / name for name in ('README.md', 'codex-models.example.json')] +
+            list((package / 'windows').glob('*.ps1')) + list((package / 'ui').glob('*.html')) +
+            list((package / 'ui').glob('*.js')) + [root / name for name in EXTRA_FILES]),
+    )
     payloads = {}
     for path in files:
         if path.is_symlink():
@@ -89,19 +93,23 @@ def build(root: Path, output: Path, version: str, portal: str):
                 raise ValueError('Unexpected setup template; refusing to guess its default portal.')
             data = data.replace(original, ("[string]$Portal = '" + portal + "'").encode())
         payloads[name] = data
-    manifest = {'version': version, 'portal': portal, 'signed': False,
-                'files': [{'name': name, 'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data)}
-                          for name, data in payloads.items()]}
+    manifest = {
+        'version': version, 'portal': portal, 'signed': False,
+        'files': [
+            {'name': name, 'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data)}
+            for name, data in payloads.items()
+        ],
+    }
     payloads['release.json'] = (json.dumps(manifest, ensure_ascii=False, indent=2) + '\n').encode()
     payloads['README-release.txt'] = (
-        'Single-product Company AI source bundle; this is not the complete monorepo.\n'
-        'The root project metadata and lock support this product profile.\n'
-        'Install from the extracted root: uv sync --frozen --no-dev --extra company-ai-access\n'
-        'Start with examples/company_ai_access/README.md and docs/company-ai-codex-design.md.\n'
-        'Sign all three Windows scripts using the included signing workflow before distribution.\n'
-        'No runtime configuration, enrollment credential, registry or provider secret is included.\n'
-        'Codex remains disabled until a qualified release/catalog/model policy is configured.\n'
-    ).encode()
+        b'Single-product Company AI source bundle; this is not the complete monorepo.\n'
+        b'The root project metadata and lock support this product profile.\n'
+        b'Install from the extracted root: uv sync --frozen --no-dev --extra company-ai-access\n'
+        b'Start with examples/company_ai_access/README.md and docs/company-ai-codex-design.md.\n'
+        b'Sign all three Windows scripts using the included signing workflow before distribution.\n'
+        b'No runtime configuration, enrollment credential, registry or provider secret is included.\n'
+        b'Codex remains disabled until a qualified release/catalog/model policy is configured.\n'
+    )
     with zipfile.ZipFile(output, 'x', compression=zipfile.ZIP_DEFLATED) as archive:
         for name, data in payloads.items():
             entry = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
@@ -118,8 +126,12 @@ def main():
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
     manifest = build(Path(__file__).resolve().parents[3], args.output, args.version, args.portal)
-    print(json.dumps({'output': str(args.output), 'source_files': len(manifest['files']),
-                      'sha256': hashlib.sha256(args.output.read_bytes()).hexdigest()}))
+    print(
+        json.dumps({
+            'output': str(args.output), 'source_files': len(manifest['files']),
+            'sha256': hashlib.sha256(args.output.read_bytes()).hexdigest(),
+        }),
+    )
 
 
 if __name__ == '__main__':

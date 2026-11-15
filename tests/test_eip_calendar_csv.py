@@ -11,11 +11,11 @@ from examples.official_document_workflow.cli.prepare_calendar_csv import prepare
 from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT
 from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_HEADERS
 from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_TRANSLATION_ROW
-from examples.official_document_workflow.infrastructure.eip.calendar_csv import export_eip_csv
-from examples.official_document_workflow.infrastructure.eip.calendar_csv import parse_csv
 from examples.official_document_workflow.infrastructure.eip.calendar_csv import direct_import_notice
-from examples.official_document_workflow.infrastructure.eip.calendar_csv import MIDNIGHT_IMPORT_NOTICE
+from examples.official_document_workflow.infrastructure.eip.calendar_csv import export_eip_csv
 from examples.official_document_workflow.infrastructure.eip.calendar_csv import MIDNIGHT_FALLBACK_HEADING
+from examples.official_document_workflow.infrastructure.eip.calendar_csv import MIDNIGHT_IMPORT_NOTICE
+from examples.official_document_workflow.infrastructure.eip.calendar_csv import parse_csv
 from examples.official_document_workflow.infrastructure.eip.netask import csv_minutes
 
 
@@ -132,10 +132,14 @@ class CsvCompatibilityTests(unittest.TestCase):
         self.assertEqual(direct_import_notice(download), MIDNIGHT_IMPORT_NOTICE)
 
     def test_noon_uses_the_native_website_clock_convention(self):
-        source, _ = parse_csv(fixture(**{
-            'Start Time': '12:00:00', 'Start Time(24hr)': '12:00',
-            'End Time': '12:30:00', 'End Time(24hr)': '12:30',
-        }))
+        source, _ = parse_csv(
+            fixture(
+                **{
+                    'Start Time': '12:00:00', 'Start Time(24hr)': '12:00',
+                    'End Time': '12:30:00', 'End Time(24hr)': '12:30',
+                },
+            ),
+        )
         download = export_eip_csv(source)
         direct = list(csv.DictReader(io.StringIO(unquote_plus(download.decode('utf-8-sig')))))
         self.assertEqual(direct[0]['Start Time'], '下午00:00:00')
@@ -174,10 +178,14 @@ class CsvCompatibilityTests(unittest.TestCase):
                     self.assertEqual(website_minutes(direct['End Time']), end)
 
     def test_midnight_native_reminder_preserves_exact_original_schedule_for_versioned_reads(self):
-        source, _ = parse_csv(fixture(**{
-            'Start Time': '00:00:00', 'Start Time(24hr)': '00:00',
-            'End Time': '01:00:00', 'End Time(24hr)': '01:00',
-        }))
+        source, _ = parse_csv(
+            fixture(
+                **{
+                    'Start Time': '00:00:00', 'Start Time(24hr)': '00:00',
+                    'End Time': '01:00:00', 'End Time(24hr)': '01:00',
+                },
+            ),
+        )
         download = export_eip_csv(source)
         direct = list(csv.DictReader(io.StringIO(unquote_plus(download.decode('utf-8-sig')))))
         self.assertEqual(direct[0]['All day event'], '真')

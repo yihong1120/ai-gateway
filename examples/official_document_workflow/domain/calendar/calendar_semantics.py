@@ -6,7 +6,6 @@ source text is discarded or executed, and no dates are inferred from filenames.
 """
 from __future__ import annotations
 
-
 import re
 import unicodedata
 from bisect import bisect_right
@@ -19,6 +18,13 @@ from datetime import timedelta
 from examples.official_document_workflow.domain.calendar.presentation import clean_ocr_presentation
 from examples.official_document_workflow.domain.calendar.presentation import event_description
 from examples.official_document_workflow.domain.calendar.presentation import format_ai_title
+from examples.shared.runtime.modules import ModuleReference
+
+_dataclasses = ModuleReference('dataclasses')
+_workflow_relative_dates = ModuleReference('examples.official_document_workflow.domain.calendar.relative_dates')
+_workflow_rows = ModuleReference('examples.official_document_workflow.domain.calendar.rows')
+_workflow_tracking_reminders = ModuleReference('examples.official_document_workflow.domain.calendar.tracking_reminders')
+_workflow_values = ModuleReference('examples.official_document_workflow.domain.calendar.values')
 
 
 def resolve_spans(spans, sources, limit=16):
@@ -455,10 +461,10 @@ def invalid_event_interval(event):
     return bool(same_day and start_time and end_time and end_time <= start_time)
 
 
-
-
-def assignment_event(event, sources, primary_source_id=None, *, document=None,
-                     estimate_relative_dates=False, estimate_tracking_reminders=False, receipt_context=None):
+def assignment_event(
+    event, sources, primary_source_id=None, *, document=None,
+    estimate_relative_dates=False, estimate_tracking_reminders=False, receipt_context=None,
+):
     """Validate source relations, retaining unknown timing instead of guessed dates.
 
     Legacy candidates without assignment still pass the existing evidence and
@@ -478,13 +484,15 @@ def assignment_event(event, sources, primary_source_id=None, *, document=None,
     if executor != candidate.get('responsible_party'):
         raise ValueError('行程 1 的辦理責任與來源關係不一致，請核對。')
     if estimate_relative_dates and document is not None:
-        from .relative_dates import estimate_event, RelativeDateProof
+        estimate_event, RelativeDateProof = _workflow_relative_dates.attributes('estimate_event', 'RelativeDateProof')
 
         candidate = estimate_event(candidate, sources, document, receipt_context)
         if isinstance(candidate.get('_relative_date_proof'), RelativeDateProof):
             return candidate
     if estimate_tracking_reminders and document is not None:
-        from .tracking_reminders import estimate_tracking_reminder, TrackingReminderProof
+        estimate_tracking_reminder, TrackingReminderProof = _workflow_tracking_reminders.attributes(
+            'estimate_tracking_reminder', 'TrackingReminderProof',
+        )
         candidate = estimate_tracking_reminder(candidate, sources, document, receipt_context)
         if isinstance(candidate.get('_tracking_reminder_proof'), TrackingReminderProof):
             return candidate
@@ -628,19 +636,20 @@ def optional_event_fields(event, sources):
     return candidate
 
 
+dataclass = _dataclasses.attribute('dataclass')
+CalendarRows = _workflow_rows.attribute('CalendarRows')
+CalendarValues = _workflow_values.attribute('CalendarValues')
 
-
-from dataclasses import dataclass
-from .rows import CalendarRows
-from .values import CalendarValues
 
 @dataclass(frozen=True)
 class CalendarRules:
     max_events: int
     rows: CalendarRows
 
-    def partition(self,  payload, sources, document, accepted, *,
-                                  estimate_relative_dates=False, estimate_tracking_reminders=False, receipt_context=None):
+    def partition(
+        self,  payload, sources, document, accepted, *,
+        estimate_relative_dates=False, estimate_tracking_reminders=False, receipt_context=None,
+    ):
         """Validate calendar candidates without blocking document exports."""
         events = payload.get('events')
         if len(events) > self.max_events:
@@ -650,10 +659,12 @@ class CalendarRules:
         pending = []
         for index, event in enumerate(events, 1):
             candidate = optional_event_fields(
-                assignment_event(event, sources, payload.get('primary_source_id'),
-                                 document=document, estimate_relative_dates=estimate_relative_dates,
-                                 estimate_tracking_reminders=estimate_tracking_reminders,
-                                 receipt_context=receipt_context), sources,
+                assignment_event(
+                    event, sources, payload.get('primary_source_id'),
+                    document=document, estimate_relative_dates=estimate_relative_dates,
+                    estimate_tracking_reminders=estimate_tracking_reminders,
+                    receipt_context=receipt_context,
+                ), sources,
             )
             if candidate.get('status') in ('current', 'needs_review') and candidate.get(
                 'start_date',
@@ -666,9 +677,11 @@ class CalendarRules:
                 pending.append(
                     f"行程 {index} 起訖待核對：結束時間早於或等於起始時間，或日期時間格式無效；未自動匯入。",
                 )
-            elif (candidate.get('status') == 'current' and candidate.get('end_date')
-                  and not candidate.get('start_time') and not candidate.get('end_time')
-                  and (date.fromisoformat(candidate['end_date']) - date.fromisoformat(candidate['start_date'])).days >= 100):
+            elif (
+                candidate.get('status') == 'current' and candidate.get('end_date')
+                and not candidate.get('start_time') and not candidate.get('end_time')
+                and (date.fromisoformat(candidate['end_date']) - date.fromisoformat(candidate['start_date'])).days >= 100
+            ):
                 pending.append(
                     f"行程 {index} 的全天跨日區間超過 EIP 單次 100 日上限，請分批核對；未自動匯入。",
                 )
@@ -676,7 +689,7 @@ class CalendarRules:
                 schedulable.append(candidate)
             valid.append(candidate)
         deadlines, rows = self.events(
-             {**payload, 'events': schedulable}, sources, document,
+            {**payload, 'events': schedulable}, sources, document,
         )
         accepted.extend(e for e in schedulable if e.get('status') == 'current')
         return deadlines, rows, pending
@@ -743,15 +756,17 @@ class CalendarRules:
                     continue
                 parts = resolve_spans(refs.get(field), sources)
                 if field.endswith('date'):
-                    from .relative_dates import RelativeDateProof
-                    from .tracking_reminders import TrackingReminderProof
+                    RelativeDateProof = _workflow_relative_dates.attribute('RelativeDateProof')
+                    TrackingReminderProof = _workflow_tracking_reminders.attribute('TrackingReminderProof')
 
                     proof = event.get('_relative_date_proof') or event.get('_tracking_reminder_proof')
                     verified = (
                         proof.supports(value, '\n'.join(p[3] for p in parts))
                         if isinstance(proof, (RelativeDateProof, TrackingReminderProof)) else
-                        verify_event_date(value, '\n'.join(p[3] for p in parts),
-                                          [sources[p[0]].text for p in parts])
+                        verify_event_date(
+                            value, '\n'.join(p[3] for p in parts),
+                            [sources[p[0]].text for p in parts],
+                        )
                     )
                     if not verified and field == 'end_date':
                         verified = any(
@@ -811,8 +826,12 @@ class CalendarRules:
                 parts,
                 payload.get('primary_source_id') or next(iter(sources)),
             )
-            from .relative_dates import ESTIMATE_TITLE, RelativeDateProof
-            from .tracking_reminders import TRACKING_TITLE, TrackingReminderProof
+            ESTIMATE_TITLE, RelativeDateProof = _workflow_relative_dates.attributes(
+                'ESTIMATE_TITLE', 'RelativeDateProof',
+            )
+            TRACKING_TITLE, TrackingReminderProof = _workflow_tracking_reminders.attributes(
+                'TRACKING_TITLE', 'TrackingReminderProof',
+            )
 
             proof = event.get('_relative_date_proof')
             if isinstance(proof, RelativeDateProof):

@@ -10,16 +10,20 @@ import asyncio
 import json
 import time
 
+import company_agent.services.research.web as _web_imports
+from examples.shared.runtime.modules import ModuleReference
+
+_webui_users = ModuleReference('open_webui.models.users')
+
 
 async def main():
-    from open_webui.models.users import Users
-    from company_agent.services.research.web import web_config, perform
+    Users = _webui_users.attribute('Users')
     user = next(u for u in (await Users.get_users(limit=100))['users'] if u.role == 'admin')
-    config = await web_config(user.id)
+    config = await _web_imports.web_config(user.id)
     started = time.monotonic()
-    search = await perform('search_web', {'query': 'site:docs.tavily.com Tavily Search API', 'count': 3}, config)
+    search = await _web_imports.perform('search_web', {'query': 'site:docs.tavily.com Tavily Search API', 'count': 3}, config)
     assert search['results'], 'Public search returned no usable results'
-    page = await perform('fetch_url', {'url': 'https://www.python.org/about/'}, config)
+    page = await _web_imports.perform('fetch_url', {'url': 'https://www.python.org/about/'}, config)
     assert page['results'] and page['results'][0]['content'], 'Public extract returned no usable text'
     print(
         json.dumps(

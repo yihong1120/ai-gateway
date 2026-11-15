@@ -13,8 +13,10 @@ import re
 import unicodedata
 
 from .calendar_read import unescape
-from .calendar_repair import fingerprint, repair_parameters
-from .calendar_verification import validate_wire, verify_detail
+from .calendar_repair import fingerprint
+from .calendar_repair import repair_parameters
+from .calendar_verification import validate_wire
+from .calendar_verification import verify_detail
 from .netask import ProjectRecord
 
 _PROJECT_LINE = re.compile(r'^工程名稱\s*[:：]\s*([^\r\n]+?)\s*$', re.MULTILINE)
@@ -130,7 +132,9 @@ async def assign_project(adapter, event_id, line, project_id, *, sharing=None):
     params = project_assignment_parameters(before, line, adapter.user_id, event_id, project_id, sharing=sharing)
     await adapter.rpc('Update', **params)
     after = await adapter.calendar_detail(event_id)
-    receipt = verify_project_assignment_detail(before, after, line, adapter.user_id, event_id, project_id, sharing=sharing)
+    receipt = verify_project_assignment_detail(
+        before, after, line, adapter.user_id, event_id, project_id, sharing=sharing,
+    )
     track = getattr(adapter, 'calendar_managed_update', None)
     if track is not None:
         await track(before, after)

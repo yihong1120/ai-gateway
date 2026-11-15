@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import unittest
 from subprocess import CalledProcessError
 from unittest.mock import patch
 
+from company_agent.evals.scenario_suite import prepare
+from company_agent.evals.scenario_suite import SCENARIOS
 from company_agent.runtime.execution import DocumentAgent
+from company_agent.services.files.errors import RecoverableToolError
 from company_agent.services.files.operations import ToolBox
 from company_agent.services.files.operations import worker
 from company_agent.services.files.schemas import Read
@@ -16,17 +20,18 @@ from company_agent.tests.test_agent import call
 from company_agent.tests.test_agent import Fixture
 from company_agent.tests.test_enterprise_completion import finish
 from company_agent.tests.test_enterprise_completion import RawRoleModel
+from examples.shared.runtime.modules import ModuleReference
+
+_openpyxl = ModuleReference('openpyxl')
 
 
 class FormatDispatchTests(Fixture):
     def test_scenario_names_existing_sheet_and_missing_sheet_is_not_substituted(self):
-        from company_agent.evals.scenario_suite import SCENARIOS, prepare
         directory = self.root/'scenario'
         prepare(directory, 'data_to_document')
         box = ToolBox(self.config, self.store, 'alice', self.job)
         value = box.read_spreadsheet(ReadSpreadsheet(root='project', path='scenario/source.xlsx', sheet='工程'))
         self.assertIn('工作表「'+value['sheet']+'」', SCENARIOS['data_to_document'])
-        from company_agent.services.files.errors import RecoverableToolError
         with self.assertRaises(RecoverableToolError):
             box.read_spreadsheet(ReadSpreadsheet(root='project', path='scenario/source.xlsx', sheet='工程表'))
 
@@ -54,8 +59,7 @@ class FormatDispatchTests(Fixture):
         self.assertEqual(source.read_bytes(), raw)
 
     def test_formula_cache_remains_unverified_and_columns_explicit(self):
-        import io
-        from openpyxl import Workbook
+        Workbook = _openpyxl.attribute('Workbook')
         book = Workbook()
         book.active['A1'] = '=1+2'
         book.active['U1'] = 99

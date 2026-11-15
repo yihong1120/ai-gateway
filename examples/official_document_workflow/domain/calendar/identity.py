@@ -4,8 +4,8 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from .presentation import split_ai_title
 from .csv_schema import CALENDAR_HEADERS
+from .presentation import split_ai_title
 
 
 def text(value):
@@ -62,5 +62,9 @@ def csv_key(row):
         values['Subject'] = title(row['Subject'])
         match = re.search(r'(?m)^辦理事項：([^\r\n]+)$', heading)
         if match:
-            values['Description'] = row['Description'][:match.start(1)] + work(match[1]) + row['Description'][match.end(1):]
+            values['Description'] = row['Description'][
+                :match.start(
+                    1,
+                )
+            ] + work(match[1]) + row['Description'][match.end(1):]
     return tuple(values[key] for key in CALENDAR_HEADERS)

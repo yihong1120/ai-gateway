@@ -1,5 +1,4 @@
 """Read completed receipts through the repository owned by this application."""
-
 from __future__ import annotations
 
 
@@ -19,7 +18,6 @@ class OutputCatalog:
                     if receipt.kind == 'renamed_pdf'
                     else receipt.kind,
                     'url': f'/api/v1/files/{receipt.id}/content?attachment=true',
-                }
+                },
             )
         return grouped
-

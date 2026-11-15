@@ -9,13 +9,15 @@ from pathlib import Path
 
 from langchain_core.messages import AIMessage
 
+from company_agent.agents.registry import ROLE_TOOLS
 from company_agent.config import Root
 from company_agent.config import Settings
+from company_agent.evals.runner import evaluation
+from company_agent.evals.runner import own_model
+from company_agent.evals.sandbox import make_state_directory
 from company_agent.runtime.execution import DocumentAgent
-from company_agent.evals.runner import evaluation, own_model
 from company_agent.runtime.models import GatewayModel
 from company_agent.services.office.documents import extract
-from company_agent.evals.sandbox import make_state_directory
 
 
 class DemoInvocation:
@@ -38,7 +40,6 @@ class DemoModel:
 
     def bind_tools(self, tools, **kwargs):
         names = {tool.name for tool in tools}
-        from company_agent.agents.registry import ROLE_TOOLS
 
         role = next(role for role, allowed in ROLE_TOOLS.items() if names == allowed)
         return DemoInvocation(self, role)

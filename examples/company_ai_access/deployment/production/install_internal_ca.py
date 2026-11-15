@@ -1,17 +1,20 @@
 """Install B's private CA maintenance and public-only signing handoff endpoints."""
+from __future__ import annotations
+
 import argparse
-from datetime import datetime, timezone
 import hashlib
 import ipaddress
 import json
 import os
-from pathlib import Path
 import pwd
 import re
 import shutil
 import socket
 import subprocess
 import zipfile
+from datetime import datetime
+from datetime import timezone
+from pathlib import Path
 
 
 SNIPPET = Path('/etc/nginx/snippets/company-ai-production.conf')
@@ -93,9 +96,11 @@ def install_tools(archive, expected):
     if hashlib.sha256(archive.read_bytes()).hexdigest() != expected:
         raise ValueError('Signing toolkit checksum mismatch.')
     public = json.loads((PUBLIC / 'pki.json').read_text())
-    allowed = {'New-CompanySigningRequest.ps1','Complete-CompanySigning.ps1','CompanyAI.Signing.ps1',
-               'Sign-CompanyAIRelease.ps1','Install-CompanyAITrust.ps1','signing-settings.json','README.txt',
-               'scripts/Setup-CompanyAI.ps1','scripts/Get-CompanyAIKey.ps1','scripts/Start-CompanyCodex.ps1'}
+    allowed = {
+        'New-CompanySigningRequest.ps1', 'Complete-CompanySigning.ps1', 'CompanyAI.Signing.ps1',
+        'Sign-CompanyAIRelease.ps1', 'Install-CompanyAITrust.ps1', 'signing-settings.json', 'README.txt',
+        'scripts/Setup-CompanyAI.ps1', 'scripts/Get-CompanyAIKey.ps1', 'scripts/Start-CompanyCodex.ps1',
+    }
     with zipfile.ZipFile(archive) as source:
         if set(source.namelist()) != allowed or len(source.namelist()) != len(allowed):
             raise ValueError('Unexpected toolkit files.')
@@ -127,7 +132,7 @@ def main():
         return
     if not args.ca_source or hashlib.sha256(args.ca_source.read_bytes()).hexdigest() != args.ca_sha256:
         raise ValueError('An exact reviewed CA source/checksum is required.')
-    if '--with-http_dav_module' not in run('/usr/sbin/nginx','-V'):
+    if '--with-http_dav_module' not in run('/usr/sbin/nginx', '-V'):
         raise ValueError('Nginx DAV is required for the two source-IP-restricted upload files.')
     stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     backup = Path('/var/backups/company-ai-code-signing') / stamp
@@ -140,7 +145,7 @@ def main():
     if CODE.exists():
         shutil.copy2(CODE, backup / 'internal_ca-before.py')
     atomic(CODE, args.ca_source.read_bytes())
-    summary = json.loads(run('/usr/bin/python3',str(CODE),'init'))
+    summary = json.loads(run('/usr/bin/python3', str(CODE), 'init'))
     # Root material is backed up only into the root-private backup, never served.
     shutil.copytree(STATE, backup / 'authority', copy_function=shutil.copy2)
     (backup / 'authority').chmod(0o700)
@@ -155,12 +160,12 @@ def main():
     generated = routes(original.decode(), args.vm_ip).encode()
     atomic(SNIPPET, generated)
     try:
-        run('/usr/sbin/nginx','-t')
-        run('systemctl','reload','nginx')
+        run('/usr/sbin/nginx', '-t')
+        run('systemctl', 'reload', 'nginx')
     except BaseException:
         atomic(SNIPPET, original)
-        run('/usr/sbin/nginx','-t')
-        run('systemctl','reload','nginx')
+        run('/usr/sbin/nginx', '-t')
+        run('systemctl', 'reload', 'nginx')
         raise
     service = '''[Unit]
 Description=Refresh Company AI code-signing certificate revocation list
@@ -189,12 +194,14 @@ WantedBy=timers.target
 '''
     atomic(Path('/etc/systemd/system/company-ai-code-signing-crl.service'), service.encode())
     atomic(Path('/etc/systemd/system/company-ai-code-signing-crl.timer'), timer.encode())
-    run('systemctl','daemon-reload')
-    run('systemctl','enable','--now','company-ai-code-signing-crl.timer')
-    run('systemctl','start','company-ai-code-signing-crl.service')
-    receipt = {'authority':summary,'backup':str(backup),'ca_source_sha256':args.ca_sha256,
-               'vm_upload_ip':args.vm_ip,'downloaded_scripts_still_unsigned':True,
-               'employee_trust_changed':False,'windows_vm_key_request':'pending'}
+    run('systemctl', 'daemon-reload')
+    run('systemctl', 'enable', '--now', 'company-ai-code-signing-crl.timer')
+    run('systemctl', 'start', 'company-ai-code-signing-crl.service')
+    receipt = {
+        'authority': summary, 'backup': str(backup), 'ca_source_sha256': args.ca_sha256,
+        'vm_upload_ip': args.vm_ip, 'downloaded_scripts_still_unsigned': True,
+        'employee_trust_changed': False, 'windows_vm_key_request': 'pending',
+    }
     (backup / 'installation.json').write_text(json.dumps(receipt, indent=2)+'\n')
     print(json.dumps(receipt, indent=2))
 

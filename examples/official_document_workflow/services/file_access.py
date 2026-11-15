@@ -1,18 +1,15 @@
 """WebUI file boundary: owned metadata, content proof and explicit deletion I/O."""
-
 from __future__ import annotations
 
 from pathlib import Path
 
-from examples.shared.runtime.io import run_sync
+from examples.official_document_workflow.application.output_verification import ContentProof
+from examples.official_document_workflow.application.output_verification import DeletionVerification
+from examples.official_document_workflow.application.output_verification import FileVerification
+from examples.official_document_workflow.application.output_verification import OutputMismatch
+from examples.official_document_workflow.application.output_verification import verify_metadata
 from examples.official_document_workflow.domain.documents import OutputUncertain
-from examples.official_document_workflow.application.output_verification import (
-    ContentProof,
-    DeletionVerification,
-    FileVerification,
-    OutputMismatch,
-    verify_metadata,
-)
+from examples.shared.runtime.io import run_sync
 
 
 class FileAccess:

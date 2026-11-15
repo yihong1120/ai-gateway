@@ -10,12 +10,20 @@ from fastapi.responses import RedirectResponse
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from examples.identity.accounts.verification import resend_verification_email
+from examples.identity.accounts.verification import verify_email_token
 from examples.identity.database import get_db
+from examples.identity.dependencies import get_current_user
+from examples.identity.models import User
 from examples.identity.providers.mode import require_local_identity_management
 from examples.identity.providers.mode import require_local_login
-from examples.identity.models import User
+from examples.identity.providers.oauth import link_apple_identity
+from examples.identity.providers.oauth import link_google_identity
+from examples.identity.providers.oauth import list_user_identities
+from examples.identity.providers.oauth import login_with_apple
+from examples.identity.providers.oauth import login_with_google
+from examples.identity.providers.oauth import unlink_identity
 from examples.identity.redis_pool import get_redis_pool
-from examples.identity.dependencies import get_current_user
 from examples.identity.schemas.auth import AppleAuthRequest
 from examples.identity.schemas.auth import AuthMessageResponse
 from examples.identity.schemas.auth import GoogleAuthRequest
@@ -31,14 +39,6 @@ from examples.identity.schemas.auth import VerifyEmailRequest
 from examples.identity.sessions.authentication import login_user
 from examples.identity.sessions.authentication import logout_user
 from examples.identity.sessions.authentication import refresh_tokens
-from examples.identity.accounts.verification import resend_verification_email
-from examples.identity.accounts.verification import verify_email_token
-from examples.identity.providers.oauth import link_apple_identity
-from examples.identity.providers.oauth import link_google_identity
-from examples.identity.providers.oauth import list_user_identities
-from examples.identity.providers.oauth import login_with_apple
-from examples.identity.providers.oauth import login_with_google
-from examples.identity.providers.oauth import unlink_identity
 from examples.identity.sessions.web import apple_callback_redirect
 from examples.identity.sessions.web import clear_web_refresh_cookie
 from examples.identity.sessions.web import is_web_auth_request

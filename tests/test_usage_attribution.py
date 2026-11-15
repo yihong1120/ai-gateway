@@ -13,13 +13,16 @@ from company_agent.runtime.models import close_model
 from company_agent.runtime.models import gateway_for_verified_user
 from examples.shared.runtime.concurrency import model_request
 from examples.shared.runtime.concurrency import ModelNotStarted
+from examples.shared.runtime.modules import ModuleReference
 from examples.shared.runtime.usage import document_subject
 from examples.shared.runtime.usage import request_metadata
+
+_fixture_test_official_document_processor_pipe = ModuleReference('tests.test_official_document_processor_pipe')
 
 
 class UsageAttributionTests(unittest.IsolatedAsyncioTestCase):
     async def test_document_responses_uses_gateway_metadata_without_user_budget(self):
-        from tests.test_official_document_processor_pipe import PIPE_MODULE
+        PIPE_MODULE = _fixture_test_official_document_processor_pipe.attribute('PIPE_MODULE')
 
         pipe = PIPE_MODULE.Pipe()
         captured = []

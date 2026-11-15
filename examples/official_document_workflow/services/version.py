@@ -1,5 +1,4 @@
 """Bind persisted work to both the installed implementation and WebUI adapter."""
-
 from __future__ import annotations
 
 import hashlib

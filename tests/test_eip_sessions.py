@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from tests.eip_calendar_fixture import new_calendar_matches
-
 import asyncio
 import tempfile
 import unittest
@@ -19,6 +17,7 @@ from examples.official_document_workflow.infrastructure.storage.automation_store
 from examples.official_document_workflow.infrastructure.storage.state import Journal
 from examples.official_document_workflow.infrastructure.storage.state import Link
 from examples.official_document_workflow.infrastructure.storage.state import State
+from tests.eip_calendar_fixture import new_calendar_matches
 from tests.eip_postgres import EIPPostgresTestCase
 
 

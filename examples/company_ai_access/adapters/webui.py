@@ -1,26 +1,31 @@
 """Opt-in installation into the existing Open WebUI host."""
-
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import JSONResponse
 import httpx
+from fastapi import APIRouter
+from fastapi import HTTPException
+from fastapi import Request
+from fastapi.responses import JSONResponse
 
-from examples.company_ai_access.routers.assets import assets_router
-from .bridge import BridgeClient, BridgeSettings
+import examples.company_ai_access.routers.dependencies as _dependencies_imports
+import examples.shared.runtime.installation as _installation_imports
+from .bridge import BridgeClient
+from .bridge import BridgeSettings
 from examples.company_ai_access.errors import error
+from examples.company_ai_access.routers.assets import assets_router
 from examples.company_ai_access.services.inference import stream_response
+from examples.shared.runtime.modules import ModuleReference
+
+_webui_auth = ModuleReference('open_webui.utils.auth')
 
 
 def install_webui(app):
-    from examples.shared.runtime.installation import install_once
-    with install_once(app, 'company_ai_installed') as installing:
+    with _installation_imports.install_once(app, 'company_ai_installed') as installing:
         if not installing:
             return
-        from open_webui.utils.auth import get_optional_verified_user_from_request
-        from examples.company_ai_access.routers.dependencies import limited_json, validate_inference_query
+        get_optional_verified_user_from_request = _webui_auth.attribute('get_optional_verified_user_from_request')
 
         router = APIRouter()
 
@@ -43,7 +48,7 @@ def install_webui(app):
                 # Use the host's normal session, including revocation checks. The
                 # bridge never accepts a caller-supplied subject/admin assertion.
                 if request.headers.get('authorization', '').startswith('Bearer sk-') or request.cookies.get(
-                    'token', ''
+                    'token', '',
                 ).startswith('sk-'):
                     raise error(401, 'ai_access_browser_login_required')
                 user = await get_optional_verified_user_from_request(request)
@@ -70,7 +75,7 @@ def install_webui(app):
                         headers[name] = request.headers[name]
             body = None
             if request.method == 'POST':
-                body = await limited_json(
+                body = await _dependencies_imports.limited_json(
                     request,
                     8 * 1024 * 1024 if inference else 16000,
                     allow_empty=not inference,
@@ -78,14 +83,14 @@ def install_webui(app):
             if inference:
                 # Claude Code's beta SDK appends this fixed hint. Validate it at
                 # both trust boundaries, then omit it from the upstream URL.
-                validate_inference_query(request)
+                _dependencies_imports.validate_inference_query(request)
             elif request.scope.get('query_string', b''):
                 # Control/device flow queries still cannot carry credentials.
                 raise error(400, 'ai_access_query_not_allowed')
             upstream = await client.send(request.method, request.url.path, headers, body)
 
             return stream_response(
-                upstream, {'Retry-After': upstream.headers['retry-after']} if 'retry-after' in upstream.headers else {}
+                upstream, {'Retry-After': upstream.headers['retry-after']} if 'retry-after' in upstream.headers else {},
             )
 
         routes = [*router.routes, *assets_router().routes]
@@ -127,7 +132,7 @@ def install_webui(app):
                         'Cache-Control': 'no-store',
                         'Referrer-Policy': 'no-referrer',
                         'X-Content-Type-Options': 'nosniff',
-                    }
+                    },
                 )
             else:
                 response = await call_next(request)

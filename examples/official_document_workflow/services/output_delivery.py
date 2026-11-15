@@ -2,16 +2,18 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import contextmanager
-from contextvars import ContextVar
-from dataclasses import dataclass
 import json
 import logging
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 
+from examples.official_document_workflow.application.output_receipts import DELETE_PENDING
+from examples.official_document_workflow.application.output_receipts import require_same_output
+from examples.official_document_workflow.domain.documents import OutputNotWritten
+from examples.official_document_workflow.domain.documents import OutputUncertain
 from examples.shared.runtime.io import run_sync
-from examples.official_document_workflow.domain.documents import OutputNotWritten, OutputUncertain
-from examples.official_document_workflow.application.output_receipts import require_same_output, DELETE_PENDING
 
 _job = ContextVar('document_output_job', default=None)
 _part = ContextVar('document_output_part', default='')
@@ -58,8 +60,12 @@ class FileOutput:
     def identity(owner, source, kind, name, explicit=None):
         scope = _job.get()
         job = scope[1] if scope and scope[0] == owner else None
-        key = str(uuid.UUID(explicit)) if explicit else str(uuid.uuid5(uuid.NAMESPACE_URL,
-            json.dumps([owner, job, source, kind, name, _part.get()], ensure_ascii=False))) if job else str(uuid.uuid4())
+        key = str(uuid.UUID(explicit)) if explicit else str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                json.dumps([owner, job, source, kind, name, _part.get()], ensure_ascii=False),
+            ),
+        ) if job else str(uuid.uuid4())
         return key, job
 
 
@@ -101,8 +107,10 @@ class OutputDelivery:
 
     async def _store(self, output):
         try:
-            receipt, started = await run_sync(self.receipts.begin, output.id, output.owner, output.name,
-                output.sha256, output.source, kind=output.kind, job=output.job, size=output.size)
+            receipt, started = await run_sync(
+                self.receipts.begin, output.id, output.owner, output.name,
+                output.sha256, output.source, kind=output.kind, job=output.job, size=output.size,
+            )
         except Exception as error:
             # The reservation itself can commit before its response is lost.
             try:
@@ -136,8 +144,8 @@ class OutputDelivery:
         return item
 
     async def _confirm(self, receipt):
-        current = await run_sync(self.receipts.mark,receipt,'stored')
+        current = await run_sync(self.receipts.mark, receipt, 'stored')
         if current is not None:
-            require_same_output(current,receipt)
-            if current.state in DELETE_PENDING | {'deleted','not_written'}:
+            require_same_output(current, receipt)
+            if current.state in DELETE_PENDING | {'deleted', 'not_written'}:
                 raise OutputUncertain('輸出已轉入其他狀態，需核對。')

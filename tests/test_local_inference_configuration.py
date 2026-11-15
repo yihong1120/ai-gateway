@@ -1,4 +1,5 @@
 """One deployment accepts native model configurations without model-specific code."""
+from __future__ import annotations
 
 import json
 import os
@@ -26,8 +27,10 @@ class LocalInferenceConfigurationTests(unittest.TestCase):
             **overrides,
         }
         result = subprocess.run(
-            ['docker', 'compose', '--env-file', '/dev/null', '-p', project,
-             '-f', str(COMPOSE), '--profile', 'local-model', 'config', '--format', 'json'],
+            [
+                'docker', 'compose', '--env-file', '/dev/null', '-p', project,
+                '-f', str(COMPOSE), '--profile', 'local-model', 'config', '--format', 'json',
+            ],
             env=environment, capture_output=True, text=True, check=True, timeout=30,
         )
         self.assertNotIn('must-not-reach-container', result.stdout)
@@ -41,11 +44,15 @@ class LocalInferenceConfigurationTests(unittest.TestCase):
             for name in ('alpha', 'beta'):
                 (models / name).mkdir()
             native_configs = [
-                {'model': '/models/model/alpha', 'served-model-name': 'alpha',
-                 'host': '0.0.0.0', 'port': 8000, 'dtype': 'auto'},
-                {'model': '/models/model/beta', 'served-model-name': ['beta', 'second-alias'],
-                 'host': '0.0.0.0', 'port': 8000, 'limit-mm-per-prompt': {'image': 2},
-                 'enable-auto-tool-choice': True, 'tool-call-parser': 'hermes'},
+                {
+                    'model': '/models/model/alpha', 'served-model-name': 'alpha',
+                    'host': '0.0.0.0', 'port': 8000, 'dtype': 'auto',
+                },
+                {
+                    'model': '/models/model/beta', 'served-model-name': ['beta', 'second-alias'],
+                    'host': '0.0.0.0', 'port': 8000, 'limit-mm-per-prompt': {'image': 2},
+                    'enable-auto-tool-choice': True, 'tool-call-parser': 'hermes',
+                },
             ]
             deployments = []
             for index, native in enumerate(native_configs):
@@ -75,8 +82,10 @@ class LocalInferenceConfigurationTests(unittest.TestCase):
             models = Path(folder)
             config = ROOT / 'examples/litellm/local/vllm.example.yaml'
             first = self.render(models, config, project='first-local')
-            second = self.render(models, config, project='second-local',
-                                 LOCAL_INFERENCE_HOST_PORT='15003', LOCAL_INFERENCE_GPU_ID='2')
+            second = self.render(
+                models, config, project='second-local',
+                LOCAL_INFERENCE_HOST_PORT='15003', LOCAL_INFERENCE_GPU_ID='2',
+            )
             self.assertNotEqual(first['name'], second['name'])
             self.assertEqual(first['services']['vllm']['ports'][0]['published'], '5003')
             service = second['services']['vllm']

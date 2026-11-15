@@ -1,5 +1,4 @@
 """Identity service boundaries preserve nonce, one-use proof and link contracts."""
-
 from __future__ import annotations
 
 import base64
@@ -8,10 +7,13 @@ import os
 import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock
+from unittest.mock import Mock
+from unittest.mock import patch
 
 import httpx
-from fastapi import HTTPException, Request
+from fastapi import HTTPException
+from fastapi import Request
 from pydantic import ValidationError
 
 from examples.identity.config import Settings
@@ -37,7 +39,7 @@ def configuration(**values):
 class IdentityServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.enterContext(
-            patch.dict(os.environ, {'PYTHON_DOTENV_DISABLED': '1'}, clear=True)
+            patch.dict(os.environ, {'PYTHON_DOTENV_DISABLED': '1'}, clear=True),
         )
         self.resources = IdentityResources(configuration())
         self.addAsyncCleanup(self.resources.http_clients.close)
@@ -57,7 +59,7 @@ class IdentityServiceTests(unittest.IsolatedAsyncioTestCase):
             )
             with self.assertRaises(HTTPException) as mismatch:
                 await verifier.verify_google_id_token(
-                    'token', expected_nonce='different'
+                    'token', expected_nonce='different',
                 )
             self.assertEqual(mismatch.exception.status_code, 401)
         with patch.object(
@@ -70,7 +72,7 @@ class IdentityServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 (
                     await verifier.verify_google_id_token(
-                        'token', require_verified_email=False
+                        'token', require_verified_email=False,
                     )
                 ).sub,
                 claims.sub,
@@ -83,7 +85,7 @@ class IdentityServiceTests(unittest.IsolatedAsyncioTestCase):
                 client,
                 'post',
                 new=AsyncMock(
-                    return_value=httpx.Response(200, json={'id_token': 'verified'})
+                    return_value=httpx.Response(200, json={'id_token': 'verified'}),
                 ),
             ) as post,
             patch.object(
@@ -94,7 +96,7 @@ class IdentityServiceTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = (
                 await self.resources.providers._exchange_apple_authorization_code_once(
-                    'one-use-code', 'client'
+                    'one-use-code', 'client',
                 )
             )
         self.assertEqual(result.id_token, 'verified')
@@ -109,7 +111,7 @@ class IdentityServiceTests(unittest.IsolatedAsyncioTestCase):
             httpx.Response(200, json=[]),
             httpx.Response(409),
             httpx.Response(
-                200, json=[{'identityProvider': 'google', 'userId': 'provider-sub'}]
+                200, json=[{'identityProvider': 'google', 'userId': 'provider-sub'}],
             ),
         ]
         with (
@@ -117,11 +119,11 @@ class IdentityServiceTests(unittest.IsolatedAsyncioTestCase):
                 client,
                 'post',
                 new=AsyncMock(
-                    return_value=httpx.Response(200, json={'access_token': 'admin'})
+                    return_value=httpx.Response(200, json={'access_token': 'admin'}),
                 ),
             ),
             patch.object(
-                client, 'request', new=AsyncMock(side_effect=responses)
+                client, 'request', new=AsyncMock(side_effect=responses),
             ) as request,
         ):
             result = await self.resources.keycloak.link_federated_identity(
@@ -131,7 +133,7 @@ class IdentityServiceTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(result, 'already_linked')
         self.assertEqual(
-            [call.args[0] for call in request.await_args_list], ['GET', 'POST', 'GET']
+            [call.args[0] for call in request.await_args_list], ['GET', 'POST', 'GET'],
         )
         self.assertIn('server%2Fsubject', request.await_args_list[0].args[1])
         self.assertFalse(client.is_closed)
@@ -153,7 +155,7 @@ class IdentityServiceTests(unittest.IsolatedAsyncioTestCase):
                 'kind': 'login-redeem',
                 'provider': 'google',
                 'provider_subject_b64': encoded,
-            }
+            },
         ).encode()
         redis = SimpleNamespace(getdel=AsyncMock(side_effect=[stored, None]))
         body = json.dumps(payload).encode()
@@ -179,19 +181,19 @@ class IdentityServiceTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(HTTPException):
             await service.redeem_keycloak_native_social_exchange(
-                request('wrong'), redis
+                request('wrong'), redis,
             )
         redis.getdel.assert_not_awaited()
         signature = service._hmac_signature(stamp, body)
         result = await service.redeem_keycloak_native_social_exchange(
-            request(signature), redis
+            request(signature), redis,
         )
         self.assertEqual(
-            result, {'provider': 'google', 'provider_subject_b64': encoded}
+            result, {'provider': 'google', 'provider_subject_b64': encoded},
         )
         with self.assertRaises(HTTPException):
             await service.redeem_keycloak_native_social_exchange(
-                request(signature), redis
+                request(signature), redis,
             )
         self.assertEqual(redis.getdel.await_count, 2)
         self.assertNotIn(identifier, redis.getdel.await_args.args[0])
@@ -209,7 +211,7 @@ class IdentityServiceTests(unittest.IsolatedAsyncioTestCase):
                 first,
             )
             self.assertIsNot(
-                other.providers._jwks_client('https://provider.test/keys'), first
+                other.providers._jwks_client('https://provider.test/keys'), first,
             )
         self.assertEqual(factory.call_count, 2)
         self.assertIs(self.resources.native_social.verifier, self.resources.providers)
@@ -219,7 +221,7 @@ class IdentityServiceTests(unittest.IsolatedAsyncioTestCase):
 class GroupedConfigurationTests(unittest.TestCase):
     def setUp(self):
         self.enterContext(
-            patch.dict(os.environ, {'PYTHON_DOTENV_DISABLED': '1'}, clear=True)
+            patch.dict(os.environ, {'PYTHON_DOTENV_DISABLED': '1'}, clear=True),
         )
 
     def test_environment_legacy_keywords_and_grouped_keywords_agree(self):
@@ -228,7 +230,7 @@ class GroupedConfigurationTests(unittest.TestCase):
             {'JWT_SECRET_KEY': 'one', 'OIDC_ENABLED': '0', 'DB_POOL_SIZE': '3'},
         ):
             settings = Settings(
-                oidc_audience='overridden', web={'app_public_url': 'https://app.test'}
+                oidc_audience='overridden', web={'app_public_url': 'https://app.test'},
             )
         self.assertEqual(settings.oidc.audience, 'overridden')
         self.assertEqual(settings.oidc_audience, settings.oidc.audience)
@@ -238,7 +240,7 @@ class GroupedConfigurationTests(unittest.TestCase):
             settings.oidc.audience = 'changed'
         with self.assertRaises(ValueError):
             Settings(
-                authjwt_secret_key='one', oidc={'audience': 'a'}, oidc_audience='b'
+                authjwt_secret_key='one', oidc={'audience': 'a'}, oidc_audience='b',
             )
 
     def test_domain_and_integration_validation_run_at_construction(self):

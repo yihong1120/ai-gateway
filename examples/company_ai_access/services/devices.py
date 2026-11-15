@@ -1,19 +1,19 @@
 """Device approval, crash-safe delivery, bounded renewal and immediate denial."""
-
 from __future__ import annotations
 
 import asyncio
 import base64
 import hashlib
+import logging
 import secrets
 import time
 import uuid
 
 from fastapi import HTTPException
 
-from examples.company_ai_access.storage.registry import digest
 from examples.company_ai_access.errors import error
 from examples.company_ai_access.services import device_state
+from examples.company_ai_access.storage.registry import digest
 
 
 def challenge(verifier):
@@ -409,7 +409,7 @@ class Service:
                         # A revocation while the HTTP request was in flight wins.
                         # /key/update never changes blocked=false here.
                         if current['status'] == 'active' and self.now() < min(
-                            current['expires_at'], current['hard_expires_at']
+                            current['expires_at'], current['hard_expires_at'],
                         ):
                             current['expires_at'] = min(expires, current['hard_expires_at'])
                             async with self.repository.transaction():
@@ -427,7 +427,6 @@ class Service:
             try:
                 await self.maintain()
             except Exception:
-                import logging
 
                 logging.getLogger(__name__).error('Company AI maintenance failed; leases were not extended.')
             # Drivers may consume cancellation while releasing a connection.

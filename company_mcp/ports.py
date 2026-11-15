@@ -1,4 +1,6 @@
 """Application ports required by the protocol server; no host/global service."""
+from __future__ import annotations
+
 from typing import Protocol
 
 

@@ -1,7 +1,9 @@
-from concurrent.futures import ThreadPoolExecutor
+from __future__ import annotations
+
 import json
-from pathlib import Path
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest

@@ -1,19 +1,16 @@
 """HTTP identity, request bounds and access-policy dependencies."""
-
 from __future__ import annotations
 
-from ipaddress import ip_address
-import json
 import asyncio
+import json
 import secrets
+from ipaddress import ip_address
 
 import jwt
-
-from examples.company_ai_access.schemas import Principal
-
 from fastapi import Request
 
 from examples.company_ai_access.errors import error
+from examples.company_ai_access.schemas import Principal
 
 
 def service(request):

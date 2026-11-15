@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import ast
+import unittest
 from importlib.util import resolve_name
 from pathlib import Path
-import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 IDENTITY = ROOT / 'examples/identity'
@@ -31,18 +31,26 @@ class IdentityBoundaryTests(unittest.TestCase):
         self.assertTrue(IDENTITY.is_dir())
         for path in IDENTITY.rglob('*.py'):
             for imported in _imports(path):
-                self.assertFalse(any(_within(imported, namespace) for namespace in (
-                    'examples.db_management', 'examples.bff',
-                )), f'{path}: {imported}')
+                self.assertFalse(
+                    any(
+                        _within(imported, namespace) for namespace in (
+                            'examples.db_management', 'examples.bff',
+                        )
+                    ), f'{path}: {imported}',
+                )
 
     def test_only_explicit_adapters_can_import_host_code_and_core_cannot_import_adapters(self):
         for path in IDENTITY.rglob('*.py'):
             if path.is_relative_to(IDENTITY / 'adapters'):
                 continue
             for imported in _imports(path):
-                self.assertFalse(any(_within(imported, namespace) for namespace in (
-                    'examples.openwebui', 'open_webui', 'examples.identity.adapters',
-                )), f'{path}: {imported}')
+                self.assertFalse(
+                    any(
+                        _within(imported, namespace) for namespace in (
+                            'examples.openwebui', 'open_webui', 'examples.identity.adapters',
+                        )
+                    ), f'{path}: {imported}',
+                )
 
     def test_old_identity_namespace_and_scattered_route_sources_are_removed(self):
         self.assertFalse((ROOT / 'examples/auth').exists())

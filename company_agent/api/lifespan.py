@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack
 
 from company_agent.api.service import create_service
 from company_agent.services.external_tools.connection import external_tools_connection
 from examples.shared.runtime.jobs import application_jobs
+from examples.shared.runtime.modules import ModuleReference
+
+_workflow_output_catalog = ModuleReference('examples.official_document_workflow.application.output_catalog')
 
 
 class ServiceLifespan:
@@ -24,7 +28,7 @@ class ServiceLifespan:
                 async with self.original(app):
                     workflow = getattr(app.state, 'workflow', None)
                     if workflow is not None and hasattr(svc, 'document_outputs') and svc.document_outputs is None:
-                        from examples.official_document_workflow.application.output_catalog import OutputCatalog
+                        OutputCatalog = _workflow_output_catalog.attribute('OutputCatalog')
                         svc.document_outputs = OutputCatalog(workflow.outputs).files_for_jobs
                     async with AsyncExitStack() as integrations:
                         # Composition-root integrations start after shared services

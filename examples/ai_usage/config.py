@@ -7,11 +7,15 @@ directory. No Keycloak client secret or LiteLLM master key is required.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
+from dataclasses import dataclass
+from dataclasses import field
+from decimal import Decimal
+from decimal import InvalidOperation
+from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfoNotFoundError
 
 from examples.shared.config import load_service
 
@@ -137,12 +141,21 @@ class UsageQuerySettings:
         except (ZoneInfoNotFoundError, ValueError):
             raise ConfigurationError('AI_USAGE_TIMEZONE must be a valid IANA timezone') from None
         object.__setattr__(self, 'timezone', zone)
-        object.__setattr__(self, 'request_timeout_seconds', _positive_float(
-            'AI_USAGE_REQUEST_TIMEOUT_SECONDS', self.request_timeout_seconds, minimum=1, maximum=120))
-        for name, maximum in (('log_page_size', 1000), ('max_log_pages', 1000),
-                              ('max_record_limit', 500), ('max_range_days', 366)):
-            object.__setattr__(self, name, _positive_int('AI_USAGE_' + name.upper(), getattr(self, name),
-                                                      minimum=1, maximum=maximum))
+        object.__setattr__(
+            self, 'request_timeout_seconds', _positive_float(
+                'AI_USAGE_REQUEST_TIMEOUT_SECONDS', self.request_timeout_seconds, minimum=1, maximum=120,
+            ),
+        )
+        for name, maximum in (
+            ('log_page_size', 1000), ('max_log_pages', 1000),
+            ('max_record_limit', 500), ('max_range_days', 366),
+        ):
+            object.__setattr__(
+                self, name, _positive_int(
+                    'AI_USAGE_' + name.upper(), getattr(self, name),
+                    minimum=1, maximum=maximum,
+                ),
+            )
         object.__setattr__(self, 'local_model_names', frozenset(self.local_model_names))
         fingerprint = self.official_document_key_hash.lower()
         if fingerprint and (len(fingerprint) != 64 or any(char not in '0123456789abcdef' for char in fingerprint)):
@@ -197,7 +210,8 @@ class AiUsageSettings(UsageQuerySettings):
             except ValueError as exc:
                 raise ConfigurationError('AI_USAGE_GATEWAY_TENANT_ID must be a tenant UUID') from exc
 
-        return cls(
+        # __post_init__ validates and normalises these raw environment values.
+        values: dict[str, Any] = dict(
             litellm_base_url=_require('AI_USAGE_LITELLM_BASE_URL', 'LITELLM_USAGE_API_URL'),
             litellm_reader_key=_require('LITELLM_USAGE_READER_KEY'),
             daily_budget_usd=_value('AI_USAGE_DAILY_BUDGET_USD') or '4.00',
@@ -245,3 +259,4 @@ class AiUsageSettings(UsageQuerySettings):
             gateway_tenant_id=gateway_tenant_id,
             max_range_days=_value('AI_USAGE_MAX_RANGE_DAYS') or '366',
         )
+        return cls(**values)

@@ -1,6 +1,5 @@
 """Reuse the deployed Pipe and the current user's Open WebUI file ACLs."""
 from __future__ import annotations
-from examples.shared.runtime.io import run_sync
 
 import asyncio
 import hashlib
@@ -15,23 +14,39 @@ from open_webui.storage.provider import Storage
 
 from .multi_agent import process_with_team
 from examples.official_document_workflow.domain import documents as module
-from examples.official_document_workflow.domain.calendar.csv_schema import CALENDAR_CSV_FORMAT_KEY
-from examples.official_document_workflow.domain.calendar.match_review import model_prompt as match_review_prompt
-from examples.official_document_workflow.domain.calendar.match_review import transport_schema as match_review_schema
+from examples.official_document_workflow.domain.calendar.csv_schema import (
+    CALENDAR_CSV_FORMAT_KEY,
+)
+from examples.official_document_workflow.domain.calendar.match_review import (
+    model_prompt as match_review_prompt,
+)
+from examples.official_document_workflow.domain.calendar.match_review import (
+    transport_schema as match_review_schema,
+)
+from examples.official_document_workflow.domain.calendar.relative_dates import (
+    ReceiptContext,
+)
 from examples.official_document_workflow.domain.limits import MAX_EIP_ATTACHMENTS
 from examples.official_document_workflow.domain.validation import ContentValidationError
-from examples.official_document_workflow.domain.calendar.relative_dates import ReceiptContext
 from examples.official_document_workflow.infrastructure.eip import calendar_csv
 from examples.official_document_workflow.infrastructure.eip.calendar_attachments import (
     validate_upload,
 )
 from examples.official_document_workflow.infrastructure.office import office_input
-from examples.official_document_workflow.infrastructure.storage.automation_store import store
+from examples.official_document_workflow.infrastructure.storage.automation_store import (
+    store,
+)
 from examples.official_document_workflow.infrastructure.storage.processing_cache import (
     ProcessingCache,
 )
+from examples.official_document_workflow.infrastructure.storage.webui_files import (
+    prior_csv_ids,
+)
 from examples.official_document_workflow.runtime import current_resources
-from examples.official_document_workflow.infrastructure.storage.webui_files import prior_csv_ids
+from examples.shared.runtime.io import run_sync
+from examples.shared.runtime.modules import ModuleReference
+
+_workflow_processor = ModuleReference('examples.official_document_workflow.services.processor')
 
 
 class DocumentValidationError(ValueError):
@@ -42,12 +57,11 @@ class DocumentValidationError(ValueError):
         self.issue = issue
 
 
-
 async def configured_pipe():
     function = await Functions.get_function_by_id('official_document_processor')
     if not function or not function.is_active:
         raise ValueError('公文處理 Function 尚未啟用。')
-    from examples.official_document_workflow.services.processor import DocumentProcessor
+    DocumentProcessor = _workflow_processor.attribute('DocumentProcessor')
 
     pipe = DocumentProcessor()
     valves = await Functions.get_function_valves_by_id('official_document_processor')

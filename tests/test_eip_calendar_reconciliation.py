@@ -6,13 +6,19 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from .test_eip_connector import remote, row
-from examples.official_document_workflow.infrastructure.eip.calendar_reconciliation import inspect_imports
-from examples.official_document_workflow.infrastructure.eip.calendar_sync import check_existing_events, verified_events, write_events
-from examples.official_document_workflow.infrastructure.eip.netask import import_line, js_escape
+import examples.official_document_workflow.infrastructure.eip.calendar_csv as _calendar_csv_imports
+from .test_eip_connector import remote
+from .test_eip_connector import row
+from examples.official_document_workflow.infrastructure.eip.calendar_reconciliation import (
+    inspect_imports,
+)
+from examples.official_document_workflow.infrastructure.eip.calendar_sync import check_existing_events
+from examples.official_document_workflow.infrastructure.eip.calendar_sync import verified_events
+from examples.official_document_workflow.infrastructure.eip.calendar_sync import write_events
+from examples.official_document_workflow.infrastructure.eip.netask import import_line
+from examples.official_document_workflow.infrastructure.eip.netask import js_escape
 from examples.official_document_workflow.infrastructure.storage.state import Journal
 from tests.eip_postgres import EIPPostgresTestCase
-
 
 USER = '17'
 EVENT = '2026-09-10 10:00:00.001;1001'
@@ -38,18 +44,23 @@ def fixture():
     }.items():
         detail[index] = value
     detail[37:42] = fields[23:28]
-    client = SimpleNamespace(user_id=USER, rpc=AsyncMock(return_value=[[0, ''], listing]), calendar_detail=AsyncMock(return_value=[detail, [0]]))
+    client = SimpleNamespace(
+        user_id=USER, rpc=AsyncMock(
+            return_value=[[0, ''], listing],
+        ), calendar_detail=AsyncMock(return_value=[detail, [0]]),
+    )
     return source, fields, listing, detail, client
 
 
 class ExistingEventTests(unittest.IsolatedAsyncioTestCase):
     async def test_sibling_all_day_segments_are_not_mistaken_for_schedule_revisions(self):
-        from examples.official_document_workflow.infrastructure.eip.calendar_csv import import_segments
 
         source, _, listing, detail, client = fixture()
-        source.update({'All day event': '真', 'Start Time': '', 'Start Time(24hr)': '',
-                       'End Time': '', 'End Time(24hr)': '', 'End Date': '2026/09/12'})
-        segments = import_segments([source])
+        source.update({
+            'All day event': '真', 'Start Time': '', 'Start Time(24hr)': '',
+            'End Time': '', 'End Time(24hr)': '', 'End Date': '2026/09/12',
+        })
+        segments = _calendar_csv_imports.import_segments([source])
         first = import_line(remote(segments[0]), USER).split(',')
         second = import_line(remote(segments[1]), USER).split(',')
         listing[6], listing[8], listing[9], listing[10] = first[0], first[5], first[2], first[4]
@@ -81,8 +92,10 @@ class ExistingEventTests(unittest.IsolatedAsyncioTestCase):
         _, fields, listing, detail, client = fixture()
         fields[0] = js_escape('「測試工程」設施會勘[AI產生](測試工程)')
         listing[6] = detail[8] = js_escape('辦理測試工程設施會勘[AI產生](測試工程)')
-        self.assertEqual((await inspect_imports(client, [','.join(fields)]))[0],
-                         {'status': 'existing', 'receipt': {'event_id': EVENT, 'detail_verified': True}})
+        self.assertEqual(
+            (await inspect_imports(client, [','.join(fields)]))[0],
+            {'status': 'existing', 'receipt': {'event_id': EVENT, 'detail_verified': True}},
+        )
 
     async def test_project_quote_alias_does_not_remove_work_or_lot_punctuation(self):
         _, fields, listing, detail, client = fixture()
@@ -174,7 +187,12 @@ class ReceiptAdoptionTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase
         self.assertNotIn('receipt', self.events[0])  # No project/attachment writes.
         self.assertEqual(self.events[0]['row'], before[0]['row'])
         with self.journal.connect() as db:
-            self.assertEqual(db.execute('SELECT event_id FROM event_receipts WHERE key=%s', (self.events[0]['key'],)).fetchone()[0], EVENT)
+            self.assertEqual(
+                db.execute(
+                    'SELECT event_id FROM event_receipts WHERE key=%s',
+                    (self.events[0]['key'],),
+                ).fetchone()[0], EVENT,
+            )
         self.adapter.calendar_import_matches.reset_mock()
         self.assertEqual(await write_events(self.adapter, self.events, Journal()), {'created': 0, 'skipped': 1})
         self.adapter.calendar_import_matches.assert_not_awaited()

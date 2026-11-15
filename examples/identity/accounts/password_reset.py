@@ -1,12 +1,16 @@
 """Password-action HTTP entries; token consumption is part of the account transaction."""
-
 from __future__ import annotations
+
 import hashlib
-from redis.asyncio import Redis
+import logging
+
 from fastapi import HTTPException
-from examples.identity.runtime import get_identity, get_settings
-from examples.identity.redis_counters import increment_window
+from redis.asyncio import Redis
+
 from examples.identity.accounts.recovery import token_hash
+from examples.identity.redis_counters import increment_window
+from examples.identity.runtime import get_identity
+from examples.identity.runtime import get_settings
 
 
 def _hash_identifier(value):
@@ -64,7 +68,7 @@ async def _enforce_forgot_password_rate_limits(
 
 async def request_password_reset(email, db, redis_pool, client_ip=None):
     await _enforce_forgot_password_rate_limits(
-        email.strip().lower(), client_ip, redis_pool
+        email.strip().lower(), client_ip, redis_pool,
     )
     return await get_identity().recovery.request_reset(email, db)
 
@@ -74,12 +78,11 @@ async def reset_password(raw_token, new_password, db, redis_pool):
     await recovery.reset(raw_token, new_password, db)
     try:
         await recovery.drain_revocations(
-            db, redis_pool, limit=1, action=token_hash(raw_token.strip())
+            db, redis_pool, limit=1, action=token_hash(raw_token.strip()),
         )
     except Exception:
-        import logging
 
         logging.getLogger(__name__).warning(
-            'Password updated; session revocation deferred'
+            'Password updated; session revocation deferred',
         )
     return {'message': 'Password reset successfully.'}

@@ -1,6 +1,5 @@
 """No live EIP writes: exercise durable opt-in automation with fake services."""
 from __future__ import annotations
-from examples.official_document_workflow.runtime import current_resources
 
 import asyncio
 import os
@@ -15,17 +14,25 @@ from unittest.mock import Mock
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+import examples.official_document_workflow.infrastructure.eip.netask as _netask_imports
 from examples.official_document_workflow.application import automatic_task
 from examples.official_document_workflow.application import automation
 from examples.official_document_workflow.application import integration
+from examples.official_document_workflow.domain.calendar.scheduling import EIP_REVIEW_NOTICE
+from examples.official_document_workflow.domain.calendar.scheduling import TENTATIVE_NOTICE
+from examples.official_document_workflow.domain.validation import ContentValidationError
 from examples.official_document_workflow.infrastructure.eip.netask import Netask
 from examples.official_document_workflow.infrastructure.storage.automation_store import (
     AutomationStore,
 )
 from examples.official_document_workflow.infrastructure.storage.state import Journal
 from examples.official_document_workflow.infrastructure.storage.state import State
+from examples.official_document_workflow.runtime import current_resources
+from examples.shared.runtime.modules import ModuleReference
 from tests.eip_calendar_fixture import new_calendar_matches
 from tests.eip_postgres import EIPPostgresTestCase
+
+_fixture_test_eip_connector = ModuleReference('tests.test_eip_connector')
 
 
 def document():
@@ -60,6 +67,7 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             commit=AsyncMock(return_value=None),
             calendar_import_matches=AsyncMock(side_effect=new_calendar_matches),
         )
+
         async def document_detail(*args):
             return {'fields': [], 'attachments': await self.adapter.attachments(*args)}
 
@@ -114,17 +122,18 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                 return_value=[{'owner': 'alice', 'generation': self.generation}],
             ),
             patch.object(
-                automation, 'asyncio', types.SimpleNamespace(**{**vars(asyncio), 'sleep': AsyncMock(side_effect=asyncio.CancelledError)}),
+                automation, 'asyncio', types.SimpleNamespace(
+                    **{**vars(asyncio), 'sleep': AsyncMock(side_effect=asyncio.CancelledError)},
+                ),
             ),
         ):
             with self.assertRaises(asyncio.CancelledError):
                 await scheduler.run()
 
     async def test_project_then_attachment_uses_verified_scope_and_no_replay(self):
-        from .test_eip_connector import remote, row
-        from examples.official_document_workflow.infrastructure.eip.netask import import_line
+        remote, row = _fixture_test_eip_connector.attributes('remote', 'row')
 
-        line = import_line(remote(row()), '17')
+        line = _netask_imports.import_line(remote(row()), '17')
         self.event['line'] = line
         self.db.set_calendar_attach_renamed_pdf('alice', True)
         self.adapter.calendar_projects.return_value = [
@@ -319,6 +328,7 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             commit=AsyncMock(return_value=None),
             calendar_import_matches=AsyncMock(side_effect=new_calendar_matches),
         )
+
         async def document_detail(*args):
             return {'fields': [], 'attachments': await adapter.attachments(*args)}
 
@@ -610,14 +620,18 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
 
     async def test_server_receipt_context_is_loaded_from_the_same_flow(self):
         self.adapter.document_detail.return_value = {
-            'fields': [{'label': '發文字號', 'value': '測試第115號'},
-                       {'label': '收文日期', 'value': '115年10月1日'}],
+            'fields': [
+                {'label': '發文字號', 'value': '測試第115號'},
+                {'label': '收文日期', 'value': '115年10月1日'},
+            ],
             'attachments': [{'name': 'a.pdf', 'url': '/fo/a'}],
         }
         self.adapter.document_detail.side_effect = None
         await self.run_once()
-        self.assertEqual(integration.process.await_args.kwargs['date_context'],
-                         automatic_task.ReceiptContext('10', '測試第115號', '2026-10-01'))
+        self.assertEqual(
+            integration.process.await_args.kwargs['date_context'],
+            automatic_task.ReceiptContext('10', '測試第115號', '2026-10-01'),
+        )
         self.adapter.document_detail.assert_awaited_once_with('10', 'inbox')
 
     async def test_imported_relative_estimate_is_visible_in_automatic_history(self):
@@ -631,10 +645,12 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.db.discover('alice', '17', [document()])
         task = self.db.tasks('alice')[0]
         retained = [{'id': 'existing-pdf', 'kind': 'document_pdf', 'name': 'document.pdf'}]
-        p = {**task['payload'], 'relative_date_recheck': {
-            'revision': 'eip-relative-date-estimate-v1', 'retained_exports': retained,
-            'retained_sha256': {'existing-pdf': 'verified-hash'},
-        }}
+        p = {
+            **task['payload'], 'relative_date_recheck': {
+                'revision': 'eip-relative-date-estimate-v1', 'retained_exports': retained,
+                'retained_sha256': {'existing-pdf': 'verified-hash'},
+            },
+        }
         self.db.save_task(task, 'discovered', p)
         with patch.object(integration, 'retained_document_exports', AsyncMock(return_value=retained)):
             await self.run_once()
@@ -646,8 +662,6 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.adapter.commit.assert_not_awaited()
 
     async def test_ai_tentative_import_reports_eip_review_and_does_not_replay(self):
-        from examples.official_document_workflow.domain.calendar.scheduling import EIP_REVIEW_NOTICE
-        from examples.official_document_workflow.domain.calendar.scheduling import TENTATIVE_NOTICE
 
         integration.read_csv.return_value = ([{'Description': TENTATIVE_NOTICE}], b'csv')
         await self.run_once()
@@ -1217,10 +1231,13 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(integration.process.await_count, 2)
 
     async def test_classified_content_failure_shows_resolution_and_continues(self):
-        from examples.official_document_workflow.domain.validation import ContentValidationError
         issue = ContentValidationError('document_group_ambiguous', group_index=1).as_issue()
         self.adapter.automatic_documents.return_value = [document(), {**document(), 'id': '20'}]
-        integration.process.side_effect = [integration.DocumentValidationError('ignored private output', issue=issue), self.output]
+        integration.process.side_effect = [
+            integration.DocumentValidationError(
+                'ignored private output', issue=issue,
+            ), self.output,
+        ]
         await self.run_once()
         tasks = {t['document_id']: t for t in self.db.tasks('alice')}
         self.assertEqual(tasks['10']['phase'], 'needs_review')
@@ -1553,7 +1570,6 @@ class IntegrationValidationClassificationTests(unittest.IsolatedAsyncioTestCase)
         self.assertNotIn('private model output', str(caught.exception))
 
     async def test_structured_content_issue_survives_integration_boundary(self):
-        from examples.official_document_workflow.domain.validation import ContentValidationError
         error = ContentValidationError('document_metadata_unverified', group_index=1, repair_attempted=True)
         with self.assertRaises(integration.DocumentValidationError) as caught:
             await self.invoke(error)

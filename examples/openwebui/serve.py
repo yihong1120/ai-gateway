@@ -7,12 +7,15 @@ from pathlib import Path
 import uvicorn
 
 from examples.shared.config import load_service
+from examples.shared.runtime.modules import ModuleReference
+
+_open_webui = ModuleReference('open_webui')
 
 
 def main():
     load_service('webui')
     os.environ['PYTHON_DOTENV_DISABLED'] = '1'
-    import open_webui
+    open_webui = _open_webui.load()
 
     os.environ['FROM_INIT_PY'] = 'true'
     if not os.getenv('WEBUI_SECRET_KEY'):

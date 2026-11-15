@@ -20,6 +20,10 @@ from company_agent.services.office.documents import spreadsheet_value
 from company_agent.services.office.documents import X
 from company_agent.services.office.schemas import CellChange
 from company_agent.services.office.worker import formula_valid
+from examples.shared.runtime.modules import ModuleReference
+
+_openpyxl_formula = ModuleReference('openpyxl.formula')
+_openpyxl_utils_cell = ModuleReference('openpyxl.utils.cell')
 
 NS = '{' + X + '}'
 PARSER = etree.XMLParser(resolve_entities=False, no_network=True)
@@ -33,8 +37,8 @@ class FormulaDependencies:
         self.visits = 0
 
     def visit(self, sheet, cell):
-        from openpyxl.formula import Tokenizer
-        from openpyxl.utils.cell import get_column_letter
+        Tokenizer = _openpyxl_formula.attribute('Tokenizer')
+        get_column_letter = _openpyxl_utils_cell.attribute('get_column_letter')
 
         book, planned, active, done = self.book, self.planned, self.active, self.done
         key = (sheet, cell)

@@ -1,25 +1,34 @@
 """Real PostgreSQL quota races across single and site batch stream writes."""
+from __future__ import annotations
 
 import asyncio
 import os
-from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, patch
 import uuid
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from unittest.mock import patch
 
 from fastapi import HTTPException
-from sqlalchemy import func, insert, select, text
+from sqlalchemy import func
+from sqlalchemy import insert
+from sqlalchemy import select
+from sqlalchemy import text
 from sqlalchemy.engine import make_url
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.schema import CreateSchema, DropSchema
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.schema import CreateSchema
+from sqlalchemy.schema import DropSchema
 
 from examples.db_management.routers import streams as routes
-from examples.db_management.schemas.stream_config import (
-    SiteStreamConfigItem, SiteStreamConfigUpsert, StreamConfigCreate,
-)
+from examples.db_management.schemas.stream_config import SiteStreamConfigItem
+from examples.db_management.schemas.stream_config import SiteStreamConfigUpsert
+from examples.db_management.schemas.stream_config import StreamConfigCreate
 from examples.db_management.services import stream_config_services as services
 from examples.identity.database import Base
-from examples.identity.models import Group, Site, StreamConfig
+from examples.identity.models import Group
+from examples.identity.models import Site
+from examples.identity.models import StreamConfig
 
 
 def single(name, *, group=1, site=100):
@@ -27,10 +36,12 @@ def single(name, *, group=1, site=100):
 
 
 def batch(*items):
-    return SiteStreamConfigUpsert(streams=[
-        SiteStreamConfigItem(stream_name=item, video_url='rtsp://synthetic/stream')
-        if isinstance(item, str) else item for item in items
-    ])
+    return SiteStreamConfigUpsert(
+        streams=[
+            SiteStreamConfigItem(stream_name=item, video_url='rtsp://synthetic/stream')
+            if isinstance(item, str) else item for item in items
+        ],
+    )
 
 
 class StreamWriteTests(unittest.IsolatedAsyncioTestCase):
@@ -41,19 +52,30 @@ class StreamWriteTests(unittest.IsolatedAsyncioTestCase):
         self.schema = 'stream_quota_test_' + uuid.uuid4().hex
         self.engine = create_async_engine(
             make_url(dsn).set(drivername='postgresql+asyncpg'),
-            connect_args={'server_settings': {'search_path': self.schema, 'lock_timeout': '3000', 'statement_timeout': '5000'}},
+            connect_args={
+                'server_settings': {
+                    'search_path': self.schema,
+                    'lock_timeout': '3000', 'statement_timeout': '5000',
+                },
+            },
         )
         self.addAsyncCleanup(self.engine.dispose)
         self.addAsyncCleanup(self.drop_schema)
         async with self.engine.begin() as connection:
             await connection.execute(CreateSchema(self.schema))
-            await connection.run_sync(lambda db: Base.metadata.create_all(db, tables=[
-                Group.__table__, Site.__table__, StreamConfig.__table__,
-            ]))
-            await connection.execute(insert(Group), [
-                {'id': 1, 'name': 'first', 'uniform_number': '00000001', 'max_allowed_streams': 1},
-                {'id': 2, 'name': 'second', 'uniform_number': '00000002', 'max_allowed_streams': 1},
-            ])
+            await connection.run_sync(
+                lambda db: Base.metadata.create_all(
+                    db, tables=[
+                        Group.__table__, Site.__table__, StreamConfig.__table__,
+                    ],
+                ),
+            )
+            await connection.execute(
+                insert(Group), [
+                    {'id': 1, 'name': 'first', 'uniform_number': '00000001', 'max_allowed_streams': 1},
+                    {'id': 2, 'name': 'second', 'uniform_number': '00000002', 'max_allowed_streams': 1},
+                ],
+            )
             await connection.execute(insert(Site), [{'id': 100, 'name': 'shared'}, {'id': 200, 'name': 'other'}])
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
 
@@ -83,8 +105,10 @@ class StreamWriteTests(unittest.IsolatedAsyncioTestCase):
                 await first_write(first)
                 with self.assertRaises(HTTPException) as failure:
                     await contender
-                self.assertEqual((failure.exception.status_code, failure.exception.detail),
-                                 (403, 'Stream limit reached for group.'))
+                self.assertEqual(
+                    (failure.exception.status_code, failure.exception.detail),
+                    (403, 'Stream limit reached for group.'),
+                )
             finally:
                 await first.rollback()
                 if not contender.done():
@@ -138,15 +162,21 @@ class StreamWriteTests(unittest.IsolatedAsyncioTestCase):
             async with self.sessions() as db:
                 await db.scalar(text('SELECT pg_backend_pid()'))
                 await start.wait()
-                items = [SiteStreamConfigItem(id=identifier, stream_name=name,
-                         video_url=f'rtsp://synthetic/writer-{group}') for identifier, name in order]
+                items = [
+                    SiteStreamConfigItem(
+                        id=identifier, stream_name=name,
+                        video_url=f'rtsp://synthetic/writer-{group}',
+                    ) for identifier, name in order
+                ]
                 await services.upsert_site_stream_configs(
                     100, batch(*items, f'new-{group}'), db, group_id=group, visible_group_id=None,
                 )
-        await asyncio.wait_for(asyncio.gather(
-            write(1, [(two, 'existing-two'), (one, 'existing-one')]),
-            write(2, [(one, 'existing-one'), (two, 'existing-two')]),
-        ), 3)
+        await asyncio.wait_for(
+            asyncio.gather(
+                write(1, [(two, 'existing-two'), (one, 'existing-one')]),
+                write(2, [(one, 'existing-one'), (two, 'existing-two')]),
+            ), 3,
+        )
         async with self.sessions() as db:
             self.assertEqual(await services.get_group_stream_limit(1, db), (2, 4))
             self.assertEqual(await services.get_group_stream_limit(2, db), (2, 4))
@@ -157,10 +187,12 @@ class StreamWriteTests(unittest.IsolatedAsyncioTestCase):
             await connection.execute(text("ALTER TABLE stream_configs ADD CONSTRAINT reject_synthetic_stream CHECK (stream_name <> 'rejected-by-database')"))
         async with self.sessions() as db:
             with self.assertRaises(HTTPException) as failure:
-                await services.upsert_site_stream_configs(100, batch(
-                    SiteStreamConfigItem(id=one, stream_name='existing-one', video_url='rtsp://changed'),
-                    'first-new', 'rejected-by-database',
-                ), db, group_id=1, visible_group_id=1)
+                await services.upsert_site_stream_configs(
+                    100, batch(
+                        SiteStreamConfigItem(id=one, stream_name='existing-one', video_url='rtsp://changed'),
+                        'first-new', 'rejected-by-database',
+                    ), db, group_id=1, visible_group_id=1,
+                )
             self.assertEqual(failure.exception.status_code, 409)
             self.assertFalse(db.in_transaction())
         async with self.sessions() as db:
@@ -183,10 +215,15 @@ class StreamWriteTests(unittest.IsolatedAsyncioTestCase):
         _, two = await self.seed_existing()
         async with self.sessions() as db:
             with self.assertRaises(HTTPException) as failure:
-                await services.upsert_site_stream_configs(100, batch(
-                    SiteStreamConfigItem(id=two, stream_name='existing-two', video_url='rtsp://changed'),
-                ), db, group_id=1, visible_group_id=1)
-            self.assertEqual((failure.exception.status_code, failure.exception.detail), (404, 'Stream configuration not found.'))
+                await services.upsert_site_stream_configs(
+                    100, batch(
+                        SiteStreamConfigItem(id=two, stream_name='existing-two', video_url='rtsp://changed'),
+                    ), db, group_id=1, visible_group_id=1,
+                )
+            self.assertEqual(
+                (failure.exception.status_code, failure.exception.detail),
+                (404, 'Stream configuration not found.'),
+            )
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(StreamConfig.video_url).where(StreamConfig.id == two)), 'rtsp://synthetic/stream')
 

@@ -1,10 +1,12 @@
 """Application-bound job service shared by requests and inherited background tasks."""
 from __future__ import annotations
 
+from collections.abc import Awaitable
+from collections.abc import Callable
 from contextlib import contextmanager
 from contextvars import ContextVar
-from collections.abc import Awaitable, Callable
-from typing import Any, Protocol
+from typing import Any
+from typing import Protocol
 
 
 class JobService(Protocol):

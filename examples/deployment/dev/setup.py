@@ -1,22 +1,29 @@
 """Prepare and start isolated local dev services; never read production databases."""
 from __future__ import annotations
+
 import json
 import os
-from pathlib import Path
 import secrets
 import shlex
 import subprocess
+import sys
 import time
 import tomllib
 import urllib.request
+from pathlib import Path
 
 import yaml
-import sys
+
+from examples.shared.runtime.modules import ModuleReference
+
+_examples_deployment_dev_files = ModuleReference('examples.deployment.dev.files')
+_examples_deployment_dev_identity = ModuleReference('examples.deployment.dev.identity')
+_shared_config = ModuleReference('examples.shared.config')
 if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from examples.shared.config import config_path, read_services
-from examples.deployment.dev.files import save
-from examples.deployment.dev.identity import provision
+config_path, read_services = _shared_config.attributes('config_path', 'read_services')
+save = _examples_deployment_dev_files.attribute('save')
+provision = _examples_deployment_dev_identity.attribute('provision')
 
 ROOT = Path(__file__).resolve().parents[3]
 HERE = Path(__file__).resolve().parent
@@ -64,9 +71,11 @@ def litellm_config():
         raise ValueError('Invalid LiteLLM development configuration YAML.') from None
     if not isinstance(config, dict) or not isinstance(config.get('model_list'), list):
         raise ValueError('Invalid LiteLLM catalog.')
-    if any(not isinstance(item, dict) or not isinstance(item.get('model_name'), str)
-           or not item['model_name'] or not isinstance(item.get('litellm_params'), dict)
-           for item in config['model_list']):
+    if any(
+        not isinstance(item, dict) or not isinstance(item.get('model_name'), str)
+        or not item['model_name'] or not isinstance(item.get('litellm_params'), dict)
+        for item in config['model_list']
+    ):
         raise ValueError('Invalid LiteLLM catalog model.')
     if not isinstance(policies, dict):
         raise ValueError('Invalid LiteLLM development policies.')
@@ -104,8 +113,10 @@ def run(args, **kwargs):
 
 
 def dev_compose(*arguments):
-    return ['/usr/bin/docker', 'compose', '--env-file', '/dev/null',
-            '-f', str(ROOT / 'docker-compose.yml'), '-p', 'ai-gateway-dev', '--profile', 'dev-db', *arguments]
+    return [
+        '/usr/bin/docker', 'compose', '--env-file', '/dev/null',
+        '-f', str(ROOT / 'docker-compose.yml'), '-p', 'ai-gateway-dev', '--profile', 'dev-db', *arguments,
+    ]
 
 
 def wait(url, headers=None):
@@ -119,9 +130,11 @@ def wait(url, headers=None):
 
 
 def api(path, key, value):
-    req = urllib.request.Request('http://127.0.0.1:14002' + path,
-                                 data=json.dumps(value).encode(),
-                                 headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
+    req = urllib.request.Request(
+        'http://127.0.0.1:14002' + path,
+        data=json.dumps(value).encode(),
+        headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'},
+    )
     with urllib.request.urlopen(req, timeout=30) as response:
         return json.load(response)
 
@@ -138,31 +151,48 @@ def main():
     # Sync only the LiteLLM group into its dedicated environment. The root
     # lock owns every version; application and worker dependencies stay out.
     interpreter = os.getenv('LITELLM_BOOTSTRAP_PYTHON', '3.12')
-    run(['uv', 'sync', '--project', ROOT, '--frozen', '--only-group', 'litellm',
-         '--python', interpreter],
-        env={**os.environ, 'UV_PROJECT_ENVIRONMENT': str(LLMPY.parents[1]), 'PYTHONNOUSERSITE': '1'})
-    schema_source = Path(subprocess.check_output([str(LLMPY), '-c',
-        PRISMA_INITIALIZATION], text=True, cwd=ROOT).strip())
-    schema = schema_source.read_text().replace('provider = "prisma-client-py"',
-        'provider = "' + str(LLMPY.parent / 'prisma-client-py') + '"')
+    run(
+        [
+            'uv', 'sync', '--project', ROOT, '--frozen', '--only-group', 'litellm',
+            '--python', interpreter,
+        ],
+        env={**os.environ, 'UV_PROJECT_ENVIRONMENT': str(LLMPY.parents[1]), 'PYTHONNOUSERSITE': '1'},
+    )
+    schema_source = Path(
+        subprocess.check_output(
+            [
+                str(LLMPY), '-c',
+                PRISMA_INITIALIZATION,
+            ], text=True, cwd=ROOT,
+        ).strip(),
+    )
+    schema = schema_source.read_text().replace(
+        'provider = "prisma-client-py"',
+        'provider = "' + str(LLMPY.parent / 'prisma-client-py') + '"',
+    )
     save(CONFIG / 'schema.prisma', schema)
-    run([LLMPY, '-m', 'prisma', 'generate', '--schema', CONFIG / 'schema.prisma'],
-        cwd=CONFIG, env={**os.environ, 'PATH': str(LLMPY.parent) + ':/usr/bin:/bin', 'PYTHONNOUSERSITE': '1'})
+    run(
+        [LLMPY, '-m', 'prisma', 'generate', '--schema', CONFIG / 'schema.prisma'],
+        cwd=CONFIG, env={**os.environ, 'PATH': str(LLMPY.parent) + ':/usr/bin:/bin', 'PYTHONNOUSERSITE': '1'},
+    )
     private = CONFIG / 'credentials.json'
     if private.exists():
         credentials = json.loads(private.read_text())
         if credentials.get('environment') != 'ai-gateway-dev-v1':
             raise RuntimeError('Unknown existing configuration.')
     else:
-        credentials = {'environment': 'ai-gateway-dev-v1', **{
-            name: secrets.token_hex(32) for name in ('postgres', 'webui_db', 'litellm_db', 'webui_secret', 'salt')},
-            'master': 'sk-dev-' + secrets.token_hex(32)}
+        credentials = {
+            'environment': 'ai-gateway-dev-v1', **{
+                name: secrets.token_hex(32) for name in ('postgres', 'webui_db', 'litellm_db', 'webui_secret', 'salt')
+            },
+            'master': 'sk-dev-' + secrets.token_hex(32),
+        }
         save(private, credentials)
     print('Preparing dedicated dev identity, databases and data directories.', flush=True)
     client_secret, operator = provision()
     save(CONFIG / 'operator.json', operator)
     save(CONFIG / 'postgres.env', 'POSTGRES_USER=dev_bootstrap\nPOSTGRES_PASSWORD=' + credentials['postgres'] + '\n')
-    dsn = lambda name, password: f'postgresql://{name}:{password}@127.0.0.1:15432/{name}'
+    def dsn(name, password): return f'postgresql://{name}:{password}@127.0.0.1:15432/{name}'
     llm.update({
         'LITELLM_MASTER_KEY': credentials['master'], 'LITELLM_SALT_KEY': credentials['salt'],
         'LITELLM_DATABASE_URL': dsn('litellm_dev', credentials['litellm_db']),
@@ -176,8 +206,10 @@ def main():
     save(CONFIG / 'litellm.json', llm)
     save(CONFIG / 'litellm.yaml', yaml.safe_dump(config, allow_unicode=True))
     source = sources['webui']
-    allowed = ('ENABLE_WEB_SEARCH', 'SEARXNG_QUERY_URL', 'SEARXNG_LANGUAGE', 'WEB_SEARCH_ENGINE',
-               'WEB_SEARCH_RESULT_COUNT', 'OAUTH_PROVIDER_NAME', 'OAUTH_SCOPES', 'OAUTH_USERNAME_CLAIM')
+    allowed = (
+        'ENABLE_WEB_SEARCH', 'SEARXNG_QUERY_URL', 'SEARXNG_LANGUAGE', 'WEB_SEARCH_ENGINE',
+        'WEB_SEARCH_RESULT_COUNT', 'OAUTH_PROVIDER_NAME', 'OAUTH_SCOPES', 'OAUTH_USERNAME_CLAIM',
+    )
     web = {k: str(source[k]) for k in allowed if source.get(k) is not None}
     web.update({
         'DATA_DIR': str(DATA / 'webui'), 'DATABASE_URL': dsn('openwebui_dev', credentials['webui_db']),
@@ -208,8 +240,10 @@ def main():
         'WHISPER_MODEL_AUTO_UPDATE': 'false', 'ENABLE_FORWARD_USER_INFO_HEADERS': 'true',
     })
     company = json.loads((ROOT / 'company_agent/configs/config.production.json').read_text())
-    company.update({'state_dir': str(DATA / 'company_agent'), 'max_concurrent_jobs': 1,
-                    'max_pending_jobs': 20, 'max_pending_per_user': 5})
+    company.update({
+        'state_dir': str(DATA / 'company_agent'), 'max_concurrent_jobs': 1,
+        'max_pending_jobs': 20, 'max_pending_per_user': 5,
+    })
     save(CONFIG / 'company.json', company)
     # Existing generated virtual keys survive restarts and redeploys.
     web.update(credentials.get('webui_keys', {}))
@@ -221,6 +255,7 @@ def main():
                 web[key] = previous_web[key]
     save(CONFIG / 'webui.json', web)
     units = Path.home() / '.config/systemd/user'
+
     def unit(name, description, start, after='', extra='', stop='', requires=True):
         body = f'[Unit]\nDescription={description}\nAfter=network-online.target {after}\n'
         if after and requires:
@@ -232,13 +267,19 @@ def main():
             body += f'ExecStop={stop}\n'
         body += extra + '\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n'
         save(units / (name + '.service'), body)
-    unit('ai-gateway-dev-db', 'AI DEV dedicated PostgreSQL', shlex.join(dev_compose('up', '-d', '--wait', 'postgres')),
-         extra='Type=oneshot\nRemainAfterExit=yes\nTimeoutStartSec=180\n', stop=shlex.join(dev_compose('stop', 'postgres')))
+    unit(
+        'ai-gateway-dev-db', 'AI DEV dedicated PostgreSQL', shlex.join(dev_compose('up', '-d', '--wait', 'postgres')),
+        extra='Type=oneshot\nRemainAfterExit=yes\nTimeoutStartSec=180\n', stop=shlex.join(dev_compose('stop', 'postgres')),
+    )
     unit('ai-gateway-dev-litellm', 'AI DEV LiteLLM', f'{LLMPY} {HERE}/run.py litellm', 'ai-gateway-dev-db.service')
-    unit('ai-gateway-dev-webui', 'AI DEV Open WebUI', f'{WEBPY} {HERE}/run.py webui',
-         'ai-gateway-dev-db.service ai-gateway-dev-litellm.service')
-    unit('ai-gateway-dev-relay', 'AI DEV B-only private relay', f'/usr/bin/python3 {HERE}/run.py relay',
-         'ai-gateway-dev-webui.service', requires=False)
+    unit(
+        'ai-gateway-dev-webui', 'AI DEV Open WebUI', f'{WEBPY} {HERE}/run.py webui',
+        'ai-gateway-dev-db.service ai-gateway-dev-litellm.service',
+    )
+    unit(
+        'ai-gateway-dev-relay', 'AI DEV B-only private relay', f'/usr/bin/python3 {HERE}/run.py relay',
+        'ai-gateway-dev-webui.service', requires=False,
+    )
     run(['systemctl', '--user', 'daemon-reload'])
     run(['systemctl', '--user', 'enable', '--now', 'ai-gateway-dev-db.service'])
     for name, password in (('openwebui_dev', credentials['webui_db']), ('litellm_dev', credentials['litellm_db'])):
@@ -248,20 +289,31 @@ SELECT 'CREATE DATABASE {name} OWNER {name}' WHERE NOT EXISTS (SELECT FROM pg_da
 REVOKE CONNECT ON DATABASE {name} FROM PUBLIC;
 """
         env = {**os.environ, 'DEV_CONFIG_DIR': str(CONFIG)}
-        run(dev_compose('exec', '-T', 'postgres',
-             'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'dev_bootstrap', '-d', 'postgres'),
-            input=sql, text=True, env=env, stdout=subprocess.DEVNULL)
-    initialized = subprocess.check_output(dev_compose('exec', '-T', 'postgres', 'psql', '-At', '-U', 'dev_bootstrap', '-d', 'litellm_dev', '-c',
-        "SELECT EXISTS(SELECT FROM information_schema.tables WHERE table_name='_prisma_migrations')"),
-        env={**os.environ, 'DEV_CONFIG_DIR': str(CONFIG)}, text=True).strip()
+        run(
+            dev_compose(
+                'exec', '-T', 'postgres',
+                'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'dev_bootstrap', '-d', 'postgres',
+            ),
+            input=sql, text=True, env=env, stdout=subprocess.DEVNULL,
+        )
+    initialized = subprocess.check_output(
+        dev_compose(
+            'exec', '-T', 'postgres', 'psql', '-At', '-U', 'dev_bootstrap', '-d', 'litellm_dev', '-c',
+            "SELECT EXISTS(SELECT FROM information_schema.tables WHERE table_name='_prisma_migrations')",
+        ),
+        env={**os.environ, 'DEV_CONFIG_DIR': str(CONFIG)}, text=True,
+    ).strip()
     if initialized != 't':
         run(['systemctl', '--user', 'enable', '--now', 'ai-gateway-dev-litellm.service'])
         wait('http://127.0.0.1:14002/health/liveliness')
         run(['systemctl', '--user', 'stop', 'ai-gateway-dev-litellm.service'])
     # The packaged migration set predates the issuer-scoped unique key. Build
     # that constraint explicitly; PostgreSQL validates it without data deletion.
-    run(dev_compose('exec', '-T', 'postgres',
-         'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'dev_bootstrap', '-d', 'litellm_dev'),
+    run(
+        dev_compose(
+            'exec', '-T', 'postgres',
+            'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'dev_bootstrap', '-d', 'litellm_dev',
+        ),
         input='''ALTER TABLE IF EXISTS "LiteLLM_JWTKeyMapping" ADD COLUMN IF NOT EXISTS jwt_issuer TEXT NOT NULL DEFAULT '';
 DO $$ BEGIN
 IF to_regclass('"LiteLLM_JWTKeyMapping"') IS NOT NULL THEN
@@ -269,10 +321,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS "LiteLLM_JWTKeyMapping_jwt_issuer_jwt_claim_na
 ON "LiteLLM_JWTKeyMapping" (jwt_issuer, jwt_claim_name, jwt_claim_value);
 END IF;
 END $$;
-''', text=True, env={**os.environ, 'DEV_CONFIG_DIR': str(CONFIG)}, stdout=subprocess.DEVNULL)
-    run([LLMPY, '-m', 'prisma', 'db', 'push', '--skip-generate', '--schema', CONFIG / 'schema.prisma'],
-        cwd=CONFIG, env={**os.environ, 'DATABASE_URL': llm['DATABASE_URL'],
-            'PATH': str(LLMPY.parent) + ':/usr/bin:/bin', 'PYTHONNOUSERSITE': '1'})
+''', text=True, env={**os.environ, 'DEV_CONFIG_DIR': str(CONFIG)}, stdout=subprocess.DEVNULL,
+    )
+    run(
+        [LLMPY, '-m', 'prisma', 'db', 'push', '--skip-generate', '--schema', CONFIG / 'schema.prisma'],
+        cwd=CONFIG, env={
+            **os.environ, 'DATABASE_URL': llm['DATABASE_URL'],
+            'PATH': str(LLMPY.parent) + ':/usr/bin:/bin', 'PYTHONNOUSERSITE': '1',
+        },
+    )
     run(['systemctl', '--user', 'enable', 'ai-gateway-dev-litellm.service'])
     run(['systemctl', '--user', 'restart', 'ai-gateway-dev-litellm.service'])
     wait('http://127.0.0.1:14002/health/liveliness')
@@ -280,20 +337,34 @@ END $$;
         # Budget may already exist after an interrupted first setup.
         current = api('/budget/info', credentials['master'], {'budgets': ['openwebui-dev-daily-usd-1']})
         if not current:
-            api('/budget/new', credentials['master'], {'budget_id': 'openwebui-dev-daily-usd-1',
-                'max_budget': 1, 'budget_duration': '1d', 'max_parallel_requests': 2})
+            api(
+                '/budget/new', credentials['master'], {
+                    'budget_id': 'openwebui-dev-daily-usd-1',
+                    'max_budget': 1, 'budget_duration': '1d', 'max_parallel_requests': 2,
+                },
+            )
         keys = {}
-        for label, variable in (('chat', 'OPENAI_API_KEYS'), ('documents', 'OFFICIAL_DOCUMENT_LITELLM_API_KEY'),
-                                 ('usage', 'LITELLM_USAGE_READER_KEY')):
-            request = {'key_alias': 'dev-' + label, 'max_parallel_requests': 2,
-                       'metadata': {'environment': 'dev'}}
+        for label, variable in (
+            ('chat', 'OPENAI_API_KEYS'), ('documents', 'OFFICIAL_DOCUMENT_LITELLM_API_KEY'),
+            ('usage', 'LITELLM_USAGE_READER_KEY'),
+        ):
+            request = {
+                'key_alias': 'dev-' + label, 'max_parallel_requests': 2,
+                'metadata': {'environment': 'dev'},
+            }
             if label == 'usage':
-                api('/user/new', credentials['master'], {'user_id': 'ai-gateway-dev-usage',
-                    'user_role': 'proxy_admin_viewer', 'auto_create_key': False})
+                api(
+                    '/user/new', credentials['master'], {
+                        'user_id': 'ai-gateway-dev-usage',
+                        'user_role': 'proxy_admin_viewer', 'auto_create_key': False,
+                    },
+                )
                 request.update({'user_id': 'ai-gateway-dev-usage', 'allowed_routes': ['/spend/logs/v2']})
             else:
-                request.update({'key_type': 'llm_api', 'max_budget': 1, 'budget_duration': '1d',
-                                'end_user_budget_id': 'openwebui-dev-daily-usd-1'})
+                request.update({
+                    'key_type': 'llm_api', 'max_budget': 1, 'budget_duration': '1d',
+                    'end_user_budget_id': 'openwebui-dev-daily-usd-1',
+                })
             keys[variable] = api('/key/generate', credentials['master'], request)['key']
         credentials['webui_keys'] = keys
         save(private, credentials)

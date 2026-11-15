@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib
 import json
 import os
@@ -16,7 +17,7 @@ from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi import Request
 
-from examples.shared.runtime.jobs import application_jobs
+from company_agent.api import service as service_module
 from company_agent.api.pipe import current_turn
 from company_agent.api.pipe import run_pipe
 from company_agent.api.service import Service
@@ -24,10 +25,17 @@ from company_agent.api.service import ServiceConfiguration
 from company_agent.api.service import WorkQueue
 from company_agent.config import Root
 from company_agent.config import Settings
+from company_agent.ops.deploy_webui import ENTRIES
+from company_agent.ops.deploy_webui import updated_banners
 from company_agent.runtime.models import gateway_for_verified_user
+from company_agent.services.files.nas import NASClient
 from company_agent.tests.test_agent import Fixture
 from company_agent.tests.test_user_billing import response
 from company_agent.tests.test_user_billing import verified
+from examples.shared.runtime.jobs import application_jobs
+from examples.shared.runtime.modules import ModuleReference
+
+_fixture_test_nas = ModuleReference('company_agent.tests.test_nas')
 
 
 class QueueTests(unittest.IsolatedAsyncioTestCase, Fixture):
@@ -220,8 +228,9 @@ class QueueTests(unittest.IsolatedAsyncioTestCase, Fixture):
             agent.return_value.run = AsyncMock(return_value={'job_id': engine_job, 'status': 'done'})
             await svc.execute(self.queue.claim())
         with self.store.db() as db:
-            revision = db.execute("SELECT status FROM audit WHERE job=%s AND action='configuration'", (key,)).fetchone()[0]
-        import hashlib
+            revision = db.execute(
+                "SELECT status FROM audit WHERE job=%s AND action='configuration'", (key,),
+            ).fetchone()[0]
         self.assertEqual(revision, hashlib.sha256(self.config.model_dump_json().encode()).hexdigest())
         factory.assert_called_once_with(verified(), self.config.model_name)
 
@@ -316,7 +325,10 @@ class QueueTests(unittest.IsolatedAsyncioTestCase, Fixture):
         failure = RuntimeError('upstream failure')
         key = self.submit()
         model = types.SimpleNamespace(subject='oidc-alice')
-        svc = Service(self.queue, AsyncMock(return_value=verified()), lambda _, model_name=None: model, lambda row: self.config)
+        svc = Service(
+            self.queue, AsyncMock(return_value=verified()), lambda _,
+            model_name=None: model, lambda row: self.config,
+        )
         with patch('company_agent.api.service.DocumentAgent') as Agent, patch('company_agent.api.service.close_model', new=AsyncMock()) as close:
             Agent.return_value.run = AsyncMock(side_effect=failure)
             with self.assertRaises(RuntimeError) as caught:
@@ -329,7 +341,6 @@ class QueueTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertNotIn('upstream failure', str(result))
 
     async def test_rate_limit_is_owned_by_one_job_and_next_jobs_still_run(self):
-        from company_agent.api import service as service_module
 
         requests = []
         clients = []
@@ -689,7 +700,6 @@ class RouterTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertNotIn(' checked', html)
 
     async def test_connection_banners_preserve_unrelated_notices(self):
-        from company_agent.ops.deploy_webui import updated_banners, ENTRIES
         other = {'id': 'company-announcement', 'content': 'keep custom announcement'}
         before = [other, {'id': 'ai-gateway-eip-workspace', 'content': 'old'}]
         after = updated_banners(before)
@@ -699,9 +709,7 @@ class RouterTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertEqual(len(updated_banners(after)), 4)
 
     async def test_nas_connections_work_after_worker_failure_without_hiding_job_error(self):
-        from company_agent.api import service as service_module
-        from company_agent.services.files.nas import NASClient
-        from company_agent.tests.test_nas import FakeDSM
+        FakeDSM = _fixture_test_nas.attribute('FakeDSM')
 
         dsm = FakeDSM()
 
@@ -753,8 +761,7 @@ class RouterTests(unittest.IsolatedAsyncioTestCase, Fixture):
             self.assertIs(current.task.exception(), failure)
 
     async def test_nas_binding_auth_csrf_consent_and_owner_isolation(self):
-        from company_agent.services.files.nas import NASClient
-        from company_agent.tests.test_nas import FakeDSM
+        FakeDSM = _fixture_test_nas.attribute('FakeDSM')
         dsm = FakeDSM()
 
         def factory(*a):
@@ -780,11 +787,10 @@ class RouterTests(unittest.IsolatedAsyncioTestCase, Fixture):
             self.assertEqual((await self.client.post('/agents/nas/unlink', json={}, headers=headers)).status_code, 200)
             self.assertFalse((await self.client.get('/agents/nas', headers=headers)).json()['bound'])
 
-
     async def test_multiple_nas_api_lists_updates_tests_and_removes_only_owned_binding(self):
-        from company_agent.services.files.nas import NASClient
-        from company_agent.tests.test_nas import FakeDSM
+        FakeDSM = _fixture_test_nas.attribute('FakeDSM')
         dsm = FakeDSM()
+
         def factory(*a):
             return NASClient(*a, transport=httpx.MockTransport(dsm.handler))
         headers = {'x-test-user': 'alice', 'Origin': 'https://testserver', 'X-Company-Action': '1'}

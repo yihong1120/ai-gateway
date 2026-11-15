@@ -4,9 +4,13 @@ The backend is the resource's authentication/authorization authority. Native
 tokens terminate there and are never used to authenticate to NAS/EIP or another
 OAuth resource. A workload key alone grants no user/resource access.
 """
+from __future__ import annotations
+
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
+from pydantic import ConfigDict
+from pydantic import Field
 
 PROTOCOL = 1
 ASSERTION_HEADER = 'x-company-mcp-assertion'

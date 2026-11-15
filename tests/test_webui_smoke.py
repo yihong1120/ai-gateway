@@ -1,17 +1,20 @@
 """WebUI owns its live check; offline adapters exercise identity and streaming."""
 from __future__ import annotations
 
+import json
+import os
+import sys
+import tempfile
+import unittest
 from contextlib import redirect_stdout
 from datetime import timedelta
 from io import StringIO
-import json
-import os
 from pathlib import Path
-import sys
-import tempfile
-from types import ModuleType, SimpleNamespace
-import unittest
-from unittest.mock import AsyncMock, Mock, patch
+from types import ModuleType
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from unittest.mock import Mock
+from unittest.mock import patch
 
 import httpx
 

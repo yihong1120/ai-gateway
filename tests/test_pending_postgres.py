@@ -1,11 +1,15 @@
 """Cross-worker continuation safety against a real isolated PostgreSQL schema."""
+from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from threading import Barrier
 
-from examples.official_document_workflow.application.pending import PendingClarificationScope
+from examples.official_document_workflow.application.pending import (
+    PendingClarificationScope,
+)
 from examples.official_document_workflow.domain.documents import PendingCalendarReminder
 from examples.official_document_workflow.domain.workflow import JobPlan
 from examples.official_document_workflow.infrastructure.storage.automation_store import (
@@ -53,7 +57,7 @@ class DurableClarificationTests(EIPPostgresTestCase, unittest.TestCase):
             raw = bytes(
                 db.execute('SELECT payload FROM pending_clarifications').fetchone()[
                     'payload'
-                ]
+                ],
             )
         self.assertNotIn(b'private subject', raw)
 
@@ -86,10 +90,10 @@ class DurableClarificationTests(EIPPostgresTestCase, unittest.TestCase):
                 self.scope,
                 attachment_fingerprint='source-revision',
                 expected_generation=old.generation,
-            )
+            ),
         )
         self.assertFalse(
-            self.repo.discard(self.scope, expected_generation=old.generation)
+            self.repo.discard(self.scope, expected_generation=old.generation),
         )
         self.assertFalse(self.repo.restore(claimed))
         self.assertFalse(self.repo.advance(claimed, self.payload))
@@ -101,7 +105,7 @@ class DurableClarificationTests(EIPPostgresTestCase, unittest.TestCase):
     def test_expiration_wrong_fingerprint_and_atomic_finalization(self):
         self.put()
         self.assertIsNone(
-            self.repo.claim(self.scope, attachment_fingerprint='changed-source')
+            self.repo.claim(self.scope, attachment_fingerprint='changed-source'),
         )
         claimed = self.repo.claim(self.scope, attachment_fingerprint='source-revision')
         self.assertTrue(self.repo.finalize(claimed))
@@ -111,7 +115,7 @@ class DurableClarificationTests(EIPPostgresTestCase, unittest.TestCase):
             db.execute('UPDATE pending_clarifications SET expires_at=0')
         self.assertIsNone(self.repo.get(self.scope))
         self.assertIsNone(
-            self.repo.claim(self.scope, attachment_fingerprint='source-revision')
+            self.repo.claim(self.scope, attachment_fingerprint='source-revision'),
         )
 
     def test_old_claim_cannot_restore_after_a_later_claim_or_replace_the_key(self):
@@ -140,13 +144,13 @@ class DurableClarificationTests(EIPPostgresTestCase, unittest.TestCase):
         restarted = PostgresClarifications(AutomationStore(self.key))
         self.assertIsNotNone(restarted.get(self.scope))
         self.assertIsNotNone(
-            restarted.get(PendingClarificationScope('owner', 'chat-15'))
+            restarted.get(PendingClarificationScope('owner', 'chat-15')),
         )
 
     def test_concurrent_first_start_shares_one_complete_key(self):
-        from threading import Barrier
         empty_key = self.key.parent / 'concurrent-key'
         start = Barrier(6)
+
         def open_store(_):
             start.wait(timeout=5)
             return AutomationStore(empty_key)

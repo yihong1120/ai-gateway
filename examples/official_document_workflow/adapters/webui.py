@@ -1,7 +1,13 @@
 """Frozen installed Pipe ABI and override copying, isolated from the processor."""
+from __future__ import annotations
 
 from inspect import ismethod
 from types import MappingProxyType
+
+from .webui_operations import COMPATIBILITY_OPERATIONS
+from examples.official_document_workflow.services.clarifications import (
+    CalendarClarifications,
+)
 from examples.official_document_workflow.services.exports import DocumentExports
 from examples.official_document_workflow.services.ocr import DocumentOCR
 from examples.official_document_workflow.services.parsing import DocumentParsing
@@ -9,7 +15,6 @@ from examples.official_document_workflow.services.rendering import DocumentRende
 from examples.official_document_workflow.services.sources import DocumentSources
 from examples.official_document_workflow.services.transport import ModelTransport
 from examples.official_document_workflow.services.values import DocumentValues
-from examples.official_document_workflow.services.clarifications import CalendarClarifications
 
 
 class ServiceOperation:
@@ -40,14 +45,13 @@ class ServiceOperation:
 def expose_operations(processor, services):
     """Install only the reviewed legacy ABI; service additions stay internal."""
     operations = {}
-    from .webui_operations import COMPATIBILITY_OPERATIONS
 
     for component, names in COMPATIBILITY_OPERATIONS.items():
         service = services[component]
         for name in names:
             if not callable(getattr(service, name, None)):
                 raise TypeError(
-                    f'Missing document compatibility operation: {component}.{name}'
+                    f'Missing document compatibility operation: {component}.{name}',
                 )
             if hasattr(processor, name):
                 raise TypeError(f'Duplicate document operation: {name}')
@@ -91,7 +95,7 @@ class LegacyPipeOperations:
                 setattr(clone, name, value)
         for name in components:
             clone.__dict__.update(
-                copy_overrides(getattr(self, name), getattr(clone, name))
+                copy_overrides(getattr(self, name), getattr(clone, name)),
             )
         return clone
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import importlib.util
 import json
@@ -7,11 +9,13 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from examples.ai_usage.adapters.webui import install_webui_usage
-from examples.deployment.dev import run, verify
+from examples.deployment.dev import run
+from examples.deployment.dev import verify
 from examples.deployment.dev.app import dev_role
 
 
@@ -97,11 +101,13 @@ def test_usage_missing_identity_does_not_query_backend():
     query.assert_not_called()
 
 
-@pytest.mark.parametrize('url', [
-    'postgresql://litellm_dev:x@100.93.178.78:5432/litellm_dev',
-    'postgresql://litellm:x@127.0.0.1:15432/litellm',
-    'postgresql://litellm_dev:x@127.0.0.1:5432/litellm_dev',
-])
+@pytest.mark.parametrize(
+    'url', [
+        'postgresql://litellm_dev:x@100.93.178.78:5432/litellm_dev',
+        'postgresql://litellm:x@127.0.0.1:15432/litellm',
+        'postgresql://litellm_dev:x@127.0.0.1:5432/litellm_dev',
+    ],
+)
 def test_runner_rejects_production_or_shared_database(tmp_path, monkeypatch, url):
     monkeypatch.setattr(run, 'CONFIG', tmp_path)
     (tmp_path / 'litellm.json').write_text(json.dumps({'LITELLM_DATABASE_URL': url}))
@@ -109,11 +115,13 @@ def test_runner_rejects_production_or_shared_database(tmp_path, monkeypatch, url
         run.load_environment('litellm')
 
 
-@pytest.mark.parametrize('prisma', [
-    None,
-    'postgresql://production:synthetic@127.0.0.1:5432/litellm',
-    'postgresql://litellm_dev:different@127.0.0.1:15432/litellm_dev',
-])
+@pytest.mark.parametrize(
+    'prisma', [
+        None,
+        'postgresql://production:synthetic@127.0.0.1:5432/litellm',
+        'postgresql://litellm_dev:different@127.0.0.1:15432/litellm_dev',
+    ],
+)
 def test_runner_rejects_mismatched_prisma_before_environment_changes(tmp_path, monkeypatch, prisma):
     values = {
         'LITELLM_DATABASE_URL': 'postgresql://litellm_dev:synthetic@127.0.0.1:15432/litellm_dev',

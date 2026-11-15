@@ -6,20 +6,20 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stderr
+from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-from examples.shared.config import (
-    ConfigurationError,
-    execution_environment,
-    load_service,
-    read_service,
-    read_services,
-)
-
-from examples.deployment.cli import main, migrate
+import examples.shared.config as _config_imports
+from examples.deployment.cli import main
+from examples.deployment.cli import migrate
+from examples.shared.config import ConfigurationError
+from examples.shared.config import execution_environment
+from examples.shared.config import load_service
+from examples.shared.config import read_service
+from examples.shared.config import read_services
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -48,12 +48,14 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_shared_reader_import_has_no_deployment_dependencies_or_environment_changes(self):
         result = subprocess.run(
-            [sys.executable, '-c',
-             'import os,sys; before=dict(os.environ); import examples.shared.config; '
-             'assert dict(os.environ)==before; '
-             'assert not any(n.startswith("examples.deployment") for n in sys.modules); '
-             'assert "argparse" not in sys.modules; '
-             'assert "dotenv" not in sys.modules'],
+            [
+                sys.executable, '-c',
+                'import os,sys; before=dict(os.environ); import examples.shared.config; '
+                'assert dict(os.environ)==before; '
+                'assert not any(n.startswith("examples.deployment") for n in sys.modules); '
+                'assert "argparse" not in sys.modules; '
+                'assert "dotenv" not in sys.modules',
+            ],
             capture_output=True, text=True, timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -132,9 +134,8 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(env['AI_GATEWAY_CONFIG'], str(another))
 
     def test_multi_service_read_uses_one_snapshot_without_exporting_other_sections(self):
-        from examples.shared.config import read_configuration
 
-        original = read_configuration
+        original = _config_imports.read_configuration
 
         def replaced_after_read(path):
             document = original(path)
@@ -150,9 +151,8 @@ class ConfigurationTests(unittest.TestCase):
         self.assertNotIn('LITELLM_MASTER_KEY', sections['webui'])
 
     def test_exec_does_not_mix_configuration_versions_between_validation_and_projection(self):
-        from examples.shared.config import read_configuration
 
-        original = read_configuration
+        original = _config_imports.read_configuration
 
         def replaced_after_read(path):
             document = original(path)
@@ -172,11 +172,13 @@ class ConfigurationTests(unittest.TestCase):
         source.write_text(original)
         destination = self.root / 'import.toml'
         migrate(self.root, destination)
-        self.assertEqual(read_service('litellm', destination), {
-            'LOCAL_MODEL_API_BASE': 'http://model.test/v1',
-            'LOCAL_MODEL_API_KEY': 'model-key',
-            'LOCAL_MODEL_DEV_API_BASE': 'http://dev.test/v1',
-        })
+        self.assertEqual(
+            read_service('litellm', destination), {
+                'LOCAL_MODEL_API_BASE': 'http://model.test/v1',
+                'LOCAL_MODEL_API_KEY': 'model-key',
+                'LOCAL_MODEL_DEV_API_BASE': 'http://dev.test/v1',
+            },
+        )
         self.assertEqual(source.read_text(), original)
 
     def test_conflicting_legacy_model_connections_leave_no_import(self):
@@ -188,13 +190,11 @@ class ConfigurationTests(unittest.TestCase):
             migrate(self.root, destination)
         self.assertFalse(destination.exists())
 
-
     def test_explicit_exec_loads_file_even_when_implicit_loading_is_disabled(self):
         os.environ['PYTHON_DOTENV_DISABLED'] = '1'
         self.assertEqual(execution_environment('webui')['DATABASE_URL'], 'web-db')
         with self.assertRaises(ConfigurationError):
             execution_environment('typo')
-
 
     def test_failed_import_removes_only_its_new_file_and_preserves_sources(self):
         original = self.root / '.env.openwebui'

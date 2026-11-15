@@ -2,14 +2,31 @@
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import json
-from pathlib import Path
+import os
 import tempfile
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from unittest.mock import AsyncMock
+from unittest.mock import MagicMock
+from unittest.mock import patch
 
-from company_agent.evals.runner import Budget, evaluation, own_sandbox, own_model, release_model, track_report, write_json
+import psycopg
+from psycopg import sql
+
+import company_agent.evals.sandbox as _sandbox_imports
+import company_agent.evals.smoke as _smoke_imports
+import company_agent.evals.smoke_vision as _smoke_vision_imports
+import examples.official_document_workflow.runtime as _runtime_imports
+from company_agent.api.service import ServiceConfiguration
+from company_agent.evals.runner import Budget
+from company_agent.evals.runner import evaluation
+from company_agent.evals.runner import own_model
+from company_agent.evals.runner import own_sandbox
+from company_agent.evals.runner import release_model
+from company_agent.evals.runner import track_report
+from company_agent.evals.runner import write_json
 from examples.shared.runtime.database import _current_scope
 
 
@@ -20,6 +37,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
             report = {'runs': []}
             captured = []
             model, fixture = object(), MagicMock()
+
             @evaluation
             async def run():
                 captured.append(_current_scope.get())
@@ -40,8 +58,6 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(captured[0]._closed)
 
     async def test_vision_cli_does_not_require_an_app_job_service_and_closes_on_setup_failure(self):
-        from company_agent.evals.smoke_vision import main
-        from company_agent.api.service import ServiceConfiguration
 
         model = object()
         user = {'id': 'owner'}
@@ -51,12 +67,11 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
                 patch('company_agent.evals.runner.close_model', new=AsyncMock()) as close, \
                 patch.dict('os.environ', {'COMPANY_AGENT_DATABASE_URL': 'test-dsn'}):
             with self.assertRaisesRegex(RuntimeError, 'sandbox setup failed'):
-                await main('owner')
+                await _smoke_vision_imports.main('owner')
         construct.assert_called_once_with(user)
         close.assert_awaited_once_with(model)
 
     async def test_live_smoke_closes_model_when_agent_construction_fails(self):
-        from company_agent.evals.smoke import run
 
         model = object()
         with tempfile.TemporaryDirectory() as temporary, \
@@ -64,11 +79,12 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
                 patch('company_agent.evals.smoke.DocumentAgent', side_effect=ValueError('invalid setup')), \
                 patch('company_agent.evals.runner.close_model', new=AsyncMock()) as close:
             with self.assertRaisesRegex(ValueError, 'invalid setup'):
-                await run(Path(temporary) / 'output', live=True)
+                await _smoke_imports.run(Path(temporary) / 'output', live=True)
         close.assert_awaited_once_with(model)
 
     async def test_explicit_release_does_not_close_model_twice(self):
         model = object()
+
         @evaluation
         async def run():
             own_model(model)
@@ -80,6 +96,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
     async def test_cancelled_run_closes_all_models_even_if_one_cleanup_fails(self):
         entered = asyncio.Event()
         models = [object(), object()]
+
         @evaluation
         async def run():
             for model in models:
@@ -96,6 +113,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_report_failure_does_not_skip_fixture_cleanup(self):
         fixture, model = MagicMock(), object()
+
         @evaluation
         async def run(path):
             own_sandbox('test-dsn')
@@ -113,6 +131,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
 class SharedBudgetTests(unittest.TestCase):
     def test_threaded_reservations_cannot_exceed_the_batch_budget(self):
         budget = Budget(1)
+
         def reserve(_):
             try:
                 budget.reserve(.1)
@@ -136,11 +155,6 @@ class SharedBudgetTests(unittest.TestCase):
 
 class SandboxTests(unittest.TestCase):
     def test_nested_sandboxes_restore_bindings_and_drop_only_their_schemas_on_failure(self):
-        import os
-        import psycopg
-        from psycopg import sql
-        from company_agent.evals.sandbox import isolated_schemas
-        from examples.official_document_workflow.runtime import current_resources
 
         dsn = os.getenv('COMPANY_AGENT_TEST_DATABASE_URL')
         if not dsn:
@@ -148,23 +162,27 @@ class SandboxTests(unittest.TestCase):
         original = {key: os.environ.get(key) for key in ('COMPANY_AGENT_DATABASE_URL', 'COMPANY_AGENT_DB_SCHEMA')}
         names = []
         with self.assertRaisesRegex(RuntimeError, 'synthetic failure'):
-            with isolated_schemas(dsn):
-                outer = current_resources()
+            with _sandbox_imports.isolated_schemas(dsn):
+                outer = _runtime_imports.current_resources()
                 outer_schema = os.environ['COMPANY_AGENT_DB_SCHEMA']
                 names.extend([outer_schema, outer.settings.schema])
                 with psycopg.connect(dsn) as db:
                     for name in names:
                         db.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(name)))
-                with isolated_schemas(dsn):
-                    inner = current_resources()
+                with _sandbox_imports.isolated_schemas(dsn):
+                    inner = _runtime_imports.current_resources()
                     names.extend([os.environ['COMPANY_AGENT_DB_SCHEMA'], inner.settings.schema])
                     with psycopg.connect(dsn) as db:
                         for name in names[2:]:
                             db.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(name)))
                     self.assertIsNot(inner, outer)
-                self.assertIs(current_resources(), outer)
+                self.assertIs(_runtime_imports.current_resources(), outer)
                 self.assertEqual(os.environ['COMPANY_AGENT_DB_SCHEMA'], outer_schema)
                 raise RuntimeError('synthetic failure')
         self.assertEqual({key: os.environ.get(key) for key in original}, original)
         with psycopg.connect(dsn) as db:
-            self.assertEqual(db.execute('SELECT count(*) FROM pg_namespace WHERE nspname=ANY(%s)', (names,)).fetchone()[0], 0)
+            self.assertEqual(
+                db.execute(
+                    'SELECT count(*) FROM pg_namespace WHERE nspname=ANY(%s)', (names,),
+                ).fetchone()[0], 0,
+            )

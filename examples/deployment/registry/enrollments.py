@@ -11,7 +11,12 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from examples.identity.models import DEPLOYMENT_STATUS_ACTIVE, TENANT_STATUS_ACTIVE, Deployment, DeploymentEnrollmentCode, Tenant, utc_now
+from examples.identity.models import Deployment
+from examples.identity.models import DEPLOYMENT_STATUS_ACTIVE
+from examples.identity.models import DeploymentEnrollmentCode
+from examples.identity.models import Tenant
+from examples.identity.models import TENANT_STATUS_ACTIVE
+from examples.identity.models import utc_now
 from examples.identity.redis_counters import FIXED_WINDOW_SCRIPT
 
 
@@ -33,15 +38,15 @@ class ProvisionedEnrollmentCode:
 
 def enrollment_code_verifier_hash(raw_code: str, pepper: str) -> str:
     """Create the persisted HMAC verifier for an enrollment code."""
-    secret: bytes = pepper.encode("utf-8")
+    secret: bytes = pepper.encode('utf-8')
     if len(secret) < 32:
         raise ValueError(
-            "deployment enrollment code pepper is not configured",
+            'deployment enrollment code pepper is not configured',
         )
     # A keyed verifier remains unusable without the server-only pepper.
     return hmac.new(
         secret,
-        raw_code.encode("utf-8"),
+        raw_code.encode('utf-8'),
         hashlib.sha256,
     ).hexdigest()
 
@@ -56,15 +61,15 @@ async def enforce_enrollment_exchange_rate_limit(
     """Rate-limit redemption attempts by source IP and code verifier."""
     # Bounds prevent a configuration error from disabling protection entirely.
     if not 1 <= maximum <= 1000 or not 1 <= window_seconds <= 24 * 60 * 60:
-        raise ValueError("deployment enrollment rate limit is not configured")
-    client_identifier: str = client_ip or "unknown-client"
+        raise ValueError('deployment enrollment rate limit is not configured')
+    client_identifier: str = client_ip or 'unknown-client'
     # Redis keys retain only hashes, never raw client addresses or verifiers.
     keys: list[str] = [
-        "construction-hazard-detection:deployment-enrollment:"
+        'construction-hazard-detection:deployment-enrollment:'
         f"{scope}:{hashlib.sha256(identifier.encode('utf-8')).hexdigest()}"
         for scope, identifier in (
-            ("ip", client_identifier),
-            ("code", verifier_hash),
+            ('ip', client_identifier),
+            ('code', verifier_hash),
         )
     ]
     # Queue both independent atomic scripts to share one Redis round trip.
@@ -95,14 +100,14 @@ async def redeem_enrollment_code(
             .with_for_update(),
         )
         if enrollment is None:
-            return EnrollmentExchangeResult(status="invalid")
+            return EnrollmentExchangeResult(status='invalid')
         # Expired, revoked, and previously redeemed codes can never be reused.
         if (
             enrollment.redeemed_at is not None
             or enrollment.revoked_at is not None
             or enrollment.expires_at <= redeemed_at
         ):
-            return EnrollmentExchangeResult(status="terminal")
+            return EnrollmentExchangeResult(status='terminal')
 
         # Lock the active deployment and tenant before consuming the code.
         deployment_id = await db.scalar(
@@ -116,11 +121,11 @@ async def redeem_enrollment_code(
             .with_for_update(of=(Deployment, Tenant)),
         )
         if deployment_id is None:
-            return EnrollmentExchangeResult(status="terminal")
+            return EnrollmentExchangeResult(status='terminal')
 
         enrollment.redeemed_at = redeemed_at
         return EnrollmentExchangeResult(
-            status="redeemed",
+            status='redeemed',
             deployment_id=deployment_id,
         )
 
@@ -135,10 +140,10 @@ async def provision_enrollment_code(
 ) -> ProvisionedEnrollmentCode:
     """Create one enrollment verifier and retain its raw code for one response."""
     if not 1 <= len(created_by) <= 160:
-        raise ValueError("created_by is required")
+        raise ValueError('created_by is required')
     created_at = utc_now()
     if expires_at <= created_at:
-        raise ValueError("expires_at must be in the future")
+        raise ValueError('expires_at must be in the future')
     # The raw code is never persisted; only its HMAC verifier reaches the row.
     value: str = secrets.token_urlsafe(32)
     verifier_hash = enrollment_code_verifier_hash(value, pepper)
@@ -156,7 +161,7 @@ async def provision_enrollment_code(
         .where(*criteria),
     )
     if deployment is None:
-        raise ValueError("deployment must be active before creating a code")
+        raise ValueError('deployment must be active before creating a code')
     enrollment = DeploymentEnrollmentCode(
         deployment_id=deployment_id,
         public_id=UUID(bytes=secrets.token_bytes(16), version=4),

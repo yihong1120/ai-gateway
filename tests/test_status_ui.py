@@ -1,4 +1,6 @@
 """The public UI hooks preserve existing custom assets and other static routes."""
+from __future__ import annotations
+
 import sys
 import types
 from unittest.mock import patch

@@ -1,8 +1,11 @@
 """Associations ORM contracts."""
-
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, ForeignKey, Table, text
+from sqlalchemy import Column
+from sqlalchemy import DateTime
+from sqlalchemy import ForeignKey
+from sqlalchemy import Table
+from sqlalchemy import text
 
 from examples.identity.database import Base
 

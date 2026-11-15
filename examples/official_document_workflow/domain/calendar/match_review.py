@@ -8,9 +8,13 @@ import unicodedata
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import BaseModel
+from pydantic import ConfigDict
+from pydantic import Field
+from pydantic import StrictInt
 
-from examples.official_document_workflow.domain.calendar import deduplication, identity
+from examples.official_document_workflow.domain.calendar import deduplication
+from examples.official_document_workflow.domain.calendar import identity
 from examples.official_document_workflow.domain.calendar.identity import text
 from examples.official_document_workflow.domain.calendar.presentation import (
     split_ai_title,
@@ -125,7 +129,12 @@ def transport_schema():
         'properties': {'kind': {'type': 'string', 'enum': ['work', 'project', 'instance']}, 'incoming_quote': quote, 'existing_quote': quote},
         'required': ['kind', 'incoming_quote', 'existing_quote'],
     }
-    difference = {**proof, 'properties': {**proof['properties'], 'kind': {'type': 'string', 'enum': ['work', 'instance', 'party', 'location']}}}
+    difference = {
+        **proof, 'properties': {
+            **proof['properties'],
+            'kind': {'type': 'string', 'enum': ['work', 'instance', 'party', 'location']},
+        },
+    }
     relation = {
         'type': 'object', 'additionalProperties': False,
         'properties': {
@@ -137,7 +146,12 @@ def transport_schema():
         },
         'required': ['candidate_index', 'relation', 'reason', 'incoming_quote', 'existing_quote', 'identity_evidence', 'difference_evidence'],
     }
-    check = {'type': 'object', 'additionalProperties': False, 'properties': {'index': {'type': 'integer'}, 'candidates': {'type': 'array', 'items': relation}}, 'required': ['index', 'candidates']}
+    check = {
+        'type': 'object', 'additionalProperties': False, 'properties': {
+            'index': {'type': 'integer'},
+            'candidates': {'type': 'array', 'items': relation},
+        }, 'required': ['index', 'candidates'],
+    }
     return {'type': 'object', 'additionalProperties': False, 'properties': {'checks': {'type': 'array', 'items': check}}, 'required': ['checks']}
 
 
@@ -252,8 +266,15 @@ def revision_compatible(incoming, existing, evidence):
         executor_compatible(incoming, existing)
         and all(event['custom_fields'][0] for event in (incoming, existing))
         and incoming['custom_fields'][:2] != existing['custom_fields'][:2]
-        and (abs((date.fromisoformat(incoming['start_date'])-date.fromisoformat(existing['start_date'])).days) <= REVISION_DAYS
-             or deduplication.revision_documented(incoming, existing))
+        and (
+            abs(
+                (
+                    date.fromisoformat(incoming['start_date']) -
+                    date.fromisoformat(existing['start_date'])
+                ).days,
+            ) <= REVISION_DAYS
+            or deduplication.revision_documented(incoming, existing)
+        )
         and identity_proven(incoming, existing, evidence)
     )
 
@@ -280,15 +301,19 @@ def apply_check(context, check):
                 event['all_day'] == '0' and 'AI 暫排' in event['description'] and '待確認欄位：開始時間、結束時間' in event['description']
                 for event in (incoming, existing)
             )
-            relation = 'revision' if estimated_milestone and revision_compatible(incoming, existing, result.identity_evidence) else 'uncertain'
+            relation = 'revision' if estimated_milestone and revision_compatible(
+                incoming, existing, result.identity_evidence,
+            ) else 'uncertain'
         if relation == 'revision' and not revision_compatible(incoming, existing, result.identity_evidence):
             relation = 'uncertain'
         if relation == 'revision' and duplicate_compatible(incoming, existing, result.identity_evidence):
             relation = 'duplicate'
         if relation == 'distinct':
             different = deduplication.difference_proven(incoming, existing, result.difference_evidence)
-            if (same_source_work(incoming, existing)
-                    or deduplication.possible_same_duty(incoming, existing) or not different):
+            if (
+                same_source_work(incoming, existing)
+                or deduplication.possible_same_duty(incoming, existing) or not different
+            ):
                 relation = 'uncertain'
         if relation == 'duplicate':
             duplicates.append(candidate['event_id'])
@@ -301,8 +326,11 @@ def apply_check(context, check):
         return {'status': 'conflict', 'reason': 'AI 已核對，但日期、對象或內容仍有矛盾／證據不足；未新增或覆寫行程。', 'ai_review': audit}
     if duplicates or revisions:
         options = set(duplicates or revisions)
-        chosen = min((c for c in candidates if c['event_id'] in options), key=lambda c: (
-            split_ai_title(c['event']['title']) is not None, not c.get('shared', False), c['event_id']))
+        chosen = min(
+            (c for c in candidates if c['event_id'] in options), key=lambda c: (
+                split_ai_title(c['event']['title']) is not None, not c.get('shared', False), c['event_id'],
+            ),
+        )
         revision = not duplicates
         return {
             'status': 'existing', 'receipt': {'event_id': chosen['event_id'], 'detail_verified': True},
@@ -321,44 +349,58 @@ async def resolve_matches(events, matches, reviewer):
         context = match['review_context']
         manual = [c for c in context['candidates'] if deduplication.manual_preferred(context['incoming'], c['event'])]
         if manual:
-            if any(not deduplication.compatible_facts(a['event'], b['event'])
-                   or not deduplication.clock_compatible(a['event'], b['event'])
-                   for n, a in enumerate(manual) for b in manual[n+1:]):
+            if any(
+                not deduplication.compatible_facts(a['event'], b['event'])
+                or not deduplication.clock_compatible(a['event'], b['event'])
+                for n, a in enumerate(manual) for b in manual[n+1:]
+            ):
                 match.clear()
                 match.update({'status': 'conflict', 'reason': '多筆手動行程的時間或責任人不同，無法唯一確認；請人工核對，未新增。'})
                 continue
             chosen = min(manual, key=lambda c: (not c.get('shared', False), c['event_id']))
             match.clear()
-            match.update({'status': 'existing', 'receipt': {'event_id': chosen['event_id'], 'detail_verified': True},
-                          'reason': '原文、具體工作與日期一致，優先沿用既有手動行程；未新增或修改時間與附件。',
-                          'ai_review': {'method': 'source_evidence', 'decision': 'existing', 'manual_preferred': True,
-                                        'manual_time_override': not deduplication.clock_compatible(context['incoming'], chosen['event']),
-                                        'shared_event': bool(chosen.get('shared')), 'existing_matches': len(manual),
-                                        'schedule_revision': False, 'reasons': ['相同完整原文與工作，保留既有人工排程。']}})
+            match.update({
+                'status': 'existing', 'receipt': {'event_id': chosen['event_id'], 'detail_verified': True},
+                'reason': '原文、具體工作與日期一致，優先沿用既有手動行程；未新增或修改時間與附件。',
+                'ai_review': {
+                    'method': 'source_evidence', 'decision': 'existing', 'manual_preferred': True,
+                    'manual_time_override': not deduplication.clock_compatible(context['incoming'], chosen['event']),
+                    'shared_event': bool(chosen.get('shared')), 'existing_matches': len(manual),
+                    'schedule_revision': False, 'reasons': ['相同完整原文與工作，保留既有人工排程。'],
+                },
+            })
             continue
         if reviewer is None:
             continue
         digest = fingerprint(context)
         cached = event.get('_ai_match_cache')
         if cached and cached['fingerprint'] == digest:
-            match.clear(); match.update(cached['result'])
+            match.clear()
+            match.update(cached['result'])
         else:
             pending.append((event, match, context, digest))
     if not pending:
         return
     if any(len(context['candidates']) > 32 for _, _, context, _ in pending) or sum(len(context['candidates']) for _, _, context, _ in pending) > 128:
         raise ValueError('AI 行程核對候選過多，未新增；請分批處理。')
-    request = {'events': [
-        {'index': index, 'incoming': context['incoming'], 'candidates': [
-            {'candidate_index': n, 'event': candidate['event']}
-            for n, candidate in enumerate(context['candidates'])
-        ]} for index, (_, _, context, _) in enumerate(pending)
-    ]}
+    request = {
+        'events': [
+            {
+                'index': index, 'incoming': context['incoming'], 'candidates': [
+                    {'candidate_index': n, 'event': candidate['event']}
+                    for n, candidate in enumerate(context['candidates'])
+                ],
+            } for index, (_, _, context, _) in enumerate(pending)
+        ],
+    }
     chunks, chunk = [], []
     for item in request['events']:
         combined = chunk+[item]
         advanced = any(
-            any(c['event'][key] != e['incoming'][key] for key in ('custom_fields', 'start_date', 'end_date', 'all_day', 'start_time', 'end_time'))
+            any(
+                c['event'][key] != e['incoming'][key]
+                for key in ('custom_fields', 'start_date', 'end_date', 'all_day', 'start_time', 'end_time')
+            )
             for e in combined for c in e['candidates']
         )
         if len(combined) > (2 if advanced else 4) or sum(len(e['candidates']) for e in combined) > 32 or len(json.dumps({'events': combined}, ensure_ascii=False)) > 120_000:
@@ -384,4 +426,5 @@ async def resolve_matches(events, matches, reviewer):
     results = [apply_check(context, checks[n]) for n, (_, _, context, _) in enumerate(pending)]
     for (event, match, _, digest), result in zip(pending, results, strict=True):
         event['_ai_match_cache'] = {'fingerprint': digest, 'result': result}
-        match.clear(); match.update(result)
+        match.clear()
+        match.update(result)

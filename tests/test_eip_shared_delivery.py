@@ -4,28 +4,41 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-from pathlib import Path
 import tempfile
-from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, Mock, patch
 import uuid
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from unittest.mock import Mock
+from unittest.mock import patch
 
+from . import test_official_upload_groups as uploads
 from .eip_postgres import EIPPostgresTestCase
-from .test_official_document_processor_pipe import PIPE_MODULE as M, SOURCE
 from .test_eip_group_processing import payload
+from .test_official_document_processor_pipe import PIPE_MODULE as M
+from .test_official_document_processor_pipe import SOURCE
 from examples.official_document_workflow.application import integration
-from examples.official_document_workflow.domain.calendar.relative_dates import ReceiptContext
+from examples.official_document_workflow.domain.calendar.relative_dates import (
+    ReceiptContext,
+)
 from examples.official_document_workflow.domain.workflow import JobPlan
-from examples.shared.runtime.concurrency import ModelNotStarted, model_request
+from examples.shared.runtime.concurrency import model_request
+from examples.shared.runtime.concurrency import ModelNotStarted
+from examples.shared.runtime.modules import ModuleReference
+
+_docx = ModuleReference('docx')
+_pymupdf = ModuleReference('pymupdf')
 
 
 def content_payload():
     value = payload(('S1',))
     value['document'].pop('calendar_subject', None)
     value['document']['evidence'].pop('calendar_subject', None)
-    for name in ('title', 'action', 'project_name', 'location', 'responsible_party', 'relevance',
-                 'start_date', 'start_time', 'end_date', 'end_time', 'anchor_date'):
+    for name in (
+        'title', 'action', 'project_name', 'location', 'responsible_party', 'relevance',
+        'start_date', 'start_time', 'end_date', 'end_time', 'anchor_date',
+    ):
         value['events'][0]['evidence_spans'].setdefault(name, [])
     return value
 
@@ -33,8 +46,8 @@ def content_payload():
 class SharedEIPDeliveryTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         super().setUp()
-        import pymupdf
-        from docx import Document
+        pymupdf = _pymupdf.load()
+        Document = _docx.attribute('Document')
 
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -85,8 +98,10 @@ class SharedEIPDeliveryTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCa
     async def run_for(self, index):
         owner = ('alice', 'bob')[index]
         source = self.sources[index]
-        return await integration.process(owner, [source.id], owner + ' private instruction', None,
-                                         groups=[[source.id]], date_context=self.contexts[index])
+        return await integration.process(
+            owner, [source.id], owner + ' private instruction', None,
+            groups=[[source.id]], date_context=self.contexts[index],
+        )
 
     async def test_concurrent_owners_share_analysis_and_word_but_keep_personal_work_and_downloads_private(self):
         with patch.object(integration, 'configured_pipe', AsyncMock(side_effect=self.pipes)):
@@ -98,8 +113,10 @@ class SharedEIPDeliveryTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCa
             self.assertEqual(result['status'], 'done', result['errors'])
             self.assertTrue(result['calendar_ready'])
             pipe = self.pipes[index]
-            self.assertEqual(pipe.plan_current_user_request.await_args.args[0]['messages'][0]['content'],
-                             ('alice', 'bob')[index] + ' private instruction')
+            self.assertEqual(
+                pipe.plan_current_user_request.await_args.args[0]['messages'][0]['content'],
+                ('alice', 'bob')[index] + ' private instruction',
+            )
             calls = [call.kwargs for call in pipe.store_output.await_args_list]
             self.assertEqual({call['user_id'] for call in calls}, {('alice', 'bob')[index]})
             self.assertEqual({call['source_file_id'] for call in calls}, {self.sources[index].id})
@@ -129,7 +146,6 @@ class SharedEIPDeliveryTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCa
         self.pipes[1].store_output.assert_not_awaited()
 
     async def test_pdf_upload_then_eip_reuses_native_word_with_private_outputs(self):
-        from . import test_official_upload_groups as uploads
         fixture = uploads.UploadGroupTests()
         fixture.addCleanup = self.addCleanup
         fixture.setUp()
@@ -160,8 +176,10 @@ class SharedEIPDeliveryTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCa
         bob.analyze_text.assert_awaited_once()
         self.assertTrue(all(call.kwargs['user_id'] == 'bob' for call in bob.store_output.await_args_list))
         uploaded_word = next(item['payload'] for item in fixture.saved if item['kind'] == 'document_docx')
-        eip_word = next(call.kwargs['payload'] for call in bob.store_output.await_args_list
-                        if call.kwargs['kind'] == 'document_docx')
+        eip_word = next(
+            call.kwargs['payload'] for call in bob.store_output.await_args_list
+            if call.kwargs['kind'] == 'document_docx'
+        )
         self.assertEqual(uploaded_word, eip_word)
 
     async def test_rejected_owner_before_provider_does_not_permanently_block_shared_content(self):
@@ -179,8 +197,10 @@ class SharedEIPDeliveryTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCa
                 return {'verified': True}
 
         async def identity(owner):
-            return {'id': owner, 'role': 'pending' if owner == 'alice' else 'user',
-                    'oauth': {'oidc': {'sub': owner + '-subject'}}}
+            return {
+                'id': owner, 'role': 'pending' if owner == 'alice' else 'user',
+                'oauth': {'oidc': {'sub': owner + '-subject'}},
+            }
 
         with patch('examples.identity.adapters.webui.verified_user', AsyncMock(side_effect=identity)):
             with self.assertRaises(ModelNotStarted):

@@ -6,18 +6,19 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
-from unittest.mock import Mock
 import shutil
 import subprocess
 import tempfile
-
+from pathlib import Path
+from unittest.mock import Mock
+from unittest.mock import patch
 
 from company_agent.tests.test_nas import NASFixture
-from tests.company_mcp import test_resources as fixture
 from company_mcp.adapters.company import Resources
-from tests.company_mcp.runtime import close_client, start
 from examples.official_document_workflow.runtime import current_resources
+from tests.company_mcp import test_resources as fixture
+from tests.company_mcp.runtime import close_client
+from tests.company_mcp.runtime import start
 from tests.test_company_ai_codex_cli import test_installed_codex_tool_loop as tool_loop
 
 
@@ -34,8 +35,6 @@ class NativeMCPTests(NASFixture):
         resources = Resources(fixture.configuration(), self.store, Mock(return_value=workflow))
         service = start(self, resources, authentication.verifier)
         port = service.port
-
-        from unittest.mock import patch
         with tempfile.TemporaryDirectory(prefix='company-mcp-native-') as temporary:
             finalizers = []
 
@@ -52,8 +51,10 @@ class NativeMCPTests(NASFixture):
             ]) + '\n'
             with patch.dict(os.environ, {'COMPANY_MCP_SYNTHETIC_TOKEN': authentication.token()}):
                 try:
-                    tool_loop(Path(temporary), 'gemini-3.8-flash', Request(),
-                              mcp_config=config, mcp_tool_suffix='connections_list')
+                    tool_loop(
+                        Path(temporary), 'gemini-3.8-flash', Request(),
+                        mcp_config=config, mcp_tool_suffix='connections_list',
+                    )
                 finally:
                     for finalizer in reversed(finalizers):
                         finalizer()

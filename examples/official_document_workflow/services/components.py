@@ -1,5 +1,4 @@
 """Explicit per-request dependencies for document services."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -38,4 +37,3 @@ class ConfiguredService:
     @property
     def content_cache(self):
         return self.request.content_cache if self.valves.document_analysis_cache_enabled else None
-

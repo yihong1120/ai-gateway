@@ -1,22 +1,22 @@
 """Exact totals and bounded response construction across summary/detail views."""
-
 from __future__ import annotations
 
 import unittest
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime
+from datetime import timedelta
+from datetime import UTC
 from decimal import Decimal
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from examples.ai_usage.config import AiUsageSettings
-from examples.ai_usage.schemas.admin_usage import UsageSelection, UsageUser
+from examples.ai_usage.schemas.admin_usage import UsageSelection
+from examples.ai_usage.schemas.admin_usage import UsageUser
 from examples.ai_usage.services.admin_usage import build_admin_usage_data
 from examples.ai_usage.services.directory import DirectoryUser
-from examples.ai_usage.services.litellm_usage import (
-    DailyLogWindow,
-    UsageFact,
-    build_daily_usage_response,
-)
+from examples.ai_usage.services.litellm_usage import build_daily_usage_response
+from examples.ai_usage.services.litellm_usage import DailyLogWindow
+from examples.ai_usage.services.litellm_usage import UsageFact
 
 
 def dataset(count=1000):
@@ -41,7 +41,7 @@ def dataset(count=1000):
             ),
             'active',
             'subject',
-        )
+        ),
     ]
     rows = [
         {
@@ -97,7 +97,7 @@ class UsageAggregationTests(unittest.TestCase):
     def test_zero_detail_daily_view_keeps_full_totals_and_count(self):
         values = dataset()
         with patch.object(
-            UsageFact, 'record', side_effect=AssertionError('unrequested detail')
+            UsageFact, 'record', side_effect=AssertionError('unrequested detail'),
         ):
             response = build_daily_usage_response(
                 settings=values['settings'],

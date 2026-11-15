@@ -5,11 +5,11 @@ from fastapi import Depends
 from fastapi import Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from examples.identity.accounts.legal import DEFAULT_LEGAL_LOCALE
+from examples.identity.accounts.legal import get_active_legal_documents
 from examples.identity.database import get_db
 from examples.identity.schemas.legal import LegalDocumentOut
 from examples.identity.schemas.legal import LegalDocumentsResponse
-from examples.identity.accounts.legal import DEFAULT_LEGAL_LOCALE
-from examples.identity.accounts.legal import get_active_legal_documents
 
 router = APIRouter(prefix='/legal', tags=['legal'])
 

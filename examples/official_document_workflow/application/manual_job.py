@@ -1,12 +1,12 @@
 """Background work started by authenticated manual API requests."""
 from __future__ import annotations
-from examples.official_document_workflow.services.output_delivery import output_part
 
 import time
 
 from . import integration
 from examples.official_document_workflow.infrastructure.eip.netask import Netask
 from examples.official_document_workflow.infrastructure.eip.sessions import manual_session
+from examples.official_document_workflow.services.output_delivery import output_part
 
 
 class ManualJob:

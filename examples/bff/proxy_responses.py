@@ -1,16 +1,17 @@
 """Pure response rewriting for browser-reachable, BFF-protected capabilities."""
-
 from __future__ import annotations
 
 import json
 import re
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
+from urllib.parse import urlunsplit
 
 import httpx
 from fastapi import Request
 
+from examples.bff.proxy_config import _VIOLATION_MEDIA_ENDPOINTS
+from examples.bff.proxy_config import _VIOLATION_MEDIA_FIELDS
 from examples.identity.deployment_context import DeploymentBinding
-from examples.bff.proxy_config import _VIOLATION_MEDIA_ENDPOINTS, _VIOLATION_MEDIA_FIELDS
 
 
 def _bff_service_path(request: Request, service: str) -> str:

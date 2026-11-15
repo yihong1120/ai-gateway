@@ -1,5 +1,4 @@
 """Optional notification/streaming integration boundary for an existing host."""
-
 from __future__ import annotations
 
 from functools import cached_property

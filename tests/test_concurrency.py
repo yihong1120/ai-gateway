@@ -2,11 +2,19 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 import unittest
 from unittest.mock import patch
 
+import httpx
+from pydantic import BaseModel
+
+import company_agent.runtime.models as _models_imports
 from examples.shared.runtime import concurrency as limits
+from examples.shared.runtime.modules import ModuleReference
+
+_fixture_test_user_billing = ModuleReference('company_agent.tests.test_user_billing')
 
 
 class AdmissionTests(unittest.IsolatedAsyncioTestCase):
@@ -186,10 +194,7 @@ class AdmissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(gate.active)
 
     async def test_company_and_document_models_share_capacity_keep_verified_billing(self):
-        import httpx
-        import json
-        from company_agent.runtime.models import gateway_for_verified_user, close_model
-        from company_agent.tests.test_user_billing import verified
+        verified = _fixture_test_user_billing.attribute('verified')
         started = asyncio.Event()
         release = asyncio.Event()
         requests = []
@@ -205,7 +210,7 @@ class AdmissionTests(unittest.IsolatedAsyncioTestCase):
                     'usage': {'prompt_tokens': 1, 'completion_tokens': 1, 'total_tokens': 2},
                 },
             )
-        model = gateway_for_verified_user(
+        model = _models_imports.gateway_for_verified_user(
             verified(), 'https://gateway.example/v1',
             'key', 'model', httpx.MockTransport(handler),
         )
@@ -230,10 +235,9 @@ class AdmissionTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 release.set()
                 await asyncio.gather(company, other, return_exceptions=True)
-                await close_model(model)
+                await _models_imports.close_model(model)
 
     async def test_cached_pipe_settings_are_frozen_for_each_concurrent_owner(self):
-        from pydantic import BaseModel
         release = asyncio.Event()
         started = asyncio.Event()
 

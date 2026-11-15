@@ -1,4 +1,5 @@
 """Persona installation consumes deployed routes without rewriting snapshots."""
+from __future__ import annotations
 
 import json
 import os
@@ -7,12 +8,15 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from types import ModuleType
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from unittest.mock import patch
 
 import yaml
 
 from examples.deployment.dev import persona
+from examples.deployment.dev import run
 
 
 class DevPersonaTests(unittest.IsolatedAsyncioTestCase):
@@ -47,11 +51,15 @@ class DevPersonaTests(unittest.IsolatedAsyncioTestCase):
         user_module.Users = self.users
         auth_module = ModuleType('open_webui.models.auths')
         auth_module.Auths, auth_module.Auth = self.auths, SimpleNamespace
-        self.enterContext(patch.dict('sys.modules', {
-            'open_webui.models.models': model_module,
-            'open_webui.models.users': user_module,
-            'open_webui.models.auths': auth_module,
-        }))
+        self.enterContext(
+            patch.dict(
+                'sys.modules', {
+                    'open_webui.models.models': model_module,
+                    'open_webui.models.users': user_module,
+                    'open_webui.models.auths': auth_module,
+                },
+            ),
+        )
         self.enterContext(patch('builtins.print'))
 
     async def test_install_preserves_deployed_yaml_and_private_environment(self):
@@ -63,11 +71,12 @@ class DevPersonaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({path.name: path.read_bytes() for path in self.config.iterdir()}, before)
         self.load.assert_called_once_with('webui')
         form, owner = self.models.insert_new_model.call_args.args
-        self.assertEqual((form.id, form.base_model_id, owner),
-                         (self.definition['id'], self.definition['base_model_id'], 7))
+        self.assertEqual(
+            (form.id, form.base_model_id, owner),
+            (self.definition['id'], self.definition['base_model_id'], 7),
+        )
 
     def test_script_entry_point_does_not_patch_deployment_routes(self):
-        from examples.deployment.dev import run
 
         self.snapshot.write_text(yaml.safe_dump({'model_list': [self.route]}))
         before = {path.name: path.read_bytes() for path in self.config.iterdir()}

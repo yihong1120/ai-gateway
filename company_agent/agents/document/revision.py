@@ -5,9 +5,9 @@ from langgraph.types import Command
 
 from company_agent.runtime.tools import injected_tool
 from company_agent.runtime.tools import tool_receipt
+from company_agent.services.files.errors import input_error_feedback
 from company_agent.services.office.revision import revise as revise_artifact
 from company_agent.services.office.schemas import EditArtifact
-from company_agent.services.files.errors import input_error_feedback
 
 
 async def revise(runtime, **kwargs):

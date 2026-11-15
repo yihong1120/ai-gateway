@@ -6,22 +6,23 @@ import hashlib
 import json
 import secrets
 import time
-from contextlib import asynccontextmanager, AsyncExitStack
+from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack
 from contextvars import ContextVar
-
-import psycopg
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Literal
 from typing import TypedDict
 
+import psycopg
+
 from .database import configuration
 from .database import connection
 from .migrations import migrate
-from examples.shared.runtime.workers import LeaseBusy
+from examples.official_document_workflow.infrastructure.eip.netask import Netask
 from examples.shared.runtime.concurrency import configured_limit
 from examples.shared.runtime.concurrency import OwnerSlots
-from examples.official_document_workflow.infrastructure.eip.netask import Netask
+from examples.shared.runtime.workers import LeaseBusy
 
 _calendar_lock = ContextVar('eip_calendar_lock', default=None)
 
@@ -128,10 +129,14 @@ class Journal:
     @asynccontextmanager
     async def scheduler_lock(self):
         """One recovery/dispatcher owner per database schema across applications."""
-        async with await psycopg.AsyncConnection.connect(self.dsn, autocommit=True, connect_timeout=5,
-                options='-c statement_timeout=5000') as db:
-            cursor = await db.execute('SELECT pg_try_advisory_lock(hashtextextended(%s,0))',
-                                      (self.schema + ':workflow_scheduler',))
+        async with await psycopg.AsyncConnection.connect(
+            self.dsn, autocommit=True, connect_timeout=5,
+            options='-c statement_timeout=5000',
+        ) as db:
+            cursor = await db.execute(
+                'SELECT pg_try_advisory_lock(hashtextextended(%s,0))',
+                (self.schema + ':workflow_scheduler',),
+            )
             if not (await cursor.fetchone())[0]:
                 raise LeaseBusy('此資料庫的 EIP 排程器已由其他程序執行。')
             yield db
@@ -149,10 +154,12 @@ class Journal:
             yield
             return
         async with AsyncExitStack() as cleanup:
-            db = await cleanup.enter_async_context(await psycopg.AsyncConnection.connect(
-                self.dsn, autocommit=True, connect_timeout=5,
-                options='-c statement_timeout=90000',
-            ))
+            db = await cleanup.enter_async_context(
+                await psycopg.AsyncConnection.connect(
+                    self.dsn, autocommit=True, connect_timeout=5,
+                    options='-c statement_timeout=90000',
+                ),
+            )
             await db.execute('SELECT pg_advisory_lock(hashtextextended(%s,0))', (self.schema+':visible_calendar_import',))
             token = _calendar_lock.set(key)
             cleanup.callback(_calendar_lock.reset, token)

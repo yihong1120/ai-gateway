@@ -1,29 +1,33 @@
 """Playback keeps app configuration and clients, and scopes only validated streams."""
+from __future__ import annotations
 
 import asyncio
 import json
 import os
-from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, patch
-from urllib.parse import parse_qs, urlsplit
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from unittest.mock import patch
+from urllib.parse import parse_qs
+from urllib.parse import urlsplit
 
 import httpx
-from fastapi import HTTPException, Request
+from fastapi import HTTPException
+from fastapi import Request
 from pydantic import ValidationError
 
+import examples.db_management.routers.playback as _playback_imports
+from examples.db_management.schemas.playback import PlaybackRenewRequest
+from examples.db_management.schemas.playback import PlaybackSessionRequest
+from examples.db_management.schemas.playback import PlaybackWallRequest
+from examples.db_management.services.playback.identity import PlaybackPrincipal
+from examples.db_management.services.playback.rendering import PlaybackResponses
+from examples.db_management.services.playback.service import create_playback_service
+from examples.db_management.services.playback.service import PlaybackService
+from examples.db_management.services.playback.upstream import PlaybackUpstream
 from examples.identity.config import Settings
 from examples.identity.runtime import IdentityResources
 from examples.identity.settings.resources import ResourcesSettings
-from examples.db_management.schemas.playback import (
-    PlaybackSessionRequest,
-    PlaybackWallRequest,
-    PlaybackRenewRequest,
-)
-from examples.db_management.services.playback.identity import PlaybackPrincipal
-from examples.db_management.services.playback.rendering import PlaybackResponses
-from examples.db_management.services.playback.service import PlaybackService, create_playback_service
-from examples.db_management.services.playback.upstream import PlaybackUpstream
 from examples.shared.runtime.http_clients import HttpClientPool
 
 
@@ -34,10 +38,10 @@ class PlaybackResourcesTests(unittest.IsolatedAsyncioTestCase):
                 os.environ,
                 {'PYTHON_DOTENV_DISABLED': '1', 'JWT_SECRET_KEY': 'test-secret'},
                 clear=True,
-            )
+            ),
         )
         self.principal = PlaybackPrincipal(
-            'alice', 7, 'native:user:7', 'native', 'private-token'
+            'alice', 7, 'native:user:7', 'native', 'private-token',
         )
         self.stream = {
             'session_id': 'upstream',
@@ -56,7 +60,7 @@ class PlaybackResourcesTests(unittest.IsolatedAsyncioTestCase):
             delete=AsyncMock(return_value=True),
         )
         self.service = PlaybackService(
-            self.identity, self.upstream, self.media, PlaybackResponses(123)
+            self.identity, self.upstream, self.media, PlaybackResponses(123),
         )
 
     async def test_two_apps_keep_url_timeout_and_client_after_environment_changes(self):
@@ -89,7 +93,7 @@ class PlaybackResourcesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.timeout.read, 3)
         self.assertEqual(second.timeout.read, 7)
         self.assertIs(
-            first, await one_playback.upstream.clients.get('streaming-playback')
+            first, await one_playback.upstream.clients.get('streaming-playback'),
         )
         self.assertIsNot(first, second)
 
@@ -109,22 +113,22 @@ class PlaybackResourcesTests(unittest.IsolatedAsyncioTestCase):
                 'streaming-playback': {
                     'transport': httpx.MockTransport(respond),
                     'timeout': 3,
-                }
-            }
+                },
+            },
         )
         self.addAsyncCleanup(pool.close)
         upstream = PlaybackUpstream(
-            ResourcesSettings(playback_api_url='http://one.test'), pool
+            ResourcesSettings(playback_api_url='http://one.test'), pool,
         )
         self.assertEqual(
             await upstream.post(
-                '/stream-playback', principal=self.principal, payload={}
+                '/stream-playback', principal=self.principal, payload={},
             ),
             ({'ok': True}, 200),
         )
         with self.assertRaises(HTTPException) as caught:
             await upstream.post(
-                '/stream-playback', principal=self.principal, payload={}
+                '/stream-playback', principal=self.principal, payload={},
             )
         self.assertEqual(caught.exception.status_code, 409)
         self.assertEqual(caught.exception.detail, 'conflict')
@@ -134,17 +138,17 @@ class PlaybackResourcesTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_single_scopes_only_validated_camera_and_replaces_stale_tokens(self):
         payload = PlaybackSessionRequest(
-            site='site', camera='requested-camera', profile='clean'
+            site='site', camera='requested-camera', profile='clean',
         )
         body, status = await self.service.create_single(
-            payload, self.principal, 'redis'
+            payload, self.principal, 'redis',
         )
         self.assertEqual(status, 201)
         self.assertEqual(
-            self.media.create.call_args.kwargs['cameras'], ['authorized-camera']
+            self.media.create.call_args.kwargs['cameras'], ['authorized-camera'],
         )
         self.assertEqual(
-            self.media.create.call_args.kwargs['principal'], self.principal
+            self.media.create.call_args.kwargs['principal'], self.principal,
         )
         self.assertEqual(body['expires_in'], 123)
         self.assertEqual(body['camera'], 'authorized-camera')
@@ -158,7 +162,7 @@ class PlaybackResourcesTests(unittest.IsolatedAsyncioTestCase):
         self,
     ):
         payload = PlaybackWallRequest(
-            site='site', cameras=['requested'], profile='clean'
+            site='site', cameras=['requested'], profile='clean',
         )
         stream = {**self.stream, 'rendition': 'preview'}
         self.upstream.post.return_value = ({'items': [stream], 'max_streams': 16}, 200)
@@ -166,7 +170,7 @@ class PlaybackResourcesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body['count'], 1)
         self.assertEqual(body['quality'], 'preview')
         self.assertEqual(
-            self.media.create.call_args.kwargs['cameras'], ['authorized-camera']
+            self.media.create.call_args.kwargs['cameras'], ['authorized-camera'],
         )
         self.media.create.reset_mock()
         self.upstream.post.return_value = ({'items': [{'key': 'unvalidated'}]}, 200)
@@ -179,20 +183,20 @@ class PlaybackResourcesTests(unittest.IsolatedAsyncioTestCase):
         self.identity.resolve.side_effect = HTTPException(status_code=401)
         with self.assertRaises(HTTPException):
             await self.service.playback_session_response(
-                PlaybackSessionRequest(site='site', camera='cam'), None, 'redis', 'db'
+                PlaybackSessionRequest(site='site', camera='cam'), None, 'redis', 'db',
             )
         self.upstream.post.assert_not_awaited()
         self.media.create.assert_not_awaited()
 
     async def test_renew_and_delete_keep_owner_and_noncacheable_response(self):
         response = await self.service.renew_playback_response(
-            PlaybackRenewRequest(id='session'), None, 'redis', 'db'
+            PlaybackRenewRequest(id='session'), None, 'redis', 'db',
         )
         self.media.renew.assert_awaited_once_with('redis', 'session', 'native:user:7')
         self.assertEqual(json.loads(response.body)['expires_in'], 123)
         self.assertEqual(response.headers['cache-control'], 'no-store')
         response = await self.service.delete_playback_response(
-            'session', None, 'redis', 'db'
+            'session', None, 'redis', 'db',
         )
         self.media.delete.assert_awaited_once_with('redis', 'session', 'native:user:7')
         self.assertEqual(response.status_code, 204)
@@ -202,22 +206,21 @@ class PlaybackResourcesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.status_code, 404)
 
     async def test_http_boundary_uses_request_app_instead_of_ambient_resources(self):
-        from examples.db_management.routers.playback import create_playback_session
 
         expected = object()
         playback = SimpleNamespace(
-            playback_session_response=AsyncMock(return_value=expected)
+            playback_session_response=AsyncMock(return_value=expected),
         )
         app = SimpleNamespace(
-            state=SimpleNamespace(playback=playback)
+            state=SimpleNamespace(playback=playback),
         )
         request = Request({'type': 'http', 'app': app})
         payload = PlaybackSessionRequest(site='site', camera='cam')
         self.assertIs(
-            await create_playback_session(payload, request, db='db', redis='redis'), expected
+            await _playback_imports.create_playback_session(payload, request, db='db', redis='redis'), expected,
         )
         playback.playback_session_response.assert_awaited_once_with(
-            payload, request, 'redis', 'db'
+            payload, request, 'redis', 'db',
         )
 
     def test_invalid_url_is_rejected_when_settings_are_built(self):

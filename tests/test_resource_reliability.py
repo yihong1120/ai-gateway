@@ -1,24 +1,23 @@
 """Resource snapshots, retrying workers and independently owned shared pools."""
-
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 import os
 import unittest
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock
+from unittest.mock import Mock
+from unittest.mock import patch
 
-from examples.shared.runtime.database import (
-    PoolRegistry,
-    PoolScope,
-    connection,
-    DatabasePoolMiddleware,
-)
+from examples.db_management import lifespan as lifecycle
+from examples.identity import lifespan as identity_lifecycle
 from examples.identity.config import Settings
 from examples.identity.runtime import IdentityResources
-from examples.identity import lifespan as identity_lifecycle
-from examples.db_management import lifespan as lifecycle
+from examples.shared.runtime.database import connection
+from examples.shared.runtime.database import DatabasePoolMiddleware
+from examples.shared.runtime.database import PoolRegistry
+from examples.shared.runtime.database import PoolScope
 
 
 class SnapshotTests(unittest.IsolatedAsyncioTestCase):
@@ -44,7 +43,7 @@ class SnapshotTests(unittest.IsolatedAsyncioTestCase):
             resources = IdentityResources(settings)
             engine = Mock(dispose=AsyncMock())
             with patch(
-                'examples.identity.database.create_async_engine', return_value=engine
+                'examples.identity.database.create_async_engine', return_value=engine,
             ) as create:
                 resources.database.start()
         self.addAsyncCleanup(resources.database.close)
@@ -55,16 +54,16 @@ class SnapshotTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('a%40b%2Fc@', resources.redis_url)
         self.assertEqual(resources.bff.upstreams['chat'], 'http://original.test')
         self.assertEqual(
-            (await resources.http_clients.get('streaming-playback')).timeout.read, 17
+            (await resources.http_clients.get('streaming-playback')).timeout.read, 17,
         )
         self.assertEqual(
-            (await resources.http_clients.get('bff-upstream')).timeout.read, 19
+            (await resources.http_clients.get('bff-upstream')).timeout.read, 19,
         )
 
     async def test_pool_middleware_allows_lifespan_to_create_its_owner(self):
         app = AsyncMock()
         middleware = DatabasePoolMiddleware(
-            app, SimpleNamespace(state=SimpleNamespace())
+            app, SimpleNamespace(state=SimpleNamespace()),
         )
         receive, send = AsyncMock(), AsyncMock()
         await middleware({'type': 'lifespan'}, receive, send)
@@ -90,7 +89,7 @@ class SnapshotTests(unittest.IsolatedAsyncioTestCase):
             patch.object(lifecycle.asyncio, 'wait_for', side_effect=wait),
         ):
             await lifecycle._run_site_media_cleanup_worker(
-                stop, SimpleNamespace(session=session)
+                stop, SimpleNamespace(session=session),
             )
         self.assertEqual(drain.await_count, 2)
         self.assertEqual(waits, [2, 30])
@@ -125,11 +124,11 @@ class SnapshotTests(unittest.IsolatedAsyncioTestCase):
             patch.object(identity_lifecycle, 'start_jwt_scheduler', return_value=Mock()),
             patch.object(identity_lifecycle.rate_limiter_service, 'preload_script', AsyncMock()),
             patch.object(
-                lifecycle, '_run_site_media_cleanup_worker', side_effect=worker
+                lifecycle, '_run_site_media_cleanup_worker', side_effect=worker,
             ),
         ):
             async with lifecycle.global_lifespan(
-                SimpleNamespace(state=SimpleNamespace(identity=resources))
+                SimpleNamespace(state=SimpleNamespace(identity=resources)),
             ):
                 await asyncio.wait_for(entered.wait(), 2)
                 database.close.assert_not_awaited()
@@ -143,7 +142,7 @@ class PoolOwnershipTests(unittest.TestCase):
         one, two = PoolScope(registry), PoolScope(registry)
         pool = Mock()
         with patch(
-            'examples.shared.runtime.database.ConnectionPool', return_value=pool
+            'examples.shared.runtime.database.ConnectionPool', return_value=pool,
         ) as create:
             one.retain('postgresql://localhost/test')
             two.retain('postgresql://localhost/test')
@@ -195,7 +194,7 @@ class PoolOwnershipTests(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 with connection(
-                    'postgresql://localhost/test', 'tenant', row_factory='new'
+                    'postgresql://localhost/test', 'tenant', row_factory='new',
                 ) as db:
                     self.assertEqual(db.row_factory, 'new')
                     raise ValueError('rollback')

@@ -3,7 +3,6 @@
 The encryption key is a separate 0600 file outside the database directory.
 Changing/loss of the key NEVER silently resets credentials or write history.
 """
-
 from __future__ import annotations
 
 import hashlib
@@ -19,8 +18,13 @@ from cryptography.fernet import Fernet
 from psycopg import sql
 from psycopg.rows import dict_row
 
-from .database import configuration, connection
+import examples.official_document_workflow.domain.calendar.tracking_reminders as _tracking_reminders_imports
+from .database import configuration
+from .database import connection
 from .migrations import migrate
+from examples.shared.runtime.modules import ModuleReference
+
+_workflow_runtime = ModuleReference('examples.official_document_workflow.runtime')
 
 
 class AutomationStore:
@@ -30,7 +34,7 @@ class AutomationStore:
         # All workers initialize/read this shared file under one database lock,
         # so none can observe a partially written key on their first request.
         with psycopg.connect(
-            self.dsn, connect_timeout=5, options='-c lock_timeout=5000'
+            self.dsn, connect_timeout=5, options='-c lock_timeout=5000',
         ) as db:
             db.execute(
                 'SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',
@@ -49,7 +53,7 @@ class AutomationStore:
                     'clarification_output_reviews',
                 ):
                     exists = db.execute(
-                        'SELECT to_regclass(%s)', (f'{self.schema}.{table}',)
+                        'SELECT to_regclass(%s)', (f'{self.schema}.{table}',),
                     ).fetchone()[0]
                     if (
                         exists
@@ -61,7 +65,7 @@ class AutomationStore:
                         ).fetchone()
                     ):
                         raise ValueError(
-                            '自動處理加密金鑰遺失，已停止讀取既有憑證與處理紀錄。'
+                            '自動處理加密金鑰遺失，已停止讀取既有憑證與處理紀錄。',
                         )
                 fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                 with os.fdopen(fd, 'wb') as stream:
@@ -79,7 +83,7 @@ class AutomationStore:
 
     def encode(self, owner, value):
         return self.cipher.encrypt(
-            json.dumps({'owner': owner, 'value': value}, ensure_ascii=False).encode()
+            json.dumps({'owner': owner, 'value': value}, ensure_ascii=False).encode(),
         )
 
     def decode(self, owner, value):
@@ -93,17 +97,17 @@ class AutomationStore:
         generation = secrets.token_urlsafe(24)
         with self.db() as db:
             other = db.execute(
-                'SELECT owner FROM accounts WHERE identity=%s', (identity,)
+                'SELECT owner FROM accounts WHERE identity=%s', (identity,),
             ).fetchone()
             if other and other['owner'] != owner:
                 raise ValueError(
-                    '此 EIP 帳號已綁定另一個 WebUI 使用者的自動處理，請先解除原綁定。'
+                    '此 EIP 帳號已綁定另一個 WebUI 使用者的自動處理，請先解除原綁定。',
                 )
             if (
                 db.execute('SELECT count(*) AS total FROM accounts').fetchone()['total']
                 >= 64
                 and not db.execute(
-                    'SELECT 1 FROM accounts WHERE owner=%s', (owner,)
+                    'SELECT 1 FROM accounts WHERE owner=%s', (owner,),
                 ).fetchone()
             ):
                 raise ValueError('自動處理帳號數已達上限。')
@@ -142,17 +146,14 @@ class AutomationStore:
     def account(self, owner, *, secrets=False):
         with self.db() as db:
             row = db.execute(
-                'SELECT * FROM accounts WHERE owner=%s', (owner,)
+                'SELECT * FROM accounts WHERE owner=%s', (owner,),
             ).fetchone()
         if not row:
             return None
         data = dict(row)
         encrypted = data.pop('secret')
-        from examples.official_document_workflow.domain.calendar.tracking_reminders import (
-            enabled_for,
-        )
 
-        data['tracking_reminders_enabled'] = enabled_for(owner, data['identity'])
+        data['tracking_reminders_enabled'] = _tracking_reminders_imports.enabled_for(owner, data['identity'])
         if secrets and encrypted:
             data.update(self.decode(owner, encrypted))
         return data
@@ -226,7 +227,7 @@ class AutomationStore:
         with self.db() as db:
             for doc in docs:
                 key = hashlib.sha256(
-                    json.dumps([owner, identity, doc['id']]).encode()
+                    json.dumps([owner, identity, doc['id']]).encode(),
                 ).hexdigest()
                 inserted = (
                     db.execute(
@@ -319,7 +320,7 @@ class AutomationStore:
         with self.db() as db:
             db.execute('BEGIN')
             total = db.execute(
-                'SELECT count(*) AS total FROM tasks WHERE owner=%s', (owner,)
+                'SELECT count(*) AS total FROM tasks WHERE owner=%s', (owner,),
             ).fetchone()['total']
             pages = max(1, (total + page_size - 1) // page_size)
             page = min(page, pages)
@@ -363,7 +364,7 @@ class AutomationStore:
         # Do not blindly repeat it or repeat ambiguous external writes.
         with self.db() as db:
             rows = db.execute(
-                "UPDATE tasks SET phase='needs_review',retry_at=0 WHERE phase IN ('downloading','processing','importing','assigning_projects','attaching') OR (retry_at>0 AND phase IN ('discovered','downloaded','converted')) RETURNING id,owner,payload"
+                "UPDATE tasks SET phase='needs_review',retry_at=0 WHERE phase IN ('downloading','processing','importing','assigning_projects','attaching') OR (retry_at>0 AND phase IN ('discovered','downloaded','converted')) RETURNING id,owner,payload",
             ).fetchall()
             for row in rows:
                 payload = self.decode(row['owner'], row['payload'])
@@ -377,11 +378,14 @@ class AutomationStore:
 
 
 def key_file():
-    return Path(os.getenv('EIP_AUTOMATION_KEY_FILE',
-                          str(Path.home() / '.local/state/ai-gateway/secrets/eip-automation.key')))
-
+    return Path(
+        os.getenv(
+            'EIP_AUTOMATION_KEY_FILE',
+            str(Path.home() / '.local/state/ai-gateway/secrets/eip-automation.key'),
+        ),
+    )
 
 
 def store():
-    from examples.official_document_workflow.runtime import current_resources
+    current_resources = _workflow_runtime.attribute('current_resources')
     return current_resources().store

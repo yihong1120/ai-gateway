@@ -1,4 +1,5 @@
 """Anthropic request fields permitted by the company device credential."""
+from __future__ import annotations
 
 FIELDS = frozenset({
     'model', 'messages', 'max_tokens', 'system', 'tools', 'tool_choice',

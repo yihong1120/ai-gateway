@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
-import sys
+from examples.shared.runtime.modules import ModuleReference
+
+_examples_deployment_dev_files = ModuleReference('examples.deployment.dev.files')
 if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from examples.deployment.dev.files import save
+save = _examples_deployment_dev_files.attribute('save')
 
 CONFIG = Path.home() / '.config/ai-gateway-dev'
 
@@ -20,15 +23,17 @@ def configure():
     origin = 'https://dev.changdar-server.mooo.com'
     audience = 'visionnaire-dev-api'
     issuer = 'https://changdar-server.mooo.com/keycloak/realms/visionnaire'
-    if (company.get('APP_PUBLIC_URL') != origin
-            or company.get('OIDC_AUDIENCE') != audience
-            or company.get('OIDC_ISSUER_URL') != issuer
-            or company.get('BFF_SESSION_COOKIE_NAME') != '__Host-vn_dev_session'
-            or access.get('AI_ACCESS_ENVIRONMENT') != 'dev'
-            or access.get('AI_ACCESS_ORIGIN') != 'https://ai-dev.changdar-server.mooo.com'
-            or access.get('AI_ACCESS_ISSUER') != issuer
-            or access.get('AI_ACCESS_LITELLM_URL') != 'http://127.0.0.1:14002'
-            or access.get('AI_ACCESS_OIDC_AUDIENCE', '') not in ('', audience)):
+    if (
+        company.get('APP_PUBLIC_URL') != origin
+        or company.get('OIDC_AUDIENCE') != audience
+        or company.get('OIDC_ISSUER_URL') != issuer
+        or company.get('BFF_SESSION_COOKIE_NAME') != '__Host-vn_dev_session'
+        or access.get('AI_ACCESS_ENVIRONMENT') != 'dev'
+        or access.get('AI_ACCESS_ORIGIN') != 'https://ai-dev.changdar-server.mooo.com'
+        or access.get('AI_ACCESS_ISSUER') != issuer
+        or access.get('AI_ACCESS_LITELLM_URL') != 'http://127.0.0.1:14002'
+        or access.get('AI_ACCESS_OIDC_AUDIENCE', '') not in ('', audience)
+    ):
         raise RuntimeError('Refusing to connect mismatched or non-dev environments.')
     for path in (company_config, access_config):
         if path.is_symlink() or path.stat().st_mode & 0o077:

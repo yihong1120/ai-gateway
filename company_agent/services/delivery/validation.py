@@ -1,15 +1,21 @@
 """Reopen real bytes and compare exact cells/text with immutable tool evidence."""
 from __future__ import annotations
 
-from pathlib import Path
-from decimal import Decimal
 import re
+from decimal import Decimal
+from pathlib import Path
 
 from langchain_core.tools import ToolException
 
+import company_agent.runtime.assignments as _assignments_imports
+import company_agent.services.delivery.native_cells as _native_cells_imports
+import company_agent.services.delivery.preservation as _preservation_imports
+import company_agent.services.files.nas as _nas_imports
+import company_agent.services.office.documents as _documents_imports
 from company_agent.services.delivery.schemas import DeliveryPlan
-from company_agent.services.files.operations import worker
+from company_agent.services.delivery.schemas import ExpectedFile
 from company_agent.services.files.errors import RecoverableToolError
+from company_agent.services.files.operations import worker
 from company_agent.services.office.documents import spreadsheet_books
 
 
@@ -37,9 +43,8 @@ def require_statistics_before_output(store, owner, job, name):
 
 
 def verify_evidence_sources(ctx, evidence):
-    from company_agent.services.files.nas import file_access
 
-    access = file_access(ctx.settings, ctx.store, ctx.owner)
+    access = _nas_imports.file_access(ctx.settings, ctx.store, ctx.owner)
     for source in {(e['source']['root'], e['source']['path'], e['source']['sha256']) for e in evidence}:
         _, sha = access.read(source[0], source[1])
         if sha != source[2]:
@@ -47,9 +52,8 @@ def verify_evidence_sources(ctx, evidence):
 
 
 def prepare_output(ctx, name, operation=None, parameters=None):
-    from company_agent.runtime.assignments import check_output
 
-    check_output(ctx, name)
+    _assignments_imports.check_output(ctx, name)
     plan = ctx.store.delivery_plan(ctx.owner, ctx.job)
     specification = DeliveryPlan.model_validate(plan or {})
     expected = next((f for f in specification.files if f.name == name), None)
@@ -58,19 +62,25 @@ def prepare_output(ctx, name, operation=None, parameters=None):
             raise RecoverableToolError('native_edit_required', '此成果綁定原簿保留，必須用edit_spreadsheet，不能重建工作簿。')
         if {k: (parameters or {}).get(k) for k in ('root', 'path', 'sha256')} != expected.base_source.model_dump():
             raise RecoverableToolError('preservation_source_mismatch', '修改參數必須使用已固定的原簿來源版本，不可換來源或SHA。')
-        from company_agent.services.delivery.native_cells import same_value
         rules = {(r.sheet, r.cell): r for r in expected.cells if r.statistic is None}
         for change in (parameters or {}).get('changes', []):
             rule = rules.get((change.get('sheet'), change.get('cell')))
             if rule is None:
                 continue
             actual = change.get('value')
-            if not same_value(actual, rule.expected) or change.get('formula', False) != rule.formula:
-                raise RecoverableToolError('planned_cell_value_mismatch', '修改值或型別不符已固定儲存格規格，尚未產檔；數值12與文字「12」不同。',
-                    sheet=rule.sheet, cell=rule.cell, expected_value=rule.expected, expected_type=type(rule.expected).__name__)
+            if not _native_cells_imports.same_value(actual, rule.expected) or change.get('formula', False) != rule.formula:
+                raise RecoverableToolError(
+                    'planned_cell_value_mismatch', '修改值或型別不符已固定儲存格規格，尚未產檔；數值12與文字「12」不同。',
+                    sheet=rule.sheet, cell=rule.cell, expected_value=rule.expected, expected_type=type(
+                        rule.expected,
+                    ).__name__,
+                )
     if ctx.settings.require_delivery_plan:
         if plan is None:
-            raise RecoverableToolError('delivery_plan_required', '產檔前須先 plan_delivery 登記使用者明確要求的全部檔案、指定欄位與必要統計；不要先建立猜測草稿。')
+            raise RecoverableToolError(
+                'delivery_plan_required',
+                '產檔前須先 plan_delivery 登記使用者明確要求的全部檔案、指定欄位與必要統計；不要先建立猜測草稿。',
+            )
         if name not in {f['name'] for f in plan['files']}:
             raise RecoverableToolError('file_not_planned', '此檔名不在已固定交付清單內；請沿用要求的檔名。規格變更須另開工作。')
     try:
@@ -78,8 +88,7 @@ def prepare_output(ctx, name, operation=None, parameters=None):
     except ToolException as error:
         raise RecoverableToolError('missing_statistics', str(error)) from error
     verify_evidence_sources(ctx, [*evidence, *ctx.store.evidence(ctx.owner, ctx.job, ctx.required_evidence)])
-    from company_agent.services.delivery.preservation import verify_preservation_sources
-    verify_preservation_sources(ctx, specification)
+    _preservation_imports.verify_preservation_sources(ctx, specification)
 
 
 def resolved_value(rule, evidence):
@@ -119,10 +128,11 @@ def validate_delivery(store, owner, job):
         name, sha, data = store.read_artifact(owner, file['id'], job)
         expected = rules.get(name)
         if expected is not None and expected.base_source is not None:
-            from company_agent.services.delivery.preservation import verify_native_receipt
-            verify_native_receipt(store, owner, job, file, expected.base_source)
-        checks = worker('validate_delivery_file', data=data, name=name,
-                        specification=expected.model_dump() if expected else None, evidence=evidence)
+            _preservation_imports.verify_native_receipt(store, owner, job, file, expected.base_source)
+        checks = worker(
+            'validate_delivery_file', data=data, name=name,
+            specification=expected.model_dump() if expected else None, evidence=evidence,
+        )
         receipt = {
             'status': 'passed', 'checks': checks,
             'evidence_ids': [e['evidence_id'] for e in evidence.values()],
@@ -134,7 +144,6 @@ def validate_delivery(store, owner, job):
 
 
 def validate_file(data, name, specification, evidence):
-    from company_agent.services.delivery.schemas import ExpectedFile
 
     expected = ExpectedFile.model_validate(specification) if specification else None
     suffix = Path(name).suffix.lower()
@@ -158,9 +167,8 @@ def validate_file(data, name, specification, evidence):
             if expected and expected.texts:
                 raise ToolException('XLSX 文字規格請使用精確儲存格檢查。')
     elif suffix in {'.docx', '.pptx', '.txt', '.md', '.csv', '.pdf'}:
-        from company_agent.services.office.documents import extract
 
-        blocks = extract(data, suffix)
+        blocks = _documents_imports.extract(data, suffix)
         if expected and (expected.cells or expected.sheet_names):
             raise ToolException('非 XLSX 不接受工作表／儲存格規格。')
         for rule in expected.texts if expected else []:

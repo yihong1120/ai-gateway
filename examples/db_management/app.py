@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import traceback
 from collections.abc import Awaitable
 from collections.abc import Callable
 from uuid import uuid4
@@ -12,38 +14,42 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
-from examples.identity.config import Settings
-from examples.db_management.lifespan import global_lifespan
+import examples.db_management.services.playback.service as _service_imports
+import examples.shared.config as _config_imports
 from examples.bff.router import router as bff_router
-from examples.identity.routers.auth import router as auth_router
+from examples.db_management.lifespan import global_lifespan
 from examples.db_management.routers.deployment_enrollment_codes import (
     router as deployment_enrollment_code_router,
 )
 from examples.db_management.routers.deployments import (
     router as deployment_router,
 )
+from examples.db_management.routers.playback import router as playback_router
+from examples.db_management.routers.sites import router as site_router
+from examples.db_management.routers.streams import router as stream_cfg_router
+from examples.deployment.registry.router import router as registry_router
+from examples.identity.config import Settings
+from examples.identity.routers.auth import router as auth_router
 from examples.identity.routers.features import router as feature_router
 from examples.identity.routers.groups import router as group_router
-from examples.identity.routers.legacy_password_migration import router as legacy_password_migration_router
+from examples.identity.routers.legacy_password_migration import (
+    router as legacy_password_migration_router,
+)
 from examples.identity.routers.legal import router as legal_router
 from examples.identity.routers.native_social import router as native_social_router
 from examples.identity.routers.oauth import router as oauth_router
 from examples.identity.routers.password_reset import router as password_reset_router
-from examples.db_management.routers.playback import router as playback_router
-from examples.db_management.routers.sites import router as site_router
-from examples.db_management.routers.streams import router as stream_cfg_router
 from examples.identity.routers.users import router as user_management_router
-from examples.deployment.registry.router import router as registry_router
+from examples.identity.runtime import IdentityResources
+from examples.identity.runtime import IdentityScopeMiddleware
+
 
 def create_app(configuration=None):
     if configuration is None:
-        from examples.shared.config import load_service
-        load_service('identity')
+        _config_imports.load_service('identity')
         configuration = Settings()
     settings = configuration
-    from examples.identity.runtime import IdentityResources, IdentityScopeMiddleware
     resources = IdentityResources(settings)
-
 
     def _allowed_cors_origins() -> list[str]:
         """Return the configured non-empty CORS origins.
@@ -58,18 +64,14 @@ def create_app(configuration=None):
             if origin.strip()
         ]
 
-
     # Initialise the FastAPI app with a custom lifespan handler
     app: FastAPI = FastAPI(lifespan=global_lifespan)
-
 
     def _log_server_traceback(
         request_id: str,
         exc: BaseException,
     ) -> None:
         """Record type and traceback without serialising exception arguments."""
-        import logging
-        import traceback
 
         # Some exceptions (notably SQL and provider errors) include submitted
         # values in ``str(exc)``.  Log stack locations and the exception class, but
@@ -81,7 +83,6 @@ def create_app(configuration=None):
             type(exc).__name__,
             trace,
         )
-
 
     @app.exception_handler(HTTPException)
     async def safe_http_exception(
@@ -120,7 +121,6 @@ def create_app(configuration=None):
             },
         )
 
-
     @app.middleware('http')
     async def request_id_and_unhandled_error_logging(
         request: Request,
@@ -147,7 +147,6 @@ def create_app(configuration=None):
             )
         response.headers['X-Request-ID'] = request_id
         return response
-
 
     @app.middleware('http')
     async def prevent_sensitive_response_caching(
@@ -179,7 +178,6 @@ def create_app(configuration=None):
             response.headers['Cache-Control'] = 'no-store'
         return response
 
-
     allowed_origins = _allowed_cors_origins()
     if allowed_origins:
         app.add_middleware(
@@ -209,8 +207,7 @@ def create_app(configuration=None):
     app.include_router(stream_cfg_router)
 
     app.state.identity = resources
-    from examples.db_management.services.playback.service import create_playback_service
-    app.state.playback = create_playback_service(resources)
+    app.state.playback = _service_imports.create_playback_service(resources)
     app.state.http_clients = resources.http_clients
     app.add_middleware(IdentityScopeMiddleware, resources=resources)
     return app

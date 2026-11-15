@@ -1,11 +1,12 @@
 """Application-owned ProviderAccounts dependencies and operations."""
-
 from __future__ import annotations
+
 import hashlib
 import re
 from datetime import datetime
 from datetime import timezone
 from typing import Literal
+
 from fastapi import HTTPException
 from fastapi import Request
 from redis.asyncio import Redis
@@ -13,6 +14,10 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+
+from examples.identity.accounts.legal import record_user_consent
+from examples.identity.accounts.legal import SignupConsentPayload
+from examples.identity.accounts.legal import validate_signup_consents
 from examples.identity.deployment_context import DeploymentBinding
 from examples.identity.deployment_context import resolve_request_deployment
 from examples.identity.models import User
@@ -28,9 +33,6 @@ from examples.identity.schemas.auth import IdentityRead
 from examples.identity.schemas.auth import ProviderClaims
 from examples.identity.schemas.auth import TokenPairData
 from examples.identity.sessions.authentication import issue_token_pair_for_user
-from examples.identity.accounts.legal import record_user_consent
-from examples.identity.accounts.legal import SignupConsentPayload
-from examples.identity.accounts.legal import validate_signup_consents
 
 Provider = Literal['google', 'apple']
 OAUTH_DISABLED_PASSWORD_HASH = 'oauth_disabled:provider-only'
@@ -51,7 +53,7 @@ class ProviderAccounts:
         """
         if status == USER_STATUS_EMAIL_UNVERIFIED:
             return HTTPException(
-                status_code=403, detail={'code': 'email_unverified', 'status': status}
+                status_code=403, detail={'code': 'email_unverified', 'status': status},
             )
         if status == USER_STATUS_PENDING_ADMIN_APPROVAL:
             return HTTPException(
@@ -60,14 +62,14 @@ class ProviderAccounts:
             )
         if status == USER_STATUS_SUSPENDED:
             return HTTPException(
-                status_code=403, detail={'code': 'account_suspended', 'status': status}
+                status_code=403, detail={'code': 'account_suspended', 'status': status},
             )
         if status == USER_STATUS_REJECTED:
             return HTTPException(
-                status_code=403, detail={'code': 'account_rejected', 'status': status}
+                status_code=403, detail={'code': 'account_rejected', 'status': status},
             )
         return HTTPException(
-            status_code=403, detail={'code': 'user_not_active', 'status': status}
+            status_code=403, detail={'code': 'user_not_active', 'status': status},
         )
 
     def _ensure_active_user(self, user: User) -> None:
@@ -109,12 +111,12 @@ class ProviderAccounts:
         """
         base = self._username_from_claims(provider, claims)
         digest = hashlib.blake2s(
-            f'{provider}:{claims.sub}'.encode(), digest_size=6
+            f'{provider}:{claims.sub}'.encode(), digest_size=6,
         ).hexdigest()
         return f'{base[:67]}_{digest}'
 
     def _profile_names(
-        self, provider: Provider, claims: ProviderClaims
+        self, provider: Provider, claims: ProviderClaims,
     ) -> tuple[str, str]:
         """Derive bounded family and given names from provider claims.
 
@@ -141,7 +143,7 @@ class ProviderAccounts:
         return (provider.title(), 'User')
 
     def _new_identity(
-        self, user: User, provider: Provider, claims: ProviderClaims
+        self, user: User, provider: Provider, claims: ProviderClaims,
     ) -> UserIdentity:
         """Build an unpersisted provider identity for a user.
 
@@ -163,16 +165,14 @@ class ProviderAccounts:
             display_name=str(
                 claims.name
                 or ' '.join(
-                    (
-                        part
-                        for part in [
+                    part
+                    for part in [
                             (claims.given_name or '').strip(),
                             (claims.family_name or '').strip(),
-                        ]
-                        if part
-                    )
+                    ]
+                    if part
                 )
-                or ''
+                or '',
             )
             or None,
             raw_profile=claims.model_dump(),
@@ -192,21 +192,19 @@ class ProviderAccounts:
         display_name = str(
             claims.name
             or ' '.join(
-                (
-                    part
-                    for part in [
-                        (claims.given_name or '').strip(),
-                        (claims.family_name or '').strip(),
-                    ]
-                    if part
-                )
+                part
+                for part in [
+                    (claims.given_name or '').strip(),
+                    (claims.family_name or '').strip(),
+                ]
+                if part
             )
-            or ''
+            or '',
         )
         return display_name or None
 
     async def _find_identity_user(
-        self, db: AsyncSession, provider: Provider, provider_user_id: str
+        self, db: AsyncSession, provider: Provider, provider_user_id: str,
     ) -> User | None:
         """Find the local user associated with a provider subject.
 
@@ -222,7 +220,7 @@ class ProviderAccounts:
             select(UserIdentity).where(
                 UserIdentity.provider == provider,
                 UserIdentity.provider_user_id == provider_user_id,
-            )
+            ),
         )
         if identity is None:
             return None
@@ -241,7 +239,7 @@ class ProviderAccounts:
         return await db.scalar(
             select(User)
             .join(UserProfile, UserProfile.user_id == User.id)
-            .where(UserProfile.email == email.strip().lower())
+            .where(UserProfile.email == email.strip().lower()),
         )
 
     async def _create_pending_user_with_identity(
@@ -288,7 +286,7 @@ class ProviderAccounts:
                     middle_name=None,
                     email=email,
                     mobile_number=None,
-                )
+                ),
             )
             db.add(self._new_identity(user, provider, claims))
             await db.commit()
@@ -298,7 +296,7 @@ class ProviderAccounts:
             if existing is not None:
                 return existing
             raise HTTPException(
-                status_code=409, detail='OAuth account creation conflict'
+                status_code=409, detail='OAuth account creation conflict',
             ) from exc
         await db.refresh(user, attribute_names=['profile', 'group'])
         return user
@@ -333,7 +331,7 @@ class ProviderAccounts:
                     deployment=deployment,
                 )
             return await issue_token_pair_for_user(
-                user, db, redis_pool, hash_refresh_token=hash_refresh_token
+                user, db, redis_pool, hash_refresh_token=hash_refresh_token,
             )
         email = self.verifier.normalise_email(claims.email)
         if email:
@@ -356,7 +354,7 @@ class ProviderAccounts:
             )
         await validate_signup_consents(consent_payload, db)
         user = await self._create_pending_user_with_identity(
-            db, provider, claims, deployment
+            db, provider, claims, deployment,
         )
         await record_user_consent(user.id, consent_payload, db, request=None)
         raise self._status_error(user.status)
@@ -440,7 +438,7 @@ class ProviderAccounts:
             Locally issued token-pair data.
         """
         claims = await self.verifier.verify_apple_identity_token(
-            identity_token, authorization_code, expected_nonce=nonce
+            identity_token, authorization_code, expected_nonce=nonce,
         )
         if email and (not claims.email):
             claims.email = email
@@ -491,7 +489,7 @@ class ProviderAccounts:
         )
 
     async def list_user_identities(
-        self, user: User, db: AsyncSession
+        self, user: User, db: AsyncSession,
     ) -> IdentityListResponse:
         """Return the current user's linked provider identities.
 
@@ -507,7 +505,7 @@ class ProviderAccounts:
                 await db.execute(
                     select(UserIdentity)
                     .where(UserIdentity.user_id == user.id)
-                    .order_by(UserIdentity.linked_at.asc())
+                    .order_by(UserIdentity.linked_at.asc()),
                 )
             )
             .scalars()
@@ -519,7 +517,7 @@ class ProviderAccounts:
         )
 
     async def _find_identity(
-        self, db: AsyncSession, provider: Provider, provider_user_id: str
+        self, db: AsyncSession, provider: Provider, provider_user_id: str,
     ) -> UserIdentity | None:
         """Find a provider identity matching an external subject.
 
@@ -535,11 +533,11 @@ class ProviderAccounts:
             select(UserIdentity).where(
                 UserIdentity.provider == provider,
                 UserIdentity.provider_user_id == provider_user_id,
-            )
+            ),
         )
 
     async def _find_current_user_provider_identity(
-        self, db: AsyncSession, user: User, provider: Provider
+        self, db: AsyncSession, user: User, provider: Provider,
     ) -> UserIdentity | None:
         """Find the user's existing identity for one provider.
 
@@ -553,12 +551,12 @@ class ProviderAccounts:
         """
         return await db.scalar(
             select(UserIdentity).where(
-                UserIdentity.user_id == user.id, UserIdentity.provider == provider
-            )
+                UserIdentity.user_id == user.id, UserIdentity.provider == provider,
+            ),
         )
 
     def _update_identity_from_claims(
-        self, identity: UserIdentity, claims: ProviderClaims
+        self, identity: UserIdentity, claims: ProviderClaims,
     ) -> None:
         """Synchronise mutable provider claims onto a persisted identity.
 
@@ -575,11 +573,11 @@ class ProviderAccounts:
             identity.display_name = display_name
         identity.raw_profile = claims.model_dump()
         identity.raw_email_is_private = claims.is_private_email or bool(
-            identity.email and identity.email.endswith('@privaterelay.appleid.com')
+            identity.email and identity.email.endswith('@privaterelay.appleid.com'),
         )
 
     async def link_provider_identity(
-        self, user: User, provider: Provider, claims: ProviderClaims, db: AsyncSession
+        self, user: User, provider: Provider, claims: ProviderClaims, db: AsyncSession,
     ) -> IdentityRead:
         """Link a verified provider identity to the current user.
 
@@ -608,7 +606,7 @@ class ProviderAccounts:
             await db.refresh(existing)
             return self._identity_read(existing)
         current_provider = await self._find_current_user_provider_identity(
-            db, user, provider
+            db, user, provider,
         )
         if current_provider is not None:
             raise HTTPException(
@@ -625,7 +623,7 @@ class ProviderAccounts:
         return self._identity_read(identity)
 
     async def link_google_identity(
-        self, user: User, id_token: str, db: AsyncSession
+        self, user: User, id_token: str, db: AsyncSession,
     ) -> IdentityRead:
         """Verify and link a Google identity token.
 
@@ -661,12 +659,12 @@ class ProviderAccounts:
             Public linked Apple identity.
         """
         claims = await self.verifier.verify_apple_identity_token(
-            identity_token, authorization_code, expected_nonce=nonce
+            identity_token, authorization_code, expected_nonce=nonce,
         )
         return await self.link_provider_identity(user, 'apple', claims, db)
 
     async def unlink_identity(
-        self, user: User, identity_id: int, db: AsyncSession
+        self, user: User, identity_id: int, db: AsyncSession,
     ) -> dict[str, str]:
         """Unlink a provider identity while retaining a login method.
 
@@ -685,7 +683,7 @@ class ProviderAccounts:
         if identity is None or identity.user_id != user.id:
             raise HTTPException(status_code=404, detail='Identity not found')
         identity_count = await db.scalar(
-            select(func.count(UserIdentity.id)).where(UserIdentity.user_id == user.id)
+            select(func.count(UserIdentity.id)).where(UserIdentity.user_id == user.id),
         )
         if not self._user_has_password(user) and int(identity_count or 0) <= 1:
             raise HTTPException(

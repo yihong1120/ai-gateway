@@ -1,7 +1,14 @@
 from __future__ import annotations
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from urllib.parse import parse_qsl
+from urllib.parse import urlencode
+from urllib.parse import urlsplit
+from urllib.parse import urlunsplit
+
 from fastapi import HTTPException
-from examples.db_management.schemas.playback import PlaybackProfile, PlaybackWallRequest
+
+from examples.db_management.schemas.playback import PlaybackProfile
+from examples.db_management.schemas.playback import PlaybackWallRequest
 
 PLAYBACK_PUBLIC_BASE_PATH = '/hazard/api/db_management/api/playback'
 

@@ -1,28 +1,39 @@
 """Application-owned configuration, HTTP profiles and complete BFF deployment."""
-
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
 from fastapi import Request
 from jwt.exceptions import InvalidTokenError
 
-from examples.shared.runtime.http_clients import HttpClientPool, get_application_http_client
-from examples.identity.config import Settings
-from examples.identity.runtime import IdentityResources, get_settings, identity_scope
-from examples.bff.deployment import BUNDLE, MANIFEST, build, read_bundle
-from examples.bff.proxy_headers import _proxy_request_headers, _proxy_response_headers
+import examples.bff.serve as _serve_imports
+from examples.bff.deployment import build
+from examples.bff.deployment import BUNDLE
+from examples.bff.deployment import MANIFEST
+from examples.bff.deployment import read_bundle
+from examples.bff.proxy_headers import _proxy_request_headers
+from examples.bff.proxy_headers import _proxy_response_headers
 from examples.bff.proxy_responses import rewrite_response
+from examples.identity.config import Settings
+from examples.identity.runtime import get_settings
+from examples.identity.runtime import identity_scope
+from examples.identity.runtime import IdentityResources
+from examples.identity.sessions.store import _fernet
+from examples.shared.runtime.http_clients import get_application_http_client
+from examples.shared.runtime.http_clients import HttpClientPool
+from examples.shared.runtime.modules import ModuleReference
+
+_management_app = ModuleReference('examples.db_management.app')
 
 
 class ApplicationIsolation(unittest.IsolatedAsyncioTestCase):
@@ -35,11 +46,11 @@ class ApplicationIsolation(unittest.IsolatedAsyncioTestCase):
                     'JWT_SECRET_KEY': 'synthetic-bootstrap-key',
                 },
                 clear=True,
-            )
+            ),
         )
 
     async def test_concurrent_apps_keep_settings_clients_and_cookie_policies(self):
-        from examples.db_management.app import create_app
+        create_app = _management_app.attribute('create_app')
 
         with patch.dict(os.environ, {'BFF_SESSION_COOKIE_NAME': 'one'}):
             first = create_app(Settings(authjwt_secret_key='one', app_public_url='https://one.test'))
@@ -92,14 +103,13 @@ class ApplicationIsolation(unittest.IsolatedAsyncioTestCase):
         one = IdentityResources(Settings(authjwt_secret_key='a' * 32))
         two = IdentityResources(Settings(authjwt_secret_key='b' * 32))
         token = one.jwt_access.create_access_token(
-            {'username': 'alice', 'user_id': 1, 'role': 'user', 'jti': 'a', 'features': []}
+            {'username': 'alice', 'user_id': 1, 'role': 'user', 'jti': 'a', 'features': []},
         )
         self.assertEqual(one.jwt_access.decode_token(token)['sub'], 'alice')
         with self.assertRaises(InvalidTokenError):
             two.jwt_access.decode_token(token)
         encrypted = one.session_cipher.encrypt(b'synthetic-refresh')
         with identity_scope(one):
-            from examples.identity.sessions.store import _fernet
 
             self.assertEqual(_fernet().decrypt(encrypted), b'synthetic-refresh')
         self.assertIsNone(one.database.engine)
@@ -151,7 +161,7 @@ class BffContracts(unittest.TestCase):
                     'BFF_COMPANY_AI_NETWORK_PROXY_KEY': 'p' * 32,
                 },
                 clear=True,
-            )
+            ),
         )
         self.resources = IdentityResources(Settings())
         self.enterContext(identity_scope(self.resources))
@@ -172,7 +182,7 @@ class BffContracts(unittest.TestCase):
                     (b'cookie', b'browser=secret'),
                     (b'authorization', b'Bearer browser'),
                 ],
-            }
+            },
         )
 
     def test_proxy_headers_keep_credentials_server_scoped(self):
@@ -188,8 +198,10 @@ class BffContracts(unittest.TestCase):
 
     def test_file_capabilities_stay_behind_bff_and_changed_content_loses_etag(self):
         data, changed = rewrite_response(
-            httpx.Response(200, content=b'{"temp_url":"/download/temp/a.b.c"}',
-                           headers={'content-type': 'application/json'}),
+            httpx.Response(
+                200, content=b'{"temp_url":"/download/temp/a.b.c"}',
+                headers={'content-type': 'application/json'},
+            ),
             self.request(),
             None,
             'files',
@@ -198,7 +210,7 @@ class BffContracts(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(json.loads(data)['temp_url'], '/bff/files/download/temp/a.b.c')
         headers = _proxy_response_headers(
-            httpx.Response(200, headers={'etag': 'old', 'content-type': 'application/json'}), content_rewritten=True
+            httpx.Response(200, headers={'etag': 'old', 'content-type': 'application/json'}), content_rewritten=True,
         )
         self.assertNotIn('etag', headers)
         self.assertEqual(headers['Cache-Control'], 'no-store')
@@ -228,9 +240,13 @@ class DeploymentBundle(unittest.TestCase):
             self.assertNotIn('examples/identity/models.py', files)
             self.assertNotIn('examples/configuration.py', files)
             self.assertFalse(any(name.startswith('examples/deployment_registry/') for name in files))
-            self.assertFalse(any(name.startswith('examples/deployment/') and
-                                 not name.startswith('examples/deployment/registry/') and
-                                 name not in {'examples/deployment/__init__.py', 'examples/deployment/cli.py'} for name in files))
+            self.assertFalse(
+                any(
+                    name.startswith('examples/deployment/') and
+                    not name.startswith('examples/deployment/registry/') and
+                    name not in {'examples/deployment/__init__.py', 'examples/deployment/cli.py'} for name in files
+                ),
+            )
             self.assertEqual(manifest['obsolete_files'], ['examples/identity/models.py', 'examples/configuration.py'])
             verified = read_bundle(one)
             release = verified.stage(root / 'versions')
@@ -253,20 +269,20 @@ class DeploymentBundle(unittest.TestCase):
 
 class ReleaseEntrypoint(unittest.TestCase):
     def test_private_configuration_controls_loopback_server(self):
-        from examples.bff.serve import main
         with tempfile.TemporaryDirectory() as temp:
             config = Path(temp) / 'config.json'
             config.write_text(json.dumps({'environment': {'BFF_TEST_RELEASE': 'selected'}, 'port': 8006}))
             config.chmod(0o600)
             with patch.object(sys, 'argv', ['serve', '--config', str(config)]), patch.dict(os.environ), \
                     patch.object(sys, 'dont_write_bytecode', False), patch('uvicorn.run') as run:
-                main()
+                _serve_imports.main()
                 self.assertEqual(os.environ['BFF_TEST_RELEASE'], 'selected')
                 self.assertTrue(sys.dont_write_bytecode)
                 run.assert_called_once_with(
                     'examples.db_management.app:app', host='127.0.0.1', port=8006, workers=1,
-                    proxy_headers=True, forwarded_allow_ips='127.0.0.1', access_log=False)
+                    proxy_headers=True, forwarded_allow_ips='127.0.0.1', access_log=False,
+                )
                 config.chmod(0o644)
                 with self.assertRaises(RuntimeError):
-                    main()
+                    _serve_imports.main()
                 self.assertEqual(run.call_count, 1)

@@ -1,4 +1,5 @@
 """Device state rules without database, HTTP or application dependencies."""
+from __future__ import annotations
 
 
 def key_error(device, now):

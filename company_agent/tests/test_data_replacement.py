@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,13 +13,34 @@ from types import SimpleNamespace
 
 from openpyxl import load_workbook
 
-from company_agent.evals.benchmark import Budget, MeteredInvocation
-from company_agent.evals.data_replacement import JobBudget, classify, export_pack, fixture_inputs, model_slot, provider_stop, run_role, schedule, summarize
-from company_agent.evals.data_replacement_cases import BY_ID, CASES, fingerprint, grade, prepare, role_plan, save
+from company_agent.config import Root
+from company_agent.config import Settings
+from company_agent.evals.benchmark import Budget
+from company_agent.evals.benchmark import MeteredInvocation
+from company_agent.evals.data_replacement import classify
+from company_agent.evals.data_replacement import export_pack
+from company_agent.evals.data_replacement import fixture_inputs
+from company_agent.evals.data_replacement import JobBudget
+from company_agent.evals.data_replacement import model_slot
+from company_agent.evals.data_replacement import provider_stop
+from company_agent.evals.data_replacement import run_role
+from company_agent.evals.data_replacement import schedule
+from company_agent.evals.data_replacement import summarize
+from company_agent.evals.data_replacement_cases import BY_ID
+from company_agent.evals.data_replacement_cases import CASES
+from company_agent.evals.data_replacement_cases import fingerprint
+from company_agent.evals.data_replacement_cases import grade
+from company_agent.evals.data_replacement_cases import prepare
 from company_agent.evals.data_replacement_cases import preserved
+from company_agent.evals.data_replacement_cases import role_plan
+from company_agent.evals.data_replacement_cases import save
 from company_agent.evals.data_replacement_report import decision
+from company_agent.services.files.operations import ToolBox
 from company_agent.services.office.schemas import AnalyzeSpreadsheet
-from company_agent.tests.test_agent import Fixture, call
+from company_agent.services.office.schemas import EditSpreadsheet
+from company_agent.services.office.schemas import ReadSpreadsheet
+from company_agent.tests.test_agent import call
+from company_agent.tests.test_agent import Fixture
 from company_agent.tests.test_enterprise_completion import finish
 from company_agent.tests.test_multi_agent import RawRoleModel
 
@@ -25,25 +48,38 @@ from company_agent.tests.test_multi_agent import RawRoleModel
 class DataEvaluationTests(unittest.TestCase):
     def test_exact_baseline_fixture_reuse_rejects_source_tampering_and_definition_drift(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory);folder=root/'job';sources=folder/'sources';sources.mkdir(parents=True)
-            case=BY_ID['D01'];data,gold=prepare(case,123)
-            for name,value in data.items(): (sources/name).write_bytes(value)
+            root = Path(directory)
+            folder = root/'job'
+            sources = folder/'sources'
+            sources.mkdir(parents=True)
+            case = BY_ID['D01']
+            data, gold = prepare(case, 123)
+            for name, value in data.items():
+                (sources/name).write_bytes(value)
             (folder/'expected.private.json').write_text(json.dumps(gold))
-            report={'completed_at':'2026-10-18T00:00:00+00:00','unrun':[], 'cases':[case.public()],
-                    'runs':[{'case':case.id,'seed':123,'folder':'job','source_sha256':fingerprint(sources)}]}
-            path=root/'report.json';path.write_text(json.dumps(report))
-            reused,oracle=fixture_inputs(path,case,123)
-            self.assertEqual(reused,data);self.assertEqual(oracle,gold)
+            report = {
+                'completed_at': '2026-10-18T00:00:00+00:00', 'unrun': [], 'cases': [case.public()],
+                'runs': [{'case': case.id, 'seed': 123, 'folder': 'job', 'source_sha256': fingerprint(sources)}],
+            }
+            path = root/'report.json'
+            path.write_text(json.dumps(report))
+            reused, oracle = fixture_inputs(path, case, 123)
+            self.assertEqual(reused, data)
+            self.assertEqual(oracle, gold)
             (sources/'source.xlsx').write_bytes(b'changed')
-            with self.assertRaisesRegex(ValueError,'hashes changed'): fixture_inputs(path,case,123)
-            report['cases'][0]['prompt']='changed';path.write_text(json.dumps(report))
-            with self.assertRaisesRegex(ValueError,'definition differs'): fixture_inputs(path,case,123)
+            with self.assertRaisesRegex(ValueError, 'hashes changed'):
+                fixture_inputs(path, case, 123)
+            report['cases'][0]['prompt'] = 'changed'
+            path.write_text(json.dumps(report))
+            with self.assertRaisesRegex(ValueError, 'definition differs'):
+                fixture_inputs(path, case, 123)
 
     def test_candidate_configs_differ_only_in_data_model(self):
-        from company_agent.config import Settings
         folder = Path(__file__).parents[1] / 'configs'
         argon = Settings.model_validate_json((folder / 'config.mixed-candidate.example.json').read_text()).model_dump()
-        flash = Settings.model_validate_json((folder / 'config.data-flash-candidate.example.json').read_text()).model_dump()
+        flash = Settings.model_validate_json(
+            (folder / 'config.data-flash-candidate.example.json').read_text(),
+        ).model_dump()
         self.assertEqual(flash['role_models']['data']['model'], 'gemini-3.8-flash')
         flash['role_models']['data']['model'] = 'gemini-4-argon'
         self.assertEqual(flash, argon)
@@ -103,8 +139,10 @@ class DataEvaluationTests(unittest.TestCase):
             self.assertEqual(plan['paid_calls'], 0)
             self.assertFalse(plan['live'])
             self.assertEqual(plan['planned_jobs'], 104)
-            self.assertTrue(all((path / name).is_file() for name in
-                                ('manifest.json', 'cases.csv', 'cases.xlsx', 'synthetic_inputs.zip')))
+            self.assertTrue(
+                all((path / name).is_file() for name in
+                    ('manifest.json', 'cases.csv', 'cases.xlsx', 'synthetic_inputs.zip')),
+            )
 
     def test_concurrent_job_budgets_keep_costs_separate(self):
         parent = Budget(10)
@@ -117,13 +155,17 @@ class DataEvaluationTests(unittest.TestCase):
 
     def test_summary_pairs_only_same_repeat_and_excludes_controls_from_positive_rate(self):
         rows = []
-        for case, repeat, arm, control, passed in [('D01', 1, 'flash', False, True),
-                                                  ('D01', 1, 'argon', False, False),
-                                                  ('D18', 1, 'flash', True, True),
-                                                  ('D01', 2, 'argon', False, True)]:
-            rows.append({'case': case, 'repeat': repeat, 'arm': arm, 'lane': 'role', 'control': control,
-                         'passed': passed, 'seconds': 1, 'accounted_usd': 0.01, 'status': 'returned',
-                         'source_sha256': {'source.xlsx': 'same'}, 'calls': [], 'critical_failures': []})
+        for case, repeat, arm, control, passed in [
+            ('D01', 1, 'flash', False, True),
+            ('D01', 1, 'argon', False, False),
+            ('D18', 1, 'flash', True, True),
+            ('D01', 2, 'argon', False, True),
+        ]:
+            rows.append({
+                'case': case, 'repeat': repeat, 'arm': arm, 'lane': 'role', 'control': control,
+                'passed': passed, 'seconds': 1, 'accounted_usd': 0.01, 'status': 'returned',
+                'source_sha256': {'source.xlsx': 'same'}, 'calls': [], 'critical_failures': [],
+            })
         result = summarize(rows)
         self.assertEqual(result['paired_counts']['flash_only_pass'], 1)
         self.assertEqual(len(result['pairs']), 1)
@@ -141,7 +183,15 @@ class DataEvaluationTests(unittest.TestCase):
         self.assertIsNone(provider_stop({'arm': 'argon', 'calls': [{'status': 'returned'}]}, streaks))
         self.assertIsNone(provider_stop(limited, streaks))
         self.assertEqual(provider_stop(limited, streaks), 'new_pairs')
-        self.assertEqual(provider_stop({'arm': 'argon', 'calls': [{'status': 'failed', 'error_type': 'AuthenticationError'}]}, streaks), 'hard')
+        self.assertEqual(
+            provider_stop(
+                {
+                    'arm': 'argon', 'calls': [
+                        {'status': 'failed', 'error_type': 'AuthenticationError'},
+                    ],
+                }, streaks,
+            ), 'hard',
+        )
 
     def test_complete_coverage_policy_keeps_transient_failures_and_still_stops_auth(self):
         streaks = {'flash': 0, 'argon': 0}
@@ -156,9 +206,11 @@ class DataEvaluationTests(unittest.TestCase):
         rows = []
         for case, lane, control in [('D01', 'role', False), ('D18', 'role', True), ('W01', 'workflow', False)]:
             for arm in ('flash', 'argon'):
-                rows.append({'case': case, 'lane': lane, 'control': control, 'arm': arm, 'repeat': 1,
-                             'passed': True, 'seconds': 1 if arm == 'flash' else 3, 'accounted_usd': 0.01,
-                             'status': 'returned', 'calls': [], 'critical_failures': [], 'source_sha256': {}})
+                rows.append({
+                    'case': case, 'lane': lane, 'control': control, 'arm': arm, 'repeat': 1,
+                    'passed': True, 'seconds': 1 if arm == 'flash' else 3, 'accounted_usd': 0.01,
+                    'status': 'returned', 'calls': [], 'critical_failures': [], 'source_sha256': {},
+                })
         report = {'runs': rows, 'unrun': [], 'source_version_unchanged': True}
         self.assertIn('限定場景替換候選', decision(report))
         rows[0]['critical_failures'] = ['accepted_wrong_data']
@@ -169,19 +221,23 @@ class DataEvaluationTests(unittest.TestCase):
 
 class ModelGateTests(unittest.IsolatedAsyncioTestCase):
     async def test_gate_excludes_another_process_but_keeps_other_model_available(self):
-        import subprocess
-        import sys
         with tempfile.TemporaryDirectory() as directory:
-            probe = ('import fcntl,os,sys; fd=os.open(sys.argv[1],os.O_RDWR); '
-                     'fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)')
+            probe = (
+                'import fcntl,os,sys; fd=os.open(sys.argv[1],os.O_RDWR); '
+                'fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)'
+            )
             async with model_slot(directory, 'flash'):
-                result = subprocess.run([sys.executable, '-c', probe, directory + '/flash.lock'],
-                                        capture_output=True, check=False)
+                result = subprocess.run(
+                    [sys.executable, '-c', probe, directory + '/flash.lock'],
+                    capture_output=True, check=False,
+                )
                 self.assertNotEqual(result.returncode, 0)
                 async with asyncio.timeout(1), model_slot(directory, 'argon'):
                     pass
-            result = subprocess.run([sys.executable, '-c', probe, directory + '/flash.lock'],
-                                    capture_output=True, check=False)
+            result = subprocess.run(
+                [sys.executable, '-c', probe, directory + '/flash.lock'],
+                capture_output=True, check=False,
+            )
             self.assertEqual(result.returncode, 0)
 
     async def test_cancelled_waiter_releases_descriptor_and_does_not_steal_gate(self):
@@ -202,7 +258,6 @@ class ModelGateTests(unittest.IsolatedAsyncioTestCase):
 
 class DataRoleTests(unittest.IsolatedAsyncioTestCase, Fixture):
     async def test_role_failure_preserves_partial_files_sources_and_safe_status(self):
-        from company_agent.config import Root
         case = BY_ID['D01']
         sources, _ = prepare(case, 123)
         self.file('source.xlsx', sources['source.xlsx'])
@@ -211,9 +266,18 @@ class DataRoleTests(unittest.IsolatedAsyncioTestCase, Fixture):
         def fail(_):
             raise RuntimeError('private provider body')
 
-        model = RawRoleModel(data=[call('read_spreadsheet', {'root': 'demo', 'path': 'source.xlsx'}, 'read'),
-                                   call('create_spreadsheet', {'name': 'checked.xlsx', 'sheets': [
-                                       {'name': '結果', 'rows': [['部分成果', 1]]}]}, 'create'), fail])
+        model = RawRoleModel(
+            data=[
+                call('read_spreadsheet', {'root': 'demo', 'path': 'source.xlsx'}, 'read'),
+                call(
+                    'create_spreadsheet', {
+                        'name': 'checked.xlsx', 'sheets': [
+                            {'name': '結果', 'rows': [['部分成果', 1]]},
+                        ],
+                    }, 'create',
+                ), fail,
+            ],
+        )
         with self.assertRaises(RuntimeError):
             await run_role(self.settings(), model, 'alice', case, self.store, asyncio.Lock())
         with self.store.db() as db:
@@ -225,19 +289,21 @@ class DataRoleTests(unittest.IsolatedAsyncioTestCase, Fixture):
         self.assertNotIn('private provider body', str(result))
 
     def test_preservation_oracle_accepts_real_narrow_edit_and_rejects_unrequested_change(self):
-        from company_agent.services.files.operations import ToolBox
-        from company_agent.services.office.schemas import EditSpreadsheet, ReadSpreadsheet
         case = BY_ID['D14']
         sources, gold = prepare(case, 123)
         self.file('source.xlsx', sources['source.xlsx'])
         self.config.enable_spreadsheet_reports = True
         box = ToolBox(self.config, self.store, 'alice', self.job)
         read = box.read_spreadsheet(ReadSpreadsheet(root='project', path='source.xlsx'))
-        result = box.edit_spreadsheet(EditSpreadsheet(root='project', path='source.xlsx', sha256=read['sha256'],
-                                                      name='revised.xlsx', changes=[
-            {'sheet': '工程', 'cell': 'B2', 'expected': 10, 'value': 12},
-            {'sheet': '第二表', 'cell': 'A1', 'expected': '原值', 'value': '已核對'},
-        ]))
+        result = box.edit_spreadsheet(
+            EditSpreadsheet(
+                root='project', path='source.xlsx', sha256=read['sha256'],
+                name='revised.xlsx', changes=[
+                    {'sheet': '工程', 'cell': 'B2', 'expected': 10, 'value': 12},
+                    {'sheet': '第二表', 'cell': 'A1', 'expected': '原值', 'value': '已核對'},
+                ],
+            ),
+        )
         revised = self.store.read_artifact('alice', result['id'], self.job)[2]
         self.assertTrue(preserved(sources['source.xlsx'], revised, gold['changed_cells']))
         book = load_workbook(io.BytesIO(revised))
@@ -252,7 +318,6 @@ class DataRoleTests(unittest.IsolatedAsyncioTestCase, Fixture):
         return self.config
 
     async def test_isolated_role_uses_real_tools_and_recovers_from_injected_parser_fault(self):
-        from company_agent.config import Root
         case = BY_ID['D17']
         sources, gold = prepare(case, 123)
         for name, data in sources.items():
@@ -264,16 +329,22 @@ class DataRoleTests(unittest.IsolatedAsyncioTestCase, Fixture):
         def create(messages):
             value = json.loads(messages[-1].content)
             stats = value['statistics_evidence']['result']
-            rows = [[label, stats[key]] for label, key in
-                    [('合計', 'sum'), ('筆數', 'count'), ('最小', 'min'), ('最大', 'max'), ('平均', 'mean')]]
+            rows = [
+                [label, stats[key]] for label, key in
+                [('合計', 'sum'), ('筆數', 'count'), ('最小', 'min'), ('最大', 'max'), ('平均', 'mean')]
+            ]
             return call('create_spreadsheet', {'name': 'checked.xlsx', 'sheets': [{'name': '結果', 'rows': rows}]}, 'create')
 
         def complete(messages):
             ids.append(json.loads(messages[-1].content)['id'])
             return finish('complete_assignment', ids=ids)
 
-        model = RawRoleModel(data=[call('analyze_spreadsheet', args, 'first'),
-                                   call('analyze_spreadsheet', args, 'corrected'), create, complete])
+        model = RawRoleModel(
+            data=[
+                call('analyze_spreadsheet', args, 'first'),
+                call('analyze_spreadsheet', args, 'corrected'), create, complete,
+            ],
+        )
         before = fingerprint(self.root)
         result, fault = await run_role(self.settings(), model, 'alice', case, self.store, asyncio.Lock())
         self.assertEqual(result['status'], 'done', result)
@@ -283,9 +354,13 @@ class DataRoleTests(unittest.IsolatedAsyncioTestCase, Fixture):
         files = {f['name']: self.store.read_artifact('alice', f['id'], result['job_id'])[2] for f in result['files']}
         evidence = self.store.evidence('alice', result['job_id'])
         with self.store.db() as db:
-            receipts = [{'call_id': key, 'name': name, 'result': json.loads(value) if value else None}
-                        for key, name, value in db.execute('SELECT call_id,name,result FROM tool_receipts WHERE job=%s',
-                                                         (result['job_id'],)).fetchall()]
+            receipts = [
+                {'call_id': key, 'name': name, 'result': json.loads(value) if value else None}
+                for key, name, value in db.execute(
+                    'SELECT call_id,name,result FROM tool_receipts WHERE job=%s',
+                    (result['job_id'],),
+                ).fetchall()
+            ]
         calls = [{'role': 'data', 'tool_names': ['analyze_spreadsheet', 'create_spreadsheet']}]
         checks = grade(case, result, files, self.root, before, gold, evidence, receipts, calls, fault)
         self.assertTrue(all(checks.values()), checks)
@@ -308,8 +383,10 @@ class DataRoleTests(unittest.IsolatedAsyncioTestCase, Fixture):
             async def ainvoke(self, messages):
                 raise asyncio.CancelledError()
 
-        outer = SimpleNamespace(model=None, rates={'input': 0.00001, 'output': 0.00001},
-                                budget=budget, name='test', calls=[])
+        outer = SimpleNamespace(
+            model=None, rates={'input': 0.00001, 'output': 0.00001},
+            budget=budget, name='test', calls=[],
+        )
         with self.assertRaises(asyncio.CancelledError):
             await MeteredInvocation(outer, Cancelled(), 'data', []).ainvoke([])
         self.assertEqual(outer.calls[0]['error_type'], 'CancelledError')

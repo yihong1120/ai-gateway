@@ -11,6 +11,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from company_agent.agents.registry import SPECS
 from company_agent.config import Settings
 from company_agent.graph import build_graph
+from company_agent.runtime.storage import Store
 from company_agent.tests import all_tools
 
 
@@ -114,7 +115,6 @@ class LayoutTests(unittest.TestCase):
                             self.assertFalse(name.startswith('langgraph'), (str(path), name))
 
     def test_config_and_persistence_have_canonical_implementations(self):
-        from company_agent.runtime.storage import Store
         self.assertEqual(Settings.__module__, 'company_agent.config')
         self.assertEqual(Store.__module__, 'company_agent.runtime.storage')
 
