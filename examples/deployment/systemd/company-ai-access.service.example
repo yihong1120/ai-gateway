@@ -1,0 +1,22 @@
+[Unit]
+Description=Company AI enrollment and bounded renewal for LiteLLM OSS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=REPLACE_WITH_SERVICE_USER
+WorkingDirectory=/opt/ai-gateway
+# Install this profile with: uv sync --frozen --no-dev --extra company-ai-access
+# Only Nginx on this host may supply a forwarded client address.
+ExecStart=/opt/ai-gateway/.venv/bin/python -m examples.deployment.cli exec company_ai_access -- /opt/ai-gateway/.venv/bin/python -m uvicorn examples.company_ai_access.app:create_app --factory --host 127.0.0.1 --port 8013 --workers 1 --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/company-ai-access
+
+[Install]
+WantedBy=multi-user.target

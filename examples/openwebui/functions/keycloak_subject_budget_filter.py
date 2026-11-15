@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
-from pydantic import Field
+from pydantic import BaseModel, Field
+
+from examples.identity.providers.subjects import linked_subject
 
 
 class Filter:
@@ -35,11 +36,9 @@ class Filter:
         self.valves = self.Valves()
 
     async def inlet(self, body: dict[str, Any], __user__: dict[str, Any] | None = None):
-        oauth = (__user__ or {}).get('oauth') or {}
-        provider_identity = oauth.get(self.valves.oidc_provider) or {}
-        subject = provider_identity.get('sub')
+        subject = linked_subject((__user__ or {}).get('oauth'), self.valves.oidc_provider)
 
-        if not isinstance(subject, str) or not subject.strip():
+        if subject is None:
             # Fail closed: sending a request without an identity would evade
             # LiteLLM's per-end-user budget.
             raise ValueError(

@@ -1,0 +1,28 @@
+# Optional defense in depth inside the existing HTTPS server block.
+# A dev: proxy_pass http://100.96.17.117:18082;
+# B production standalone: proxy_pass http://127.0.0.1:8013;
+# Keep the configured company DNS name and a valid TLS certificate.
+location ^~ /company-ai/v1/ {
+    deny 192.168.1.1;
+    allow 192.168.1.0/24;
+    allow 127.0.0.1;
+    # Add individually approved VPN peer /32s, not all 100.64.0.0/10.
+    deny all;
+    proxy_pass http://100.96.17.117:18082;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Host $host;
+    # Never forward caller-provided internal bridge assertions.
+    proxy_set_header X-Company-AI-Bridge "";
+    proxy_set_header X-Company-AI-Subject "";
+    proxy_set_header X-Company-AI-Admin "";
+    proxy_set_header X-Company-AI-Client-IP "";
+    proxy_buffering off;
+    proxy_request_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    client_max_body_size 8m;
+}

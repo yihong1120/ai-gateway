@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>changdar-ai 電腦設定與綁定</title>
+<main><h1>changdar-ai 電腦設定與綁定</h1>
+<p><a id="windows-installer" href="/company-ai/downloads/changdar-ai-setup.exe">下載 changdar-ai Windows 設定程式（EXE）</a></p>
+<p>下載後以一般員工身分雙擊開啟，確認公司憑證信任並按「開始設定」。預設 Claude Code＋Codex，已安裝的工具會略過下載。出現綁定驗證碼時，請親自核對並核准。</p>
+<details><summary>PowerShell 設定方式（供 IT／進階使用者）</summary>
+<p><a href="/company-ai/downloads/Setup-CompanyAI.ps1">下載 PS1</a></p>
+<p>請依公司核准的 PowerShell 執行政策，在一般員工視窗執行：<code id="install-command"></code></p></details>
+<p>開發工具：<select id="tool-choice" aria-label="選擇開發工具"><option value="Claude">Claude Code</option><option value="Codex" disabled>Codex CLI（讀取公司設定中）</option><option value="Both" selected disabled>Claude Code 與 Codex CLI（讀取公司設定中）</option></select></p>
+<p id="status" role="status">正在讀取登入與綁定資訊。</p>
+<p>只核准你剛剛在自己電腦啟動的設定。請比對終端機與此處的驗證碼。</p>
+<dl><dt>電腦名稱</dt><dd id="device"></dd><dt>驗證碼</dt><dd id="code"></dd></dl>
+<button id="approve" disabled>驗證碼相符，核准此電腦</button>
+<p id="login-help"><a id="login" href="/auth">登入 AI 開發網站</a>（登入後會返回此驗證碼頁，請再按「核准此電腦」）</p>
+<p><button id="retry" type="button">重新讀取登入與綁定資訊</button></p>
+<p>核准後請回到 Windows 設定工具完成安裝。金鑰不會顯示在這個網頁。</p>
+</main><script src="/company-ai/setup.js" defer></script></html>
