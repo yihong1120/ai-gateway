@@ -20,25 +20,34 @@ read -rsp 'Open WebUI PostgreSQL password: ' OPENWEBUI_DB_PASSWORD; echo
 sudo -u postgres psql -d postgres \
   -v litellm_password="$LITELLM_DB_PASSWORD" \
   -v openwebui_password="$OPENWEBUI_DB_PASSWORD" \
-  -f infra/postgres/bootstrap-ai-databases.sql
+  -f examples/deployment/postgres/bootstrap-ai-databases.sql
 unset LITELLM_DB_PASSWORD OPENWEBUI_DB_PASSWORD
 ```
 
-Then create the two ignored files from their examples, replace their
-placeholders, and restrict them to their owner:
+Create one ignored configuration file, replace its placeholders, and restrict it
+to its owner:
 
 ```bash
-cp .env.litellm.example .env.litellm
-cp .env.openwebui.example .env.openwebui
-chmod 600 .env.litellm .env.openwebui
+cp -n config.example.toml config.local.toml
+chmod 600 config.local.toml
+ai-gateway check
 ```
 
-After `.env.litellm` is complete, uncomment the `general_settings` and
-`litellm_settings` blocks at the end of `config.yaml`. Replace the current
-user service with `infra/systemd/ai-gateway-litellm.service`, run
-`systemctl --user daemon-reload`, and restart LiteLLM. Open WebUI is started
-by the matching `infra/systemd/openwebui.service` unit and reads only
-`.env.openwebui`.
+`[litellm]` contains provider/launcher settings; `[webui]` contains WebUI's own
+database, login client and restricted gateway credentials. Keep their databases
+and key scopes separate. The CLI injects only the selected section, and existing
+process environment variables take precedence. For example:
+
+```bash
+ai-gateway compose litellm up -d
+ai-gateway exec webui -- python -m examples.openwebui.serve
+```
+
+The WebUI command runs in the existing host environment with this repo installed.
+Systemd templates use the same configuration entry; review their paths before
+applying them. Copying the template or checking configuration does not deploy or
+restart services. Existing env files can be converted once with `ai-gateway migrate`;
+its preserved originals are compatibility backups, not parallel configuration sources.
 
 ## Keycloak client
 
@@ -54,7 +63,7 @@ uses its own root vhost at `https://ai.changdar-server.mooo.com/`. Its exact
 valid redirect URI is
 `https://ai.changdar-server.mooo.com/oauth/oidc/callback`; set the same
 public base URL in `WEBUI_URL`. Configure its dedicated client secret in
-`.env.openwebui` only. Standard `openid`, `profile`, `email`, and `roles`
+the `[webui]` section only. Standard `openid`, `profile`, `email`, and `roles`
 client scopes are attached. The available client roles are `openwebui-user`
 and `openwebui-admin`. The token claim has this form:
 
@@ -97,16 +106,16 @@ tables. If an old
 Open WebUI record has the same email but a different or missing `sub`, login is
 rejected for explicit reconciliation; email alone never proves identity.
 
-Install `infra/nginx/openwebui-ai.conf` as a separate Nginx site, then
+Install `examples/deployment/nginx/openwebui-ai.conf` as a separate Nginx site, then
 run `sudo nginx -t && sudo systemctl reload nginx`. It proxies the root path of
 that vhost to Open WebUI while keeping port 8080 loopback-only. If desired,
-`infra/nginx/openwebui.conf` may be included in the main site only to redirect
+`examples/deployment/nginx/openwebui.conf` may be included in the main site only to redirect
 the retired `/openwebui/` path to the AI subdomain. Port 8443 is disabled.
 
 Visionnaire remains the source of truth for business roles, groups, sites and
 features. Keycloak carries the login identity and the claims provisioned for
 the `open-webui` client. Its `visionnaire-groups` mapper emits full Keycloak
-paths in the `groups` claim, and `.env.openwebui` enables group creation and
+paths in the `groups` claim, and the `[webui]` section enables group creation and
 membership sync. Open WebUI creates a local mirror for each path solely to
 hold its own chat/knowledge-base ACLs; it does not replace Visionnaire scope or
 function permissions.
@@ -133,7 +142,7 @@ then use its master key
 budget and Open WebUI's restricted service virtual key:
 
 ```bash
-source .env.litellm
+ai-gateway exec litellm -- sh <<'SHELL'
 curl --fail-with-body http://127.0.0.1:4000/budget/new \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H 'Content-Type: application/json' \
@@ -143,9 +152,10 @@ curl --fail-with-body http://127.0.0.1:4000/key/generate \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"key_alias":"openwebui-backend","models":["Kimi-K2.5","Kimi-K2.6"],"max_budget":1000,"budget_duration":"30d"}'
+SHELL
 ```
 
-Put only the returned virtual key in `OPENAI_API_KEYS` in `.env.openwebui`.
+Put only the returned virtual key in `[webui].OPENAI_API_KEYS` in `config.local.toml`.
 Do not give Open WebUI the master key. The second budget is a service-key
 safety ceiling; it is not the per-person quota.
 
@@ -154,7 +164,7 @@ safety ceiling; it is not the per-person quota.
 Open WebUI's default OpenAI-compatible client does not forward a `user` field
 to LiteLLM. Its optional `X-OpenWebUI-User-Id` header is its own local UUID,
 not Keycloak's OIDC `sub`. Import
-`openwebui/functions/keycloak_subject_budget_filter.py` as an **active global
+`examples/openwebui/functions/keycloak_subject_budget_filter.py` as an **active global
 Filter** in Open WebUI's Admin Panel after the first `openwebui-admin` login.
 
 The Filter runs inside Open WebUI's backend. It retrieves the authenticated

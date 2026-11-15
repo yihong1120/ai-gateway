@@ -9,9 +9,9 @@ from fastapi.responses import RedirectResponse
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from examples.auth.database import get_db
-from examples.auth.identity_provider import identity_provider_account_url
-from examples.auth.redis_pool import get_redis_pool
+from examples.identity.database import get_db
+from examples.identity.providers.mode import identity_provider_account_url
+from examples.identity.redis_pool import get_redis_pool
 from examples.bff.oidc_services import complete_oidc_login
 from examples.bff.oidc_services import oidc_global_logout_redirect
 from examples.bff.oidc_services import oidc_login_redirect

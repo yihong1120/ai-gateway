@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from examples.identity.runtime import get_settings
+from examples.identity.settings.bff import get_bff_options
+
 import hmac
-import os
 from typing import Literal
 from typing import TypedDict
 
@@ -9,15 +11,9 @@ from fastapi import HTTPException
 from fastapi import Request
 from fastapi import Response
 
-from examples.auth.config import Settings
-from examples.auth.session_store import AUTH_SESSION_TTL_SECONDS
+from examples.identity.runtime import get_identity
 
-settings = Settings()
-SESSION_COOKIE = os.getenv('BFF_SESSION_COOKIE_NAME', '__Host-vn_session')
-SESSION_COOKIE_SECURE = os.getenv(
-    'BFF_SESSION_COOKIE_SECURE',
-    'true',
-).lower() in {'1', 'true', 'yes', 'on'}
+
 
 
 class _SessionCookieOptions(TypedDict):
@@ -42,6 +38,7 @@ def allowed_origins() -> set[str]:
     Returns:
         Origins explicitly configured for credentialed browser requests.
     """
+    settings = get_settings()
     return {
         value.strip().rstrip('/')
         for value in settings.cors_allowed_origins.split(',')
@@ -91,7 +88,7 @@ def _session_cookie_options() -> _SessionCookieOptions:
         Cookie options shared by creation and removal responses.
     """
     return {
-        'secure': SESSION_COOKIE_SECURE,
+        'secure': get_bff_options().cookie_secure,
         'httponly': True,
         'samesite': 'lax',
         'path': '/',
@@ -106,9 +103,9 @@ def set_session_cookie(response: Response, session_id: str) -> None:
         session_id: Opaque server-side session identifier.
     """
     response.set_cookie(
-        key=SESSION_COOKIE,
+        key=get_bff_options().cookie_name,
         value=session_id,
-        max_age=AUTH_SESSION_TTL_SECONDS,
+        max_age=get_identity().session_ttl_seconds,
         **_session_cookie_options(),
     )
 
@@ -120,6 +117,6 @@ def clear_session_cookie(response: Response) -> None:
         response: Response on which to expire the session cookie.
     """
     response.delete_cookie(
-        key=SESSION_COOKIE,
+        key=get_bff_options().cookie_name,
         **_session_cookie_options(),
     )

@@ -1,6 +1,8 @@
 """OIDC authorization-code + PKCE flow for the browser BFF."""
 from __future__ import annotations
 
+from examples.identity.runtime import get_settings
+
 import base64
 import hashlib
 import json
@@ -18,21 +20,18 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from src.http_client_pool import get_application_http_client
+from examples.shared.runtime.http_clients import get_application_http_client
 
-from examples.auth.config import Settings
-from examples.auth.deployment_context import resolve_request_deployment
-from examples.auth.models import User
-from examples.auth.oidc import OidcTokenVerifier
-from examples.auth.oidc_identity import subject_from_oidc_identity
-from examples.auth.session_store import consume_oidc_logout_state
-from examples.auth.session_store import create_auth_session
-from examples.auth.session_store import create_oidc_logout_state
+from examples.identity.runtime import get_identity
+from examples.identity.deployment_context import resolve_request_deployment
+from examples.identity.models import User
+from examples.identity.providers.oidc_identity import subject_from_oidc_identity
+from examples.identity.sessions.store import consume_oidc_logout_state
+from examples.identity.sessions.store import create_auth_session
+from examples.identity.sessions.store import create_oidc_logout_state
 from examples.bff.schemas import UserSummary
 from examples.bff.security import set_session_cookie
 
-settings = Settings()
-_access_verifier = OidcTokenVerifier.from_settings(settings)
 _STATE_PREFIX = 'bff:oidc:state'
 _SOCIAL_IDENTITY_PROVIDER_HINTS = frozenset({'google', 'apple'})
 
@@ -88,7 +87,8 @@ def _social_identity_provider_hint(value: str | None) -> str | None:
 
 def _require_web_client() -> None:
     """Fail closed until every web authorization-code setting is configured."""
-    if not settings.oidc_web_client_configured or _access_verifier is None:
+    settings = get_settings()
+    if not settings.oidc_web_client_configured or get_identity().oidc_verifier is None:
         raise HTTPException(
             status_code=503,
             detail='oidc_web_login_not_configured',
@@ -97,6 +97,7 @@ def _require_web_client() -> None:
 
 def _require_web_logout() -> None:
     """Fail closed until browser SSO logout is fully configured."""
+    settings = get_settings()
     if not settings.oidc_web_logout_configured:
         raise HTTPException(
             status_code=503,
@@ -146,6 +147,7 @@ async def oidc_login_redirect(
     idp_hint: str | None = None,
 ) -> RedirectResponse:
     """Store single-use state and redirect the browser to the OIDC provider."""
+    settings = get_settings()
     _require_web_client()
     provider_hint = _social_identity_provider_hint(idp_hint)
     binding = await resolve_request_deployment(request, db)
@@ -204,11 +206,9 @@ async def _consume_state(redis: Redis, state: str | None) -> dict[str, object]:
 
 async def _post_token_form(form: Mapping[str, str]) -> dict[str, Any]:
     """Exchange an OIDC code or refresh token server-side."""
+    settings = get_settings()
     _require_web_client()
-    client = await get_application_http_client(
-        'bff-oidc',
-        timeout=httpx.Timeout(10.0, connect=5.0),
-    )
+    client = await get_application_http_client('bff-oidc')
     try:
         if client is None:
             async with httpx.AsyncClient(
@@ -271,8 +271,8 @@ async def refresh_oidc_tokens(refresh_token: str) -> dict[str, Any]:
             'refresh_token': refresh_token,
         },
     )
-    assert _access_verifier is not None
-    await _access_verifier.decode_access_token(str(payload['access_token']))
+    assert get_identity().oidc_verifier is not None
+    await get_identity().oidc_verifier.decode_access_token(str(payload['access_token']))
     return payload
 
 
@@ -296,6 +296,7 @@ async def oidc_global_logout_redirect(
     state: str | None,
 ) -> RedirectResponse:
     """Consume the local bridge and redirect to Keycloak RP logout."""
+    settings = get_settings()
     _require_web_logout()
     if not await consume_oidc_logout_state(redis, state):
         raise HTTPException(
@@ -327,6 +328,7 @@ async def complete_oidc_login(
     state: str | None,
 ) -> RedirectResponse:
     """Exchange a verified callback code for a token-private BFF session."""
+    settings = get_settings()
     _require_web_client()
     record = await _consume_state(redis, state)
     verifier = record.get('code_verifier')
@@ -355,8 +357,8 @@ async def complete_oidc_login(
             'redirect_uri': settings.oidc_web_redirect_uri,
         },
     )
-    assert _access_verifier is not None
-    claims = await _access_verifier.decode_access_token(
+    assert get_identity().oidc_verifier is not None
+    claims = await get_identity().oidc_verifier.decode_access_token(
         str(token_pair['access_token']),
     )
     subject = await subject_from_oidc_identity(

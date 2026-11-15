@@ -8,14 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from examples.auth.deployment_context import DeploymentBinding
-from examples.auth.deployment_context import resolve_request_deployment
-from examples.auth.models import User
-from examples.auth.session_store import auth_tokens
-from examples.auth.session_store import create_auth_session
-from examples.auth.session_store import delete_auth_session
-from examples.auth.session_store import get_auth_session
-from examples.auth.session_store import touch_auth_session
+from examples.identity.deployment_context import DeploymentBinding
+from examples.identity.deployment_context import resolve_request_deployment
+from examples.identity.models import User
+from examples.identity.sessions.store import auth_tokens
+from examples.identity.sessions.store import create_auth_session
+from examples.identity.sessions.store import delete_auth_session
+from examples.identity.sessions.store import get_auth_session
+from examples.identity.sessions.store import touch_auth_session
 from examples.bff.oidc_services import create_oidc_global_logout_url
 from examples.bff.proxy import get_proxy_access_token
 from examples.bff.proxy import proxy_request
@@ -26,11 +26,11 @@ from examples.bff.schemas import UserSummary
 from examples.bff.security import check_csrf
 from examples.bff.security import clear_session_cookie
 from examples.bff.security import require_trusted_origin
-from examples.bff.security import SESSION_COOKIE
+from examples.identity.settings.bff import get_bff_options
 from examples.bff.security import set_session_cookie
-from examples.db_management.schemas.auth import DeploymentInfo
-from examples.db_management.services.auth_services import login_user
-from examples.db_management.services.auth_services import logout_user
+from examples.identity.schemas.auth import DeploymentInfo
+from examples.identity.sessions.authentication import login_user
+from examples.identity.sessions.authentication import logout_user
 
 
 async def _session(
@@ -51,7 +51,7 @@ async def _session(
             record
             has expired.
     """
-    session_id = request.cookies.get(SESSION_COOKIE)
+    session_id = request.cookies.get(get_bff_options().cookie_name)
     data = await get_auth_session(redis, session_id)
     if not session_id or data is None:
         raise HTTPException(status_code=401, detail='app_session_expired')

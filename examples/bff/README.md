@@ -1,5 +1,7 @@
 # Web Backend-for-Frontend
 
+Installation, testing and packaging follow the root [contributor guide](../../CONTRIBUTING.md).
+
 The Web BFF is a separate code module mounted by
 `examples.db_management.app` in the shared FastAPI process on port `8005`.
 Nginx exposes it at `/bff/`. It owns the opaque Web session cookie, CSRF
@@ -8,7 +10,7 @@ checks, JWT refresh and the allowlisted HTTP proxy to backend services.
 Run the shared process with:
 
 ```bash
-uvicorn examples.db_management.app:app \
+uv run --frozen --no-dev --extra identity-services ai-gateway exec identity -- python -m uvicorn examples.db_management.app:app \
   --host 127.0.0.1 \
   --port 8005 \
   --workers 4 \
@@ -79,3 +81,27 @@ Web clients keep renewal requests on the BFF path even if a Native-form
 
 Keeping BFF code in this package preserves a clear security boundary without
 adding another process, database pool or deployment unit.
+
+
+## Source modules and deployment
+
+`proxy.py` orchestrates allowlisted requests. `proxy_tokens.py` owns refresh and
+session reconciliation; `proxy_http.py` and `proxy_streams.py` own HTTP/SSE
+transport. `proxy_headers.py` and `proxy_responses.py` perform bounded header and
+response conversion. `proxy_config.py` constructs immutable BFF options once per
+application. HTTP clients use named lifespan profiles.
+
+`python -m examples.bff.deployment STAGE` produces `identity-services.zip` and a
+format-2 `bff-artifact.json`. The bundle contains the BFF and its auth, management,
+registry and shared dependencies. Deploying only `proxy.py` is no longer supported.
+The activation tool verifies every module and stages a complete source root under
+its SHA256. A backed-up systemd drop-in switches the BFF to that release through
+`python -B -m examples.bff.serve --config PRIVATE_CONFIG`; rollback restores the
+previous configuration and entry point. The host checkout stays intact for other
+services. Releases contain the single `auth/models/` registry and exclude the old
+flat model module. Install the identity-services runtime dependencies before switching.
+
+The identity bundle also includes `auth/settings/` and
+`db_management/services/identity/`. Provider verification, native proof
+transactions, local accounts and Keycloak administration are constructed once
+per application; their HTTP clients and JWKS caches stay within that application.

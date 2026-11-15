@@ -1,5 +1,7 @@
 # Web Backend-for-Frontend
 
+安裝、測試與發布統一使用根目錄的 [開發指南](../../CONTRIBUTING.md)。
+
 Web BFF 是獨立的程式碼模組，由 `examples.db_management.app` 掛載在共同的
 FastAPI process（port `8005`），並由 Nginx 以 `/bff/` 對外提供。它負責 Web
 opaque session cookie、CSRF、JWT refresh，以及只允許固定 service 的 HTTP
@@ -8,7 +10,7 @@ proxy。
 啟動方式：
 
 ```bash
-uvicorn examples.db_management.app:app \
+uv run --frozen --no-dev --extra identity-services ai-gateway exec identity -- python -m uvicorn examples.db_management.app:app \
   --host 127.0.0.1 \
   --port 8005 \
   --workers 4 \

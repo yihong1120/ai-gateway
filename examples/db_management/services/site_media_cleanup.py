@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Iterator
 from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
@@ -15,44 +14,14 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from examples.auth.models import SiteMediaCleanupJob
-from examples.auth.models import Violation
+from examples.identity.models import SiteMediaCleanupJob
+from examples.identity.models import Violation
 
 logger = logging.getLogger(__name__)
-_cleanup_enqueue_chunk_size: Final[int] = 250
 _cleanup_error_max_length: Final[int] = 500
 _cleanup_lease_seconds: Final[int] = 300
 _cleanup_file_concurrency: Final[int] = 8
 _cleanup_retry_max_seconds: Final[int] = 3600
-
-
-def _chunks(values: list[str], size: int) -> Iterator[list[str]]:
-    """Yield bounded chunks without allocating a second list of chunks."""
-    for start in range(0, len(values), size):
-        yield values[start: start + size]
-
-
-async def enqueue_site_media_cleanup_jobs(
-    image_paths: list[str],
-    db: AsyncSession,
-) -> None:
-    """Persist unique image deletions before the owning site is removed."""
-    paths = list(dict.fromkeys(path for path in image_paths if path))
-    for path_chunk in _chunks(paths, _cleanup_enqueue_chunk_size):
-        await db.execute(
-            pg_insert(SiteMediaCleanupJob)
-            .values([{'path': path} for path in path_chunk])
-            .on_conflict_do_update(
-                index_elements=['path'],
-                set_={
-                    'attempt_count': 0,
-                    'last_error': None,
-                    'completed_at': None,
-                    'lease_token': None,
-                    'lease_expires_at': None,
-                },
-            ),
-        )
 
 
 async def enqueue_site_media_cleanup_for_site(
@@ -131,14 +100,6 @@ async def drain_site_media_cleanup_jobs(
     semaphore = asyncio.Semaphore(_cleanup_file_concurrency)
 
     async def delete_claimed(job: SiteMediaCleanupJob) -> OSError | None:
-        """Perform delete claimed.
-
-        Args:
-            job: Value used by this callable.
-
-        Returns:
-            The callable result.
-        """
         try:
             async with semaphore:
                 await asyncio.to_thread(_delete_file, job.path)

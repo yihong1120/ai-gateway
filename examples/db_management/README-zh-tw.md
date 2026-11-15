@@ -2,6 +2,8 @@
 
 # Database Management Backend
 
+安裝、測試與發布統一使用根目錄的 [開發指南](../../CONTRIBUTING.md)。
+
 用於管理使用者、群組、功能權限、工地與 stream 設定的 FastAPI 服務。`main.py` 會讀取
 這裡的啟用 stream 設定，因此這個 backend 是直播偵測 runtime 的 control plane。
 
@@ -29,7 +31,7 @@
 從 repo 根目錄：
 
 ```bash
-uvicorn examples.db_management.app:app \
+uv run --frozen --no-dev --extra identity-services ai-gateway exec identity -- python -m uvicorn examples.db_management.app:app \
   --host 127.0.0.1 \
   --port 8005 \
   --workers 2 \
@@ -40,36 +42,40 @@ OpenAPI docs：`http://127.0.0.1:8005/docs`。
 
 ## 必要設定
 
-```dotenv
-DATABASE_URL=postgresql+asyncpg://username:password@127.0.0.1/construction_hazard_detection
-DB_POOL_SIZE=2
-DB_MAX_OVERFLOW=1
-DB_POOL_TIMEOUT_SECONDS=10
-DB_POOL_RECYCLE_SECONDS=1800
-REDIS_HOST=127.0.0.1
-REDIS_PORT=6379
-REDIS_PASSWORD=password
-JWT_SECRET_KEY=replace-with-a-long-random-secret
-HCAPTCHA_ENABLED=true
-HCAPTCHA_SECRET_KEY=replace-with-your-hcaptcha-secret
-HCAPTCHA_SITE_KEY=3e5cc8c8-0e36-4316-8416-63f0e4c635d0
-HCAPTCHA_BYPASS_KEY=local-script-only-random-secret
-BFF_TOKEN_ENCRYPTION_KEY=replace-with-an-independent-random-secret
-BFF_SESSION_COOKIE_NAME=__Host-vn_session
-BFF_SESSION_COOKIE_SECURE=true
-BFF_SESSION_TTL_SECONDS=2592000
-MEDIA_SESSION_TTL_SECONDS=600
-PLAYBACK_STREAMING_API_URL=http://127.0.0.1:8800
-CORS_ALLOWED_ORIGINS=https://changdar-server.mooo.com,https://visionnaire-cda17.web.app,http://localhost:3000,http://127.0.0.1:3000,http://localhost:5000,http://127.0.0.1:5000,http://localhost:8080,http://127.0.0.1:8080
-DEPLOYMENT_API_BASE_PATH=/hazard/api
-DEPLOYMENT_REGISTRY_ED25519_PRIVATE_KEY=load-from-secret-manager-only
-DEPLOYMENT_REGISTRY_KEY_ID=registry-ed25519-2026-01
-DEPLOYMENT_REGISTRY_TTL_SECONDS=86400
-BREVO_API_KEY=replace-with-your-brevo-api-key
-MAIL_FROM=verified-sender@example.com
-MAIL_FROM_NAME=Visionnaire
-APP_PUBLIC_URL=https://changdar-server.mooo.com
-PASSWORD_RESET_TOKEN_TTL_SECONDS=1800
+以下設定放在 repo 根目錄私人 `config.local.toml` 既有的 `[identity]` 區塊。
+由公開 `config.example.toml` 建立，不再另建或載入 `.env`。
+
+```toml
+[identity]
+DATABASE_URL = "postgresql+asyncpg://username:password@127.0.0.1/construction_hazard_detection"
+DB_POOL_SIZE = "2"
+DB_MAX_OVERFLOW = "1"
+DB_POOL_TIMEOUT_SECONDS = "10"
+DB_POOL_RECYCLE_SECONDS = "1800"
+REDIS_HOST = "127.0.0.1"
+REDIS_PORT = "6379"
+REDIS_PASSWORD = "password"
+JWT_SECRET_KEY = "replace-with-a-long-random-secret"
+HCAPTCHA_ENABLED = "true"
+HCAPTCHA_SECRET_KEY = "replace-with-your-hcaptcha-secret"
+HCAPTCHA_SITE_KEY = "3e5cc8c8-0e36-4316-8416-63f0e4c635d0"
+HCAPTCHA_BYPASS_KEY = "local-script-only-random-secret"
+BFF_TOKEN_ENCRYPTION_KEY = "replace-with-an-independent-random-secret"
+BFF_SESSION_COOKIE_NAME = "__Host-vn_session"
+BFF_SESSION_COOKIE_SECURE = "true"
+BFF_SESSION_TTL_SECONDS = "2592000"
+MEDIA_SESSION_TTL_SECONDS = "600"
+PLAYBACK_STREAMING_API_URL = "http://127.0.0.1:8800"
+CORS_ALLOWED_ORIGINS = "https://changdar-server.mooo.com,https://visionnaire-cda17.web.app,http://localhost:3000,http://127.0.0.1:3000,http://localhost:5000,http://127.0.0.1:5000,http://localhost:8080,http://127.0.0.1:8080"
+DEPLOYMENT_API_BASE_PATH = "/hazard/api"
+DEPLOYMENT_REGISTRY_ED25519_PRIVATE_KEY = "load-from-secret-manager-only"
+DEPLOYMENT_REGISTRY_KEY_ID = "registry-ed25519-2026-01"
+DEPLOYMENT_REGISTRY_TTL_SECONDS = "86400"
+BREVO_API_KEY = "replace-with-your-brevo-api-key"
+MAIL_FROM = "verified-sender@example.com"
+MAIL_FROM_NAME = "Visionnaire"
+APP_PUBLIC_URL = "https://changdar-server.mooo.com"
+PASSWORD_RESET_TOKEN_TTL_SECONDS = "1800"
 ```
 
 所有 API service 必須使用同一個 `JWT_SECRET_KEY`。
@@ -128,7 +134,7 @@ protected API（包括 streaming、violations、FCM）會透過共用驗證層�
 
 每個 Keycloak `sub` 都必須先在 `user_identities` 連到一個本機使用者。使用
 `scripts/keycloak_link_users.py` 預覽、確認後套用帳號連結；這個步驟不會讀取或搬移
-password hash。設定範例、切換順序及改密碼行為見 `examples/auth/README-zh-tw.md`。
+password hash。設定範例、切換順序及改密碼行為見 `examples/identity/README-zh-tw.md`。
 
 全數切換完成後設定 `OIDC_PASSWORDS_MANAGED_EXTERNALLY=true`：
 `/password/forgot`、`/password/reset`、`/update_my_password` 與兩個管理者改密碼 API
@@ -223,16 +229,19 @@ media capability 的 TTL，`hls_url` 與 `items[*].preview_hls_url` 不會改變
 或 Bearer media session。多鏡頭牆最多 24 個不重複鏡頭，不支援 wildcard。
 即時影像只會回傳已開啟 `recognition_enabled` 的設定。
 
-```dotenv
-GOOGLE_WEB_CLIENT_ID=860473757501-c1gtkrqr4lsa52vgoq7vclprm8atjvtv.apps.googleusercontent.com
-GOOGLE_IOS_CLIENT_ID=860473757501-s53qldp7i294qbg1ia8aq822oa0rudj2.apps.googleusercontent.com
-GOOGLE_ANDROID_CLIENT_ID=860473757501-088t4flpgv0kdds6pu4a5m1fntamf1ht.apps.googleusercontent.com
-APPLE_TEAM_ID=5DU8R27949
-APPLE_KEY_ID=NGC4QBS7ZY
-APPLE_SERVICE_ID=com.changdar.visionnaire.signin
-APPLE_BUNDLE_ID=com.changdar.visionnaire
-APPLE_REDIRECT_URI=https://changdar-server.mooo.com/hazard/api/db_management/auth/apple/callback
-APPLE_PRIVATE_KEY_PATH=config/secrets/apple/AuthKey_NGC4QBS7ZY.p8
+以下選用 provider 設定合併至同一個 `[identity]` 區塊，不重複宣告同名區塊：
+
+```toml
+[identity]
+GOOGLE_WEB_CLIENT_ID = "860473757501-c1gtkrqr4lsa52vgoq7vclprm8atjvtv.apps.googleusercontent.com"
+GOOGLE_IOS_CLIENT_ID = "860473757501-s53qldp7i294qbg1ia8aq822oa0rudj2.apps.googleusercontent.com"
+GOOGLE_ANDROID_CLIENT_ID = "860473757501-088t4flpgv0kdds6pu4a5m1fntamf1ht.apps.googleusercontent.com"
+APPLE_TEAM_ID = "5DU8R27949"
+APPLE_KEY_ID = "NGC4QBS7ZY"
+APPLE_SERVICE_ID = "com.changdar.visionnaire.signin"
+APPLE_BUNDLE_ID = "com.changdar.visionnaire"
+APPLE_REDIRECT_URI = "https://changdar-server.mooo.com/hazard/api/db_management/auth/apple/callback"
+APPLE_PRIVATE_KEY_PATH = "config/secrets/apple/AuthKey_NGC4QBS7ZY.p8"
 ```
 
 ## 忘記密碼
@@ -273,3 +282,22 @@ database stream_configs -> main.py -> src/stream_processor.py
 
 多攝影機部署建議使用 database mode，而不是本機 JSON config，這樣更新設定不需要修改
 `main.py`。
+
+## 帳號恢復與 session 升級
+
+既有認證資料庫須先在相同服務環境執行：
+
+```bash
+python -m examples.identity.migrations
+```
+
+命令沿用 `SQLALCHEMY_DATABASE_URI`／`DATABASE_URL`，建立帳號動作 token 表，並將
+`users.status` 擴為可保存 `pending_admin_approval` 的長度。正常啟動只檢查版本；
+新安裝明確使用 `AUTO_CREATE_SCHEMA=true` 時，會在建立基本資料表後初始化 migration。
+
+驗證信與密碼重設改用 PostgreSQL token 雜湊，舊 Redis 連結須重新申請；本機舊 JWT
+session 須重新登入，OIDC／BFF session 格式維持原樣。帳號快照不再存放 bearer 或可變
+session 清單，refresh 旋轉及撤銷由原子 Redis 操作處理。
+
+郵件結果區分成功、拒絕及不明；逾時保留連結，不自動重寄。密碼更新與 token 消耗在
+同一交易提交；Redis 暫時失敗時，session 撤銷由持久待辦重試，避免遺失或重複撤銷新登入。

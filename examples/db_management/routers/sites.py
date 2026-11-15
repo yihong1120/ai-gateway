@@ -9,17 +9,17 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from examples.auth.database import get_db
-from examples.auth.models import Site
-from examples.auth.models import User
-from examples.auth.redis_pool import get_redis_pool
-from examples.auth.user_service import invalidate_effective_site_cache
-from examples.db_management.deps import _site_permission
-from examples.db_management.deps import ensure_admin_with_group
-from examples.db_management.deps import get_current_user
-from examples.db_management.deps import is_super_admin
-from examples.db_management.deps import require_admin
-from examples.db_management.deps import SUPER_ADMIN_NAME
+from examples.identity.database import get_db
+from examples.identity.models import Site
+from examples.identity.models import User
+from examples.identity.redis_pool import get_redis_pool
+from examples.identity.accounts.access import invalidate_effective_site_cache
+from examples.identity.dependencies import _site_permission
+from examples.identity.dependencies import ensure_admin_with_group
+from examples.identity.dependencies import get_current_user
+from examples.identity.dependencies import is_super_admin
+from examples.identity.dependencies import require_admin
+from examples.identity.dependencies import SUPER_ADMIN_NAME
 from examples.db_management.schemas.site import SiteCreate
 from examples.db_management.schemas.site import SiteDelete
 from examples.db_management.schemas.site import SiteGroupOp
@@ -37,17 +37,9 @@ from examples.db_management.services.site_services import (
 from examples.db_management.services.site_services import remove_user_from_site
 from examples.db_management.services.site_services import site_to_read
 from examples.db_management.services.site_services import update_site
-from examples.local_notification_server.site_recipient_cache import (
-    invalidate_site_notification_user_cache,
-)
-from examples.local_notification_server.site_recipient_cache import (
-    refresh_site_notification_user_cache,
-)
-from examples.streaming_web.metadata_keys import (
-    increment_metadata_site_generation,
-)
+from examples.shared.host import integrations
 
-router: APIRouter = APIRouter(tags=['site-mgmt'])
+router: APIRouter = APIRouter(tags=['site-mgmt'], dependencies=[Depends(integrations.require_sites)])
 
 
 @router.get('/list_sites', response_model=list[SiteRead])
@@ -163,8 +155,8 @@ async def endpoint_update_site(
     old_name = site.name
     await update_site(site, payload.new_name, db)
     invalidate_effective_site_cache()
-    await invalidate_site_notification_user_cache([old_name], rds)
-    await refresh_site_notification_user_cache(payload.new_name, db, rds)
+    await integrations.notifications.invalidate_site_notification_user_cache([old_name], rds)
+    await integrations.notifications.refresh_site_notification_user_cache(payload.new_name, db, rds)
     return {'message': 'Site updated successfully.'}
 
 
@@ -209,9 +201,9 @@ async def endpoint_delete_site(
     # Check permissions for deletion
     _site_permission(me, site=site)
 
-    await increment_metadata_site_generation(rds, site.name)
+    await integrations.metadata.increment_metadata_site_generation(rds, site.name)
 
-    await invalidate_site_notification_user_cache([site.name], rds)
+    await integrations.notifications.invalidate_site_notification_user_cache([site.name], rds)
 
     await delete_site(site, db)
     invalidate_effective_site_cache()
@@ -293,7 +285,7 @@ async def endpoint_add_user_to_site(
 
     await add_user_to_site(user.id, site.id, db)
     invalidate_effective_site_cache()
-    await refresh_site_notification_user_cache(site.name, db, rds)
+    await integrations.notifications.refresh_site_notification_user_cache(site.name, db, rds)
     return {'message': 'User linked to site successfully.'}
 
 
@@ -365,7 +357,7 @@ async def endpoint_remove_user_from_site(
 
     await remove_user_from_site(user.id, site.id, db)
     invalidate_effective_site_cache()
-    await refresh_site_notification_user_cache(site.name, db, rds)
+    await integrations.notifications.refresh_site_notification_user_cache(site.name, db, rds)
     return {'message': 'User unlinked from site successfully.'}
 
 

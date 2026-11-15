@@ -2,6 +2,8 @@
 
 # Database Management Backend
 
+Installation, testing and packaging follow the root [contributor guide](../../CONTRIBUTING.md).
+
 FastAPI service for user, group, feature, site, and stream-configuration
 management. `main.py` reads active stream configurations from this service, so
 this backend is the control plane for the live detection runtime.
@@ -30,7 +32,7 @@ this backend is the control plane for the live detection runtime.
 From the repository root:
 
 ```bash
-uvicorn examples.db_management.app:app \
+uv run --frozen --no-dev --extra identity-services ai-gateway exec identity -- python -m uvicorn examples.db_management.app:app \
   --host 127.0.0.1 \
   --port 8005 \
   --workers 2 \
@@ -41,32 +43,37 @@ OpenAPI docs are available at `http://127.0.0.1:8005/docs`.
 
 ## Required Settings
 
-```dotenv
-DATABASE_URL=postgresql+asyncpg://username:password@127.0.0.1/construction_hazard_detection
-DB_POOL_SIZE=2
-DB_MAX_OVERFLOW=1
-DB_POOL_TIMEOUT_SECONDS=10
-DB_POOL_RECYCLE_SECONDS=1800
-REDIS_HOST=127.0.0.1
-REDIS_PORT=6379
-REDIS_PASSWORD=password
-JWT_SECRET_KEY=replace-with-a-long-random-secret
-HCAPTCHA_ENABLED=true
-HCAPTCHA_SECRET_KEY=replace-with-your-hcaptcha-secret
-HCAPTCHA_SITE_KEY=3e5cc8c8-0e36-4316-8416-63f0e4c635d0
-HCAPTCHA_BYPASS_KEY=local-script-only-random-secret
-BFF_TOKEN_ENCRYPTION_KEY=replace-with-an-independent-random-secret
-BFF_SESSION_COOKIE_NAME=__Host-vn_session
-BFF_SESSION_COOKIE_SECURE=true
-BFF_SESSION_TTL_SECONDS=2592000
-MEDIA_SESSION_TTL_SECONDS=600
-PLAYBACK_STREAMING_API_URL=http://127.0.0.1:8800
-CORS_ALLOWED_ORIGINS=https://changdar-server.mooo.com,https://visionnaire-cda17.web.app,http://localhost:3000,http://127.0.0.1:3000,http://localhost:5000,http://127.0.0.1:5000,http://localhost:8080,http://127.0.0.1:8080
-BREVO_API_KEY=replace-with-your-brevo-api-key
-MAIL_FROM=verified-sender@example.com
-MAIL_FROM_NAME=Visionnaire
-APP_PUBLIC_URL=https://changdar-server.mooo.com
-PASSWORD_RESET_TOKEN_TTL_SECONDS=1800
+Keep these values in the repository-root private `config.local.toml`, under its
+existing `[identity]` section. Use the public `config.example.toml` as the starting
+point; do not create or load a separate `.env` file.
+
+```toml
+[identity]
+DATABASE_URL = "postgresql+asyncpg://username:password@127.0.0.1/construction_hazard_detection"
+DB_POOL_SIZE = "2"
+DB_MAX_OVERFLOW = "1"
+DB_POOL_TIMEOUT_SECONDS = "10"
+DB_POOL_RECYCLE_SECONDS = "1800"
+REDIS_HOST = "127.0.0.1"
+REDIS_PORT = "6379"
+REDIS_PASSWORD = "password"
+JWT_SECRET_KEY = "replace-with-a-long-random-secret"
+HCAPTCHA_ENABLED = "true"
+HCAPTCHA_SECRET_KEY = "replace-with-your-hcaptcha-secret"
+HCAPTCHA_SITE_KEY = "3e5cc8c8-0e36-4316-8416-63f0e4c635d0"
+HCAPTCHA_BYPASS_KEY = "local-script-only-random-secret"
+BFF_TOKEN_ENCRYPTION_KEY = "replace-with-an-independent-random-secret"
+BFF_SESSION_COOKIE_NAME = "__Host-vn_session"
+BFF_SESSION_COOKIE_SECURE = "true"
+BFF_SESSION_TTL_SECONDS = "2592000"
+MEDIA_SESSION_TTL_SECONDS = "600"
+PLAYBACK_STREAMING_API_URL = "http://127.0.0.1:8800"
+CORS_ALLOWED_ORIGINS = "https://changdar-server.mooo.com,https://visionnaire-cda17.web.app,http://localhost:3000,http://127.0.0.1:3000,http://localhost:5000,http://127.0.0.1:5000,http://localhost:8080,http://127.0.0.1:8080"
+BREVO_API_KEY = "replace-with-your-brevo-api-key"
+MAIL_FROM = "verified-sender@example.com"
+MAIL_FROM_NAME = "Visionnaire"
+APP_PUBLIC_URL = "https://changdar-server.mooo.com"
+PASSWORD_RESET_TOKEN_TTL_SECONDS = "1800"
 ```
 
 The same `JWT_SECRET_KEY` must be used by every API service.
@@ -177,16 +184,20 @@ are limited to 24 unique cameras and never accept wildcards.
 Only configurations with `recognition_enabled` enabled are returned to
 live-view clients.
 
-```dotenv
-GOOGLE_WEB_CLIENT_ID=860473757501-c1gtkrqr4lsa52vgoq7vclprm8atjvtv.apps.googleusercontent.com
-GOOGLE_IOS_CLIENT_ID=860473757501-s53qldp7i294qbg1ia8aq822oa0rudj2.apps.googleusercontent.com
-GOOGLE_ANDROID_CLIENT_ID=860473757501-088t4flpgv0kdds6pu4a5m1fntamf1ht.apps.googleusercontent.com
-APPLE_TEAM_ID=5DU8R27949
-APPLE_KEY_ID=NGC4QBS7ZY
-APPLE_SERVICE_ID=com.changdar.visionnaire.signin
-APPLE_BUNDLE_ID=com.changdar.visionnaire
-APPLE_REDIRECT_URI=https://changdar-server.mooo.com/hazard/api/db_management/auth/apple/callback
-APPLE_PRIVATE_KEY_PATH=config/secrets/apple/AuthKey_NGC4QBS7ZY.p8
+Merge the optional provider settings into the same `[identity]` section; do not
+add a second section with that name.
+
+```toml
+[identity]
+GOOGLE_WEB_CLIENT_ID = "860473757501-c1gtkrqr4lsa52vgoq7vclprm8atjvtv.apps.googleusercontent.com"
+GOOGLE_IOS_CLIENT_ID = "860473757501-s53qldp7i294qbg1ia8aq822oa0rudj2.apps.googleusercontent.com"
+GOOGLE_ANDROID_CLIENT_ID = "860473757501-088t4flpgv0kdds6pu4a5m1fntamf1ht.apps.googleusercontent.com"
+APPLE_TEAM_ID = "5DU8R27949"
+APPLE_KEY_ID = "NGC4QBS7ZY"
+APPLE_SERVICE_ID = "com.changdar.visionnaire.signin"
+APPLE_BUNDLE_ID = "com.changdar.visionnaire"
+APPLE_REDIRECT_URI = "https://changdar-server.mooo.com/hazard/api/db_management/auth/apple/callback"
+APPLE_PRIVATE_KEY_PATH = "config/secrets/apple/AuthKey_NGC4QBS7ZY.p8"
 ```
 
 ## Password Reset
@@ -229,3 +240,29 @@ Key fields include:
 
 For multi-camera deployments, prefer database mode over local JSON config so
 updates can be applied without editing `main.py`.
+
+## Account recovery and session upgrade
+
+For an existing identity database, apply the account-action migration before
+starting the updated service:
+
+```bash
+python -m examples.identity.migrations
+```
+
+Use the same `SQLALCHEMY_DATABASE_URI` / `DATABASE_URL` configuration as the
+identity app. This upgrades the account-action table and widens `users.status`
+for `pending_admin_approval`; ordinary startup checks the version and does not
+run DDL. New installations using `AUTO_CREATE_SCHEMA=true` also initialize this
+migration after creating the base tables.
+
+Verification and password-reset links now use PostgreSQL token hashes. Previous
+Redis links must be requested again; local JWT sessions must sign in again.
+OIDC and BFF session formats are unchanged. Profile snapshots no longer store
+bearer tokens or mutable token lists. Refresh rotation and revocation use
+atomic Redis session operations.
+
+Mail delivery records distinguish sent, rejected, and unknown outcomes. Timeouts
+keep the link valid and do not trigger automatic resend. Password reset and its
+one-time token commit together; session revocation has a durable, idempotent
+retry path if Redis is temporarily unavailable.

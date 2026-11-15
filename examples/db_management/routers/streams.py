@@ -7,17 +7,15 @@ from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from examples.auth.database import get_db
-from examples.auth.models import Group
-from examples.auth.models import StreamConfig
-from examples.auth.models import User
-from examples.db_management.deps import _site_permission
-from examples.db_management.deps import get_current_user
-from examples.db_management.deps import is_super_admin
-from examples.db_management.deps import require_admin
+from examples.identity.database import get_db
+from examples.identity.models import StreamConfig
+from examples.identity.models import User
+from examples.identity.dependencies import _site_permission
+from examples.identity.dependencies import get_current_user
+from examples.identity.dependencies import is_super_admin
+from examples.identity.dependencies import require_admin
 from examples.db_management.schemas.stream_config import SiteStreamConfigUpsert
 from examples.db_management.schemas.stream_config import StreamConfigCreate
 from examples.db_management.schemas.stream_config import StreamConfigRead
@@ -41,7 +39,7 @@ from examples.db_management.services.stream_config_services import (
     get_group_stream_limit,
 )
 from examples.db_management.services.stream_config_services import (
-    list_stream_configs,
+    upsert_site_stream_configs,
 )
 from examples.db_management.services.stream_config_services import (
     update_stream_config,
@@ -130,13 +128,6 @@ async def endpoint_create_stream_config(
         requested_group_id=payload.group_id,
     )
 
-    current, limit = await get_group_stream_limit(group_id, db)
-    if current >= limit:
-        raise HTTPException(
-            status_code=403,
-            detail='Stream limit reached for group.',
-        )
-
     payload_with_group = payload.model_copy(update={'group_id': group_id})
     cfg = await create_stream_config(payload_with_group, db)
 
@@ -177,88 +168,9 @@ async def endpoint_put_site_stream_config(
     group_id = _resolve_stream_group_id(site, me)
     visible_group_id = None if is_super_admin(cast(Any, me)) else group_id
 
-    # Validate the complete replacement before creating or changing any row.
-    stream_names = [item.stream_name for item in payload.streams]
-    if len(stream_names) != len(set(stream_names)):
-        raise HTTPException(
-            status_code=400,
-            detail='Duplicate stream names are not allowed.',
-        )
-
-    # Read all site configurations once.  Besides making name validation a
-    # local lookup, this preserves the site-wide uniqueness rule even when an
-    # administrator can only update one of the site's groups.
-    site_configs = await list_stream_configs(site_id, db)
-    existing_configs = [
-        cfg
-        for cfg in site_configs
-        if visible_group_id is None or cfg.group_id == visible_group_id
-    ]
-    existing_by_id = {cfg.id: cfg for cfg in existing_configs}
-    config_id_by_name = {cfg.stream_name: cfg.id for cfg in site_configs}
-
-    new_items = [item for item in payload.streams if item.id is None]
-    for item in payload.streams:
-        cfg = existing_by_id.get(item.id) if item.id is not None else None
-        if item.id is not None and cfg is None:
-            raise HTTPException(
-                status_code=404,
-                detail='Stream configuration not found.',
-            )
-        owner_id = config_id_by_name.get(item.stream_name)
-        if owner_id is not None and owner_id != item.id:
-            raise HTTPException(
-                status_code=400,
-                detail='Stream name already exists in site.',
-            )
-
-    if new_items:
-        # Serialise quota checks for this group.  Without the row lock, two
-        # concurrent replacement requests can both pass a stale COUNT(*).
-        await db.execute(
-            select(Group.id).where(Group.id == group_id).with_for_update(),
-        )
-        current, limit = await get_group_stream_limit(group_id, db)
-        if current + len(new_items) > limit:
-            raise HTTPException(
-                status_code=403,
-                detail='Stream limit reached for group.',
-            )
-
-    for item in payload.streams:
-        item_data = item.model_dump(exclude={'id'})
-        if item.id is None:
-            db.add(
-                StreamConfig(
-                    site_id=site_id,
-                    group_id=group_id,
-                    **item_data,
-                ),
-            )
-            continue
-
-        cfg = existing_by_id[item.id]
-        for field, value in item_data.items():
-            setattr(cfg, field, value)
-
-    try:
-        # Flush assigns identifiers and checks all constraints before the one
-        # commit.  It avoids N transactions and N round-trips for a wall's
-        # configuration replacement.
-        await db.flush()
-        await db.commit()
-    except IntegrityError as exc:
-        await db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail='Stream configuration update conflicted.',
-        ) from exc
-    except Exception as exc:
-        await db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail='Unable to update stream configurations.',
-        ) from exc
+    await upsert_site_stream_configs(
+        site_id, payload, db, group_id=group_id, visible_group_id=visible_group_id,
+    )
 
     return await _list_site_stream_config_reads(site_id, db, me)
 

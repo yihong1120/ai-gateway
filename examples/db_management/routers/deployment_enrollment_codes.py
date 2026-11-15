@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+from examples.identity.runtime import get_settings
+
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
 from fastapi import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from examples.auth.config import Settings
-from examples.auth.database import get_db
-from examples.db_management.deps import require_tenant_deployment_administrator
-from examples.db_management.deps import TenantDeploymentAdministrator
+from examples.identity.database import get_db
+from examples.identity.dependencies import require_tenant_deployment_administrator
+from examples.identity.dependencies import TenantDeploymentAdministrator
 from examples.db_management.schemas.deployment_enrollment_code import (
     DeploymentEnrollmentCodeCreate,
 )
@@ -27,7 +28,6 @@ from examples.db_management.services import (
 )
 
 router = APIRouter(tags=['deployment-enrollment-codes'])
-settings = Settings()
 
 
 def _unavailable() -> HTTPException:
@@ -51,6 +51,7 @@ async def create_deployment_enrollment_code(
     db: AsyncSession = Depends(get_db),
 ) -> DeploymentEnrollmentCodeCreated:
     """Issue one raw code once for the deployment bound to this login."""
+    settings = get_settings()
     try:
         created = await code_services.create_managed_enrollment_code(
             db,

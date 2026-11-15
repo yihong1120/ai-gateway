@@ -4,8 +4,8 @@ from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import Field
 
-from examples.db_management.schemas.auth import DeploymentInfo
-from examples.db_management.schemas.auth import UserLogin
+from examples.identity.schemas.auth import DeploymentInfo
+from examples.identity.schemas.auth import UserLogin
 
 
 class UserSummary(BaseModel):

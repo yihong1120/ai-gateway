@@ -1,0 +1,126 @@
+"""Application-owned NativeTransactions dependencies and operations."""
+
+from __future__ import annotations
+from examples.identity.settings.native import NativeSettings
+import hashlib
+import json
+import re
+import secrets
+from collections.abc import Mapping
+from typing import Literal
+from fastapi import HTTPException
+from fastapi import Request
+from redis.asyncio import Redis
+
+NativeSocialProvider = Literal['google', 'apple']
+_TRANSACTION_RE = re.compile('^[A-Za-z0-9_-]{43,128}$')
+_BEGIN_RATE_LIMIT_MAX = 20
+_BEGIN_RATE_LIMIT_WINDOW_SECONDS = 300
+
+
+from examples.identity.redis_counters import increment_window
+
+
+class NativeTransactions:
+    def __init__(self, settings: NativeSettings):
+        self.allowed_clients = (
+            settings.allowed_clients if settings.exchange_enabled else {}
+        )
+
+    def identifier(self) -> str:
+        """Create an unguessable URL-safe transaction identifier."""
+        return secrets.token_urlsafe(32)
+
+    def _transaction_key(self, transaction_id: str) -> str:
+        """Hash public transaction IDs before using them as Redis keys."""
+        digest = hashlib.sha256(transaction_id.encode('ascii')).hexdigest()
+        return f'native-social:transaction:{digest}'
+
+    def _rate_limit_key(self, request: Request) -> str:
+        """Build a privacy-preserving anonymous begin rate-limit key."""
+        host = request.client.host if request.client else 'unknown'
+        digest = hashlib.sha256(host.encode('utf-8')).hexdigest()
+        return f'native-social:begin-rate:{digest}'
+
+    async def enforce_begin_rate_limit(self, request: Request, redis: Redis) -> None:
+        """Bound unauthenticated transaction allocation per trusted peer."""
+        key = self._rate_limit_key(request)
+        count, retry_after = await increment_window(redis, key, _BEGIN_RATE_LIMIT_WINDOW_SECONDS)
+        if count > _BEGIN_RATE_LIMIT_MAX:
+            raise HTTPException(
+                status_code=429,
+                detail='native_social_exchange_rate_limited',
+                headers={
+                    'Retry-After': str(
+                        max(1, retry_after)
+                        if isinstance(retry_after, int)
+                        else _BEGIN_RATE_LIMIT_WINDOW_SECONDS
+                    )
+                },
+            )
+
+    def validate_client_binding(self, client_id: str, redirect_uri: str) -> None:
+        """Require one of the server-configured Keycloak public clients."""
+        allowed = self.allowed_clients
+        if redirect_uri not in allowed.get(client_id, ()):
+            raise HTTPException(status_code=400, detail='invalid_oidc_client')
+
+    def _decode_record(self, raw: bytes | str | None) -> dict[str, object]:
+        """Decode a Redis transaction record without exposing malformed state."""
+        if raw is None:
+            raise HTTPException(
+                status_code=401, detail='native_social_exchange_expired'
+            )
+        try:
+            value = json.loads(raw)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=401, detail='native_social_exchange_expired'
+            ) from exc
+        if not isinstance(value, dict):
+            raise HTTPException(
+                status_code=401, detail='native_social_exchange_expired'
+            )
+        return value
+
+    async def consume(self, redis: Redis, transaction_id: str) -> dict[str, object]:
+        """Atomically consume a one-use transaction before validation work."""
+        if not _TRANSACTION_RE.fullmatch(transaction_id):
+            raise HTTPException(
+                status_code=401, detail='native_social_exchange_expired'
+            )
+        return self._decode_record(
+            await redis.getdel(self._transaction_key(transaction_id))
+        )
+
+    async def store(
+        self,
+        redis: Redis,
+        transaction_id: str,
+        payload: Mapping[str, object],
+        ttl_seconds: int,
+    ) -> None:
+        """Store compact, non-secret transaction state with an absolute TTL."""
+        await redis.set(
+            self._transaction_key(transaction_id),
+            json.dumps(payload, separators=(',', ':')).encode('utf-8'),
+            ex=ttl_seconds,
+        )
+
+    def required_string(self, record: Mapping[str, object], name: str) -> str:
+        """Return a bounded string field from trusted transaction state."""
+        value = record.get(name)
+        if not isinstance(value, str) or not value:
+            raise HTTPException(
+                status_code=401, detail='native_social_exchange_expired'
+            )
+        return value
+
+    def provider(self, record: Mapping[str, object]) -> NativeSocialProvider:
+        """Return the fixed provider stored in a transaction."""
+        provider = record.get('provider')
+        if provider not in {'google', 'apple'}:
+            raise HTTPException(
+                status_code=401, detail='native_social_exchange_expired'
+            )
+        return provider
