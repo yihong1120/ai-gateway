@@ -48,6 +48,56 @@ uv run --frozen --all-extras python -m examples.deployment.tools.validate
 實驗輸出放在已忽略的 `artifacts/`；歷史數據不代表主機目前狀態。舊 TabbyAPI、OCR 1.5／PP-OCR 備援及
 已完成的模型退役工具已移除；目前只維護對應產品目錄中的啟動設定。
 
+## AI Agent 協作流程
+
+主協調依任務選擇專責角色，互不依賴的工作可並行，相依工作則依序交接。
+需要修訂時，審核結果交回主協調安排補正。
+下圖由左至右呈現多角色協作；實際工具與審核要求依伺服器設定。
+
+```mermaid
+flowchart LR
+    UI["Open WebUI<br/>身分與任務"] -->|授權與佇列排程| C["主協調 Agent<br/>規劃與按需委派"]
+
+    subgraph Specialists["專責 Agents"]
+        K["知識 Agent<br/>附件／NAS／MCP"]
+        E["EIP Agent<br/>公文與行事曆"]
+        S["研究 Agent<br/>搜尋與來源引用"]
+        D["文件 Agent<br/>Word／PPT 修訂"]
+        A["資料 Agent<br/>Excel 統計圖表"]
+        G["工程圖 Agent<br/>CAD／2D 草稿"]
+    end
+
+    C --> K
+    C --> E
+    C --> S
+    C --> D
+    C --> A
+    C --> G
+    K --> M["主協調整合<br/>來源與交付驗收"]
+    E --> M
+    S --> M
+    D --> M
+    A --> M
+    G --> M
+
+    M -->|需獨立校核| R["審核 Agent<br/>唯讀校核成果"]
+    R -.->|需修訂| M
+    R -->|通過| O["回覆與私人下載<br/>待確認操作"]
+    M -->|無需校核| O
+
+    classDef entry fill:#eef2ff,stroke:#6366a0,color:#1f2937
+    classDef agent fill:#edf8f0,stroke:#4b8b62,color:#1f2937
+    classDef review fill:#fff5df,stroke:#b58a31,color:#1f2937
+    class UI,O entry
+    class C,K,E,S,D,A,G,M agent
+    class R review
+    style Specialists fill:#f8fafc,stroke:#b8c5d6,color:#334155
+```
+
+各角色透過 LiteLLM 使用固定配置的模型；PostgreSQL 保存佇列、checkpoint 與成果紀錄。
+Agent 審核只核對內容，受控存檔與行事曆寫入仍需本人在工作台預覽確認。
+角色分工與設定見[公司助理](company_agent/README.md)。
+
 ## 架構與執行契約
 
 應用持有各自資源，背景工作由 PostgreSQL lease 管理，同一帳號依序處理。
