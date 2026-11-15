@@ -1,0 +1,1 @@
+"""Company MCP ui boundary."""

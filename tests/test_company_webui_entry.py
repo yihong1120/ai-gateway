@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class WebUIEntryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        path = ROOT / 'openwebui/functions/company_agent_pipe.py'
+        path = ROOT / 'examples/openwebui/functions/company_agent_pipe.py'
         spec = importlib.util.spec_from_file_location('company_entry_test', path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -39,7 +39,7 @@ class WebUIEntryTests(unittest.IsolatedAsyncioTestCase):
                 run.assert_awaited_once()
 
     def test_launcher_installs_canonical_router(self):
-        source = (ROOT / 'official_document_workflow/api/app.py').read_text()
+        source = (ROOT / 'examples/openwebui/app.py').read_text()
         imports = [
             node.module
             for node in ast.walk(ast.parse(source))
@@ -53,7 +53,7 @@ class WebUIEntryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             function_source(),
-            (ROOT / 'openwebui/functions/company_agent_pipe.py').read_text(
+            (ROOT / 'examples/openwebui/functions/company_agent_pipe.py').read_text(
                 encoding='utf-8',
             ),
         )

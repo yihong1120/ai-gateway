@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>公司資源操作確認</title><link rel="stylesheet" href="/connections/app.css"><script defer src="/agents/mcp/app.js"></script></head>
+<body><main><nav><a href="/connections">帳號與連線</a> · <a href="/agents">公司助理工作台</a></nav>
+<h1>公司資源操作確認</h1><p id="status" role="status">正在核對本人操作…</p>
+<section id="operation" hidden><h2>公文分析</h2><p id="description"></p><pre id="instruction"></pre>
+<p>確認後會使用本人模型額度；同版本及判讀條件沿用既有分析結果。行事曆仍須另行預覽確認，不會在此自動新增。</p>
+<button id="analyze" type="button">確認並開始分析</button></section>
+<section id="calendar" hidden><h2>待確認行事曆</h2><p id="calendar-notice"></p><pre id="events"></pre>
+<button id="import" type="button">確認匯入我的私人行事曆</button></section>
+<p><a id="workspace" href="/agents">查看處理進度與成果</a></p></main></body></html>

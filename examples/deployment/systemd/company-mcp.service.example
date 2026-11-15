@@ -1,0 +1,23 @@
+[Unit]
+Description=Company NAS and EIP MCP protocol service
+After=network-online.target
+Wants=network-online.target
+# Deliberately no PartOf/Requires=WebUI: health and restart are independent.
+
+[Service]
+User=REPLACE_WITH_DEDICATED_MCP_USER
+WorkingDirectory=/opt/ai-gateway
+# Install: UV_PROJECT_ENVIRONMENT=.venv-company-mcp uv sync --frozen --no-dev --extra company-mcp
+# This file contains ONLY [company_mcp]; no WebUI/DB/vault/IdP client secrets.
+Environment=AI_GATEWAY_CONFIG=/etc/ai-gateway/company-mcp.toml
+ExecStart=/opt/ai-gateway/.venv-company-mcp/bin/python -m examples.deployment.cli exec company_mcp -- /opt/ai-gateway/.venv-company-mcp/bin/python -m company_mcp.serve
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

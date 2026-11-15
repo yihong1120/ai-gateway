@@ -1,0 +1,1 @@
+"""Company MCP adapters boundary."""
