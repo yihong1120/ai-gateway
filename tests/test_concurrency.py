@@ -6,7 +6,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from official_document_workflow.infrastructure import concurrency as limits
+from examples.shared.runtime import concurrency as limits
 
 
 class AdmissionTests(unittest.IsolatedAsyncioTestCase):
@@ -135,7 +135,7 @@ class AdmissionTests(unittest.IsolatedAsyncioTestCase):
         entered = []
 
         class Pipe:
-            async def _emit_processing_status(self, *args):
+            async def emit_status(self, *args):
                 pass
 
             @limits.document_request
@@ -244,7 +244,7 @@ class AdmissionTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.valves = Valves()
 
-            async def _emit_processing_status(self, *args):
+            async def emit_status(self, *args):
                 pass
 
             @limits.document_request

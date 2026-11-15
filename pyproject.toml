@@ -1,61 +1,164 @@
 [project]
 name = "ai-gateway"
 version = "0.1.0"
-description = "LiteLLM Proxy configuration + local dev tooling"
+description = "Self-hosted AI gateway, identity services and document workflows"
 readme = "README.md"
-requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
 dependencies = [
-  "litellm[proxy]",
-  "openai",
-  "requests",
   "fastapi>=0.115,<1",
   "uvicorn[standard]>=0.30,<1",
   "httpx>=0.27,<1",
+  "anyio>=4,<5",
+  "pydantic>=2,<3",
   "PyJWT[crypto]>=2.8,<3",
-  "python-dotenv>=1.0,<2",
-  "python-docx>=1.1,<2",
-  "pdf2docx>=0.5.13,<0.6",
-  "PyMuPDF>=1.28,<1.29",
-  "Pillow>=11.1,<13",
-  "pillow-heif>=1,<2",
-  "langgraph==1.0.10",
-  "langgraph-prebuilt==1.0.8",
-  "cryptography>=43,<49",
+  "python-dotenv>=1.2.0,<2",
+  "PyYAML>=6,<7",
 ]
 
+[project.scripts]
+ai-gateway = "examples.deployment.cli:main"
+
+[project.urls]
+Repository = "https://github.com/yihong1120/ai-gateway"
+
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project.optional-dependencies]
+company-mcp = ["mcp==2.3.0"]
+company-ai-access = [
+  "cryptography>=43,<49",
+  "psycopg[binary]>=3.2,<4",
+  "psycopg-pool>=3.2,<4",
+]
+identity-services = [
+  "ai-gateway[company-ai-access]",
+  "apscheduler>=3.10,<4",
+  "pydantic-settings>=2.2,<3",
+  "sqlalchemy[asyncio]>=2,<3",
+  "asyncpg>=0.29,<1",
+  "redis>=5,<8",
+  "pwdlib[argon2,bcrypt]>=0.2,<1",
+  "python-multipart>=0.0.18,<1",
+  "email-validator>=2,<3",
+]
+ai-usage = [
+  "sqlalchemy[asyncio]>=2,<3",
+  "asyncpg>=0.29,<1",
+  "pydantic-settings>=2.2,<3",
+]
+documents = [
+  "ai-gateway[company-ai-access]",
+  "python-docx>=1.1,<2",
+  "PyMuPDF>=1.28,<1.29",
+  "Pillow>=11.1,<14",
+  "pillow-heif>=1,<2",
+  "sqlalchemy>=2,<3",
+  "langsmith>=0.4,<1",
+  "typing-extensions>=4.12,<5",
+  "jsonschema>=4,<5",
+]
 company-agent = [
+  "ai-gateway[documents,company-ai-access]",
+  "openai>=1,<3",
   "openpyxl>=3.1.5,<4",
-  "python-pptx>=1.0,<2", "defusedxml>=0.7,<1",
+  "python-pptx>=1.0,<2",
+  "defusedxml>=0.7,<1",
+  "lxml>=5,<7",
   "langchain-core>=1.2.13,<2",
   "langchain==1.2.10",
+  "langchain-openai==1.1.10",
   "langgraph==1.0.10",
   "langgraph-prebuilt==1.0.8",
-  "langchain-openai==1.1.10",
   "langgraph-checkpoint-postgres==3.0.5",
-  "psycopg[binary]>=3.2,<4",
+  "mcp==2.3.0",
+  "jsonschema>=4,<5",
   "pycryptodome>=3.23,<4",
 ]
 
-[tool.setuptools.packages.find]
-include = ["official_document_workflow*", "company_agent*"]
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.14,<1", "build>=1,<2", "aiosqlite>=0.20,<1", "litellm==1.109.1"]
+office-worker = ["openpyxl==3.1.5", "PyMuPDF==1.26.7"]
+cad-worker = ["ezdxf==1.4.4"]
+litellm = [
+  "litellm[proxy]==1.109.1",
+  "litellm-proxy-extras==0.4.113",
+  "prisma==0.15.0",
+  "psycopg[binary]==3.3.4",
+  "google-auth==2.49.1",
+  "cryptography==50.0.2",
+]
 
-[tool.setuptools.package-data]
-"official_document_workflow" = ["frontend/*.html", "frontend/assets/*.js", "frontend/assets/*.css"]
-"company_agent" = ["README.md"]
-"company_agent.configs" = ["*.json"]
-"company_agent.evals" = ["README.md"]
-"company_agent.agents" = ["common.md"]
-"company_agent.ui" = ["*.html", "*.js", "*.css"]
-"company_agent.services.cad.worker" = ["*.cs", "*.csproj"]
-"company_agent.tests" = ["fixtures/*.json"]
-"*" = ["prompt.md"]
+[tool.uv.dependency-groups]
+litellm = {requires-python = ">=3.12"}
 
 [tool.uv]
-# Use a local virtualenv in the repo (default behavior when running `uv sync`).
+conflicts = [
+  [{group = "litellm"}, {extra = "company-mcp"}],
+  [{group = "litellm"}, {extra = "company-ai-access"}],
+  [{group = "litellm"}, {extra = "identity-services"}],
+  [{group = "litellm"}, {extra = "ai-usage"}],
+  [{group = "litellm"}, {extra = "documents"}],
+  [{group = "litellm"}, {extra = "company-agent"}],
+  [{group = "office-worker"}, {extra = "company-ai-access"}],
+  [{group = "office-worker"}, {extra = "identity-services"}],
+  [{group = "office-worker"}, {extra = "ai-usage"}],
+  [{group = "office-worker"}, {extra = "documents"}],
+  [{group = "office-worker"}, {extra = "company-agent"}],
+  [{group = "cad-worker"}, {extra = "company-ai-access"}],
+  [{group = "cad-worker"}, {extra = "identity-services"}],
+  [{group = "cad-worker"}, {extra = "ai-usage"}],
+  [{group = "cad-worker"}, {extra = "documents"}],
+  [{group = "cad-worker"}, {extra = "company-agent"}],
+  [{group = "litellm"}, {group = "office-worker"}],
+  [{group = "litellm"}, {group = "cad-worker"}],
+]
+
+[tool.setuptools.packages.find]
+include = [
+  "examples.official_document_workflow*",
+  "company_agent*",
+  "company_mcp*",
+  "examples",
+  "examples.company_ai_access*",
+  "examples.identity*",
+  "examples.bff*",
+  "examples.db_management*",
+  "examples.deployment.registry*",
+  "examples.ai_usage*",
+  "examples.shared*",
+  "examples.deployment",
+  "examples.openwebui",
+  "examples.openwebui.functions",
+]
+
+exclude = ["company_agent.tests*", "examples.official_document_workflow.deployment*", "examples.company_ai_access.deployment*", "examples.ai_usage.deployment*"]
+
+[tool.setuptools.package-data]
+"examples.identity" = ["README.md", "README-zh-tw.md"]
+"examples.openwebui" = ["README.md"]
+"examples.deployment.registry" = ["README.md"]
+"examples.shared.runtime" = ["README.md"]
+"examples.official_document_workflow" = ["README.md", "frontend/*.html", "frontend/assets/*.js", "frontend/assets/*.css"]
+"company_agent" = ["README.md"]
+"company_agent.configs" = ["*.json", "archive/*.json"]
+"company_agent.evals" = ["README.md"]
+"examples.official_document_workflow.evals" = ["README.md"]
+"company_agent.agents" = ["common.md"]
+"company_agent.ui" = ["*.html", "*.js", "*.css"]
+"company_mcp.ui" = ["*.html", "*.js"]
+"examples.company_ai_access" = ["windows/*.ps1", "ui/*.html", "ui/*.js", "codex-models.example.json"]
+"company_agent.services.cad.worker" = ["*.cs", "*.csproj"]
+"*" = ["prompt.md"]
+
+[tool.setuptools.exclude-package-data]
+"examples.deployment" = ["systemd/*", "nginx/*"]
+"company_agent" = ["tests/*", "tests/**/*"]
+"examples" = ["litellm/*", "litellm/**/*"]
+"examples.official_document_workflow" = ["deployment/*", "deployment/**/*"]
+
 [tool.black]
 line-length = 120

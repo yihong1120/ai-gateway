@@ -1,0 +1,8 @@
+include config.example.toml CONTRIBUTING.md
+include Dockerfile .dockerignore uv.lock docker-compose.yml
+include examples/litellm/config.yaml
+include examples/litellm/profiles/dev.yaml
+include examples/litellm/local/vllm.example.yaml
+include examples/official_document_workflow/deployment/ocr/vllm.example.yaml
+include examples/deployment/systemd/company-mcp.service.example
+include examples/deployment/nginx/company-mcp.conf.example

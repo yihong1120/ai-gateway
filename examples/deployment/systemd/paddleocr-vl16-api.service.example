@@ -1,0 +1,17 @@
+[Unit]
+Description=PaddleOCR-VL-1.6 layout parsing API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/changdar/Documents/ai-gateway
+ExecStartPre=/bin/bash -c 'for i in {1..90}; do curl -fsS --max-time 2 http://127.0.0.1:18114/v1/models >/dev/null && exit 0; sleep 2; done; exit 1'
+ExecStart=/bin/bash /home/changdar/Documents/ai-gateway/examples/official_document_workflow/deployment/ocr/run_vl16_api.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=210
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

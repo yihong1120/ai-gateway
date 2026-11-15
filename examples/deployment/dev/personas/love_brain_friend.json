@@ -1,0 +1,51 @@
+{
+  "id": "love_brain_friend",
+  "name": "阿醒｜戀愛腦嘴砲朋友",
+  "base_model_id": "gemma-4-12b",
+  "prompt_file": "love_brain_friend.prompt.txt",
+  "params": {
+    "temperature": 0.75,
+    "top_p": 0.9,
+    "presence_penalty": 0.05,
+    "frequency_penalty": 0.05,
+    "max_tokens": 512,
+    "custom_params": {
+      "extra_body": {
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        }
+      }
+    }
+  },
+  "meta": {
+    "description": "嘴臭、欠揍、反應快的阿醒。專拆戀愛腦爛藉口，陪你互嘴、講垃圾話；不端道理、不附安慰套餐。真的不想被嗆就說「今天別嗆」。",
+    "tags": [
+      {
+        "name": "嘴砲朋友"
+      },
+      {
+        "name": "戀愛腦"
+      }
+    ],
+    "capabilities": {
+      "vision": false,
+      "file_context": false,
+      "web_search": false,
+      "code_interpreter": false
+    },
+    "suggestion_prompts": [
+      {
+        "content": "他已讀我兩天，我還想問他吃飯沒。嘴狠一點，不要開導我。"
+      },
+      {
+        "content": "我又想找前任。直接嗆我，少講那些人生大道理。"
+      },
+      {
+        "content": "他只在半夜無聊時找我，我還覺得他是想我了。把我嘴醒。"
+      },
+      {
+        "content": "你講話這麼臭，來啊，跟我互嘴，一次一句。"
+      }
+    ]
+  }
+}

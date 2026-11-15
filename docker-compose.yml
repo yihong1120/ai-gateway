@@ -1,24 +1,153 @@
+name: ai-gateway
+
+x-inference: &inference
+  restart: unless-stopped
+  environment:
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+  shm_size: 2g
+  command: ["--config", "/etc/vllm/config.yaml"]
+
 services:
   litellm:
-    image: ghcr.io/berriai/litellm:main-latest
-    container_name: ai-gateway
+    profiles: [litellm]
+    image: ghcr.io/berriai/litellm:v1.109.1@sha256:11175975a3093e05e92faee2fe2fe3412a3ae2fcaa849eb0fe25d5f0d8bcb2e9
     restart: unless-stopped
-    # Linux-only: lets the container reach host services at 127.0.0.1 (e.g., Ollama on :11434)
     network_mode: host
     working_dir: /app
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
-      - ./secrets/changdar-ai-llm-server.json:/app/secrets/changdar-ai-llm-server.json:ro
-    env_file:
-      # LiteLLM must not receive the Open WebUI / Keycloak secrets.
-      - .env.litellm
-    command: ["--config", "/app/config.yaml", "--host", "127.0.0.1", "--port", "4000"]
+      - type: bind
+        source: ./examples/litellm/config.yaml
+        target: /app/config.yaml
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${VERTEX_CREDENTIALS:-/nonexistent/vertex-credentials.json}
+        target: ${VERTEX_CREDENTIALS:-/nonexistent/vertex-credentials.json}
+        read_only: true
+        bind: {create_host_path: false}
+    # Only this service's credentials enter the container.
+    environment:
+      LITELLM_DATABASE_URL:
+      LITELLM_MASTER_KEY:
+      LITELLM_SALT_KEY:
+      AZURE_AI_API_BASE:
+      AZURE_AI_API_KEY:
+      LOCAL_MODEL_API_BASE:
+      LOCAL_MODEL_API_KEY:
+      VERTEX_CREDENTIALS:
+      VERTEX_PROJECT:
+      VERTEX_LOCATION:
+      TZ: ${TZ:-Asia/Taipei}
+      DEBUG: "false"
+      PYTHON_DOTENV_DISABLED: "1"
+    command: ["--config", "/app/config.yaml", "--host", "${LITELLM_HOST:-127.0.0.1}", "--port", "${LITELLM_PORT:-4000}"]
+
+  vllm:
+    <<: *inference
+    profiles: [local-model]
+    image: ${LOCAL_INFERENCE_IMAGE:-vllm/vllm-openai:v0.31.0}
+    ports:
+      - "127.0.0.1:${LOCAL_INFERENCE_HOST_PORT:-5003}:8000"
+    volumes:
+      - type: bind
+        source: ${LOCAL_INFERENCE_MODEL_PATH:-/nonexistent/local-model}
+        target: /models/model
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${LOCAL_INFERENCE_CONFIG_PATH:-/nonexistent/vllm-config.yaml}
+        target: /etc/vllm/config.yaml
+        read_only: true
+        bind: {create_host_path: false}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${LOCAL_INFERENCE_GPU_ID:-0}"]
+              capabilities: [gpu]
+
+  paddleocr-vl16-vllm:
+    <<: *inference
+    profiles: [ocr]
+    image: ${OCR_INFERENCE_IMAGE:-vllm/vllm-openai:v0.31.0}
+    ports:
+      - "127.0.0.1:${OCR_HOST_PORT:-18114}:8000"
+    volumes:
+      - type: bind
+        source: ${OCR_MODEL_PATH:-/nonexistent/ocr-model}
+        target: /models/model
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${OCR_INFERENCE_CONFIG_PATH:-/nonexistent/ocr-vllm-config.yaml}
+        target: /etc/vllm/config.yaml
+        read_only: true
+        bind: {create_host_path: false}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${OCR_GPU_ID:-0}"]
+              capabilities: [gpu]
+
+  postgres:
+    profiles: [dev-db]
+    image: postgres@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
+    restart: unless-stopped
+    env_file: ${DEV_CONFIG_DIR:-/nonexistent}/postgres.env
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - postgres:/var/lib/postgresql
+    shm_size: 128mb
+    mem_limit: 1g
+    cpus: 1
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev_bootstrap -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   fileserver:
+    profiles: [files]
     image: nginx:alpine
-    container_name: ai-fileserver
     restart: unless-stopped
     ports:
-      - "18080:80"
+      - "${FILESERVER_HOST:-0.0.0.0}:${FILESERVER_PORT:-18080}:80"
     volumes:
-      - /mnt/data:/usr/share/nginx/html:ro
+      - type: bind
+        source: ${FILESERVER_ROOT:-/mnt/data}
+        target: /usr/share/nginx/html
+        read_only: true
+        bind: {create_host_path: false}
+
+  management-api:
+    profiles: [images]
+    image: ai-gateway/management-api:1
+    build: {context: ., dockerfile: Dockerfile, target: management-api}
+
+  company-office:
+    profiles: [images]
+    image: ai-gateway/company-office:1
+    build: {context: ., dockerfile: Dockerfile, target: company-office}
+
+  eip-office:
+    profiles: [images]
+    image: ai-gateway/eip-office:1
+    build: {context: ., dockerfile: Dockerfile, target: eip-office}
+
+  company-cad:
+    profiles: [images]
+    image: ai-gateway/company-cad:1
+    build: {context: ., dockerfile: Dockerfile, target: company-cad}
+
+  eval-preview:
+    profiles: [images]
+    image: ai-gateway/company-eval-preview:20261018
+    build: {context: ., dockerfile: Dockerfile, target: eval-preview}
+
+volumes:
+  postgres:

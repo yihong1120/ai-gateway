@@ -1,0 +1,316 @@
+# Copy once to config.local.toml and keep it mode 0600. Never commit real credentials.
+# Each process receives only its selected section; process environment wins.
+# Values use the existing environment-variable spelling and string formats.
+# CSV lists and JSON text stay strings. Commented settings remain optional.
+
+[webui]
+# Only the WebUI process receives this section.
+# This section must not project LITELLM_MASTER_KEY or provider keys into WebUI.
+
+# PostgreSQL role/database dedicated to Open WebUI.
+DATABASE_URL = "postgresql://openwebui:REPLACE_WITH_OPENWEBUI_DB_PASSWORD@127.0.0.1:5432/openwebui"
+WEBUI_SECRET_KEY = "REPLACE_WITH_LONG_RANDOM_VALUE"
+# The main site is Visionnaire Flutter. Open WebUI gets its own prefixed route.
+WEBUI_URL = "https://ai.changdar-server.mooo.com"
+CORS_ALLOW_ORIGIN = "https://ai.changdar-server.mooo.com"
+WEBUI_SESSION_COOKIE_SECURE = "true"
+WEBUI_AUTH_COOKIE_SECURE = "true"
+WEBUI_SESSION_COOKIE_SAME_SITE = "lax"
+WEBUI_AUTH_COOKIE_SAME_SITE = "lax"
+OAUTH_MAX_SESSIONS_PER_USER = "10"
+JWT_EXPIRES_IN = "8h"
+
+# Open WebUI -> LiteLLM. This is a restricted LiteLLM virtual key, generated
+# only after LiteLLM has its own database. It is not the LiteLLM master key.
+OPENAI_API_BASE_URLS = "http://127.0.0.1:4000/v1"
+OPENAI_API_KEYS = "sk-REPLACE_WITH_OPENWEBUI_BACKEND_VIRTUAL_KEY"
+
+# Optional Company Agent JSON settings. Configure trusted mcp_servers with
+# explicit read-only tool allowlists there; the default list is empty.
+# No bearer, service-account secret or refresh token belongs in that JSON.
+# COMPANY_AGENT_CONFIG = "/etc/ai-gateway/company-agent.json"
+
+# The daily-usage Function uses its own read-only spend-log key and shared usage
+# reader. These settings belong to this host, independently of the AI Usage API.
+# LITELLM_USAGE_READER_KEY = "sk-REPLACE_WITH_RESTRICTED_USAGE_READER_KEY"
+LITELLM_USAGE_BASE_URL = "http://127.0.0.1:4000"
+LITELLM_DAILY_BUDGET_USD = "4.00"
+# Optional comma-separated catalog aliases, including privately hosted models.
+# AI_USAGE_LOCAL_MODEL_NAMES = "your-local-model"
+
+# This Function-only virtual key is deliberately separate from the ordinary
+# Open WebUI key above. Official-document cloud processing has no end-user
+# `user` field, so this key's service budget (not a user's daily budget) is
+# charged. Keep it out of browsers, Flutter apps, Function Valves and git.
+OFFICIAL_DOCUMENT_LITELLM_BASE_URL = "http://127.0.0.1:4000/v1"
+OFFICIAL_DOCUMENT_LITELLM_API_KEY = "sk-REPLACE_WITH_OFFICIAL_DOCUMENT_SERVICE_KEY"
+
+# Web search is performed by the local private SearXNG service. Its Docker
+# port must be bound to 127.0.0.1 only, not published to the network.
+ENABLE_WEB_SEARCH = "true"
+WEB_SEARCH_ENGINE = "searxng"
+SEARXNG_QUERY_URL = "http://127.0.0.1:8888/search"
+SEARXNG_LANGUAGE = "all"
+WEB_SEARCH_RESULT_COUNT = "5"
+
+# Keycloak realm `visionnaire` OIDC client `open-webui`.
+# Do not create a second account/password directory in Open WebUI.
+ENABLE_PASSWORD_AUTH = "false"
+ENABLE_LOGIN_FORM = "false"
+ENABLE_PASSWORD_CHANGE_FORM = "true"
+ENABLE_OAUTH_SIGNUP = "true"
+OAUTH_CLIENT_ID = "open-webui"
+OAUTH_CLIENT_SECRET = "REPLACE_WITH_KEYCLOAK_CLIENT_SECRET"
+OPENID_PROVIDER_URL = "https://changdar-server.mooo.com/keycloak/realms/visionnaire/.well-known/openid-configuration"
+OPENID_REDIRECT_URI = "https://ai.changdar-server.mooo.com/oauth/oidc/callback"
+OAUTH_PROVIDER_NAME = "Visionnaire SSO"
+OAUTH_SCOPES = "openid profile email"
+OAUTH_SUB_CLAIM = "sub"
+OAUTH_USERNAME_CLAIM = "preferred_username"
+ENABLE_OAUTH_EMAIL_FALLBACK = "true"
+OAUTH_MERGE_ACCOUNTS_BY_EMAIL = "false"
+ENABLE_OAUTH_PERSISTENT_CONFIG = "false"
+
+# Only client roles explicitly mapped into the OIDC token are accepted.
+ENABLE_OAUTH_ROLE_MANAGEMENT = "true"
+OAUTH_ROLES_CLAIM = "resource_access.open-webui.roles"
+OAUTH_ALLOWED_ROLES = "openwebui-user,openwebui-admin"
+OAUTH_ADMIN_ROLES = "openwebui-admin"
+
+# Keycloak is the source of truth for shared Visionnaire/Open WebUI group
+# membership. The `visionnaire-groups` mapper emits full Keycloak paths in the
+# standard `groups` claim, e.g. /engineering/site-a. Open WebUI mirrors those
+# names and updates membership at every OIDC login.
+ENABLE_OAUTH_GROUP_MANAGEMENT = "true"
+ENABLE_OAUTH_GROUP_CREATION = "true"
+OAUTH_GROUPS_CLAIM = "groups"
+OAUTH_BLOCKED_GROUPS = "[]"
+
+# The following header contains Open WebUI's local UUID, not the Keycloak
+# subject. Leave this disabled; quota identity is injected by the trusted
+# server-side Filter described in docs/visionnaire-ai-integration.md.
+ENABLE_FORWARD_USER_INFO_HEADERS = "false"
+
+# Scheduled EIP calendar reservation when the source has a start but no end.
+# Allowed: 60 or 120 minutes. This is not an authoritative source end time.
+EIP_CALENDAR_DEFAULT_DURATION_MINUTES = "60"
+
+# Share content-derived upload/EIP work after each account obtains its own source.
+# Private downloads, receipt dates and calendar writes remain per user.
+EIP_SHARED_CONTENT_CACHE_ENABLED = "true"
+EIP_SHARED_CONTENT_CACHE_TTL_SECONDS = "604800"
+
+# Optional EIP public origin and a private key file owned by the service account.
+# EIP_WEBUI_ORIGIN = "https://ai.example.com"
+# EIP_AUTOMATION_KEY_FILE = "/var/lib/ai-gateway/eip-automation.key"
+
+# Company assistant NAS identity. Configure in this section or a trusted process environment.
+# COMPANY_AGENT_NAS_URL = "https://nas.example.com:5001"
+# Optional verified HTTPS route to the SAME NAS after an office/network move.
+# Existing encrypted credentials and binding revisions continue to use NAS_URL.
+# COMPANY_AGENT_NAS_CONNECT_URL = "https://verified-nas-relay.example.com"
+
+# Optional company-owned HTTP MCP; deploy Keycloak clients and proxy routes first.
+COMPANY_MCP_ENABLED = false
+# COMPANY_MCP_ORIGIN = "https://ai.changdar-server.mooo.com"
+# COMPANY_MCP_ISSUER = "https://changdar-server.mooo.com/keycloak/realms/visionnaire"
+# COMPANY_MCP_CLIENTS = "changdar-codex-mcp,changdar-claude-mcp"
+# COMPANY_MCP_ALLOWED_CIDRS = "127.0.0.0/8,192.168.1.0/24"
+# COMPANY_MCP_INTROSPECTION_CLIENT = "changdar-company-resources"
+# COMPANY_MCP_INTROSPECTION_SECRET = "REPLACE_WITH_CONFIDENTIAL_CLIENT_SECRET"
+# Shared only with the dedicated same-host MCP edge; generate token_urlsafe(32).
+# COMPANY_MCP_BACKEND_KEY = "REPLACE_WITH_DEDICATED_BACKEND_SERVICE_KEY"
+# Operator acknowledgement of the backend-to-EIP transport boundary.
+COMPANY_MCP_EIP_TRANSPORT_ACKNOWLEDGED = false
+
+[company_mcp]
+# Deploy this section in its own protected config file for the MCP service user.
+# Do not give that user access to WebUI/DB/vault/IdP client secrets.
+COMPANY_MCP_ENABLED = false
+# COMPANY_MCP_ORIGIN = "https://ai.changdar-server.mooo.com"
+# COMPANY_MCP_ISSUER = "https://changdar-server.mooo.com/keycloak/realms/visionnaire"
+# COMPANY_MCP_CLIENTS = "changdar-codex-mcp,changdar-claude-mcp"
+# COMPANY_MCP_ALLOWED_CIDRS = "127.0.0.0/8,192.168.1.0/24"
+# COMPANY_MCP_BACKEND_KEY = "SAME_DEDICATED_BACKEND_SERVICE_KEY_AS_WEBUI"
+COMPANY_MCP_BACKEND_URL = "http://127.0.0.1:8080/internal/company-mcp"
+COMPANY_MCP_PORT = "18090"
+
+[litellm]
+# Only the LiteLLM process receives this section.
+# Do not copy this section into the WebUI environment.
+
+# PostgreSQL role/database dedicated to LiteLLM.
+LITELLM_DATABASE_URL = "postgresql://litellm:REPLACE_WITH_LITELLM_DB_PASSWORD@127.0.0.1:5432/litellm"
+
+# Administration only: never place this in Open WebUI, browser, Flutter, or a
+# user-facing client.
+LITELLM_MASTER_KEY = "REPLACE_WITH_LONG_RANDOM_VALUE"
+
+# Azure AI Foundry serverless deployment key for Kimi.  This is distinct from
+# Microsoft Entra DefaultAzureCredential authentication.
+AZURE_AI_API_KEY = "REPLACE_WITH_AZURE_AI_FOUNDRY_DEPLOYMENT_KEY"
+
+# Required by LiteLLM for a daily reset at Taiwan local midnight.
+TZ = "Asia/Taipei"
+
+# Optional native command (absolute paths; the CLI projects this section).
+LITELLM_EXECUTABLE = "/absolute/path/to/litellm-venv/bin/litellm"
+LITELLM_CONFIG_PATH = "/absolute/path/to/ai-gateway/examples/litellm/config.yaml"
+LITELLM_HOST = "127.0.0.1"
+LITELLM_PORT = "4000"
+
+# Provider connections. Real values belong only in config.local.toml.
+LOCAL_MODEL_API_BASE = "http://YOUR_MODEL_HOST:5002/v1"
+# A placeholder is sufficient only for the existing unauthenticated private ingress.
+LOCAL_MODEL_API_KEY = "local-private-ingress"
+LOCAL_MODEL_DEV_API_BASE = "http://127.0.0.1:5003/v1"
+AZURE_AI_API_BASE = "https://YOUR_RESOURCE.services.ai.azure.com"
+VERTEX_PROJECT = "YOUR_GCP_PROJECT"
+VERTEX_LOCATION = "global"
+# Absolute path; Docker mounts the same path read-only inside the container.
+VERTEX_CREDENTIALS = "/absolute/path/to/vertex-service-account.json"
+
+[local_inference]
+# Optional vLLM deployment, independent of the gateway's credentials.
+# Copy examples/litellm/local/vllm.example.yaml to vllm.local.yaml and customize
+# native model, parser, context and memory options there. Use absolute paths.
+LOCAL_INFERENCE_IMAGE = "vllm/vllm-openai:v0.31.0"
+LOCAL_INFERENCE_MODEL_PATH = "/absolute/path/to/model"
+LOCAL_INFERENCE_CONFIG_PATH = "/absolute/path/to/ai-gateway/vllm.local.yaml"
+LOCAL_INFERENCE_GPU_ID = "0"
+LOCAL_INFERENCE_HOST_PORT = "5003"
+
+[ocr]
+# PaddleOCR's vLLM backend; the PaddleX /layout-parsing API stays separate.
+# Copy the public OCR vllm.example.yaml to private ocr-vllm.local.yaml.
+OCR_INFERENCE_IMAGE = "vllm/vllm-openai:v0.31.0"
+OCR_MODEL_PATH = "/absolute/path/to/PaddleOCR-VL-1.6"
+OCR_INFERENCE_CONFIG_PATH = "/absolute/path/to/ai-gateway/ocr-vllm.local.yaml"
+OCR_GPU_ID = "0"
+OCR_HOST_PORT = "18114"
+
+[fileserver]
+# Optional, enabled only by the files profile. Preserve the existing read-only
+# service; set FILESERVER_HOST to 127.0.0.1 for a host-only deployment.
+FILESERVER_ROOT = "/mnt/data"
+FILESERVER_HOST = "0.0.0.0"
+FILESERVER_PORT = "18080"
+
+[company_ai_access]
+# Only the dedicated company AI access process receives this section.
+# Never project these credentials into Flutter or WebUI.
+AI_ACCESS_ENVIRONMENT = "production"
+AI_ACCESS_ORIGIN = "https://changdar-server.mooo.com"
+# Optional exact HTTPS origins of additional same-origin BFF sites.
+# This is a server-side mutation allowlist, not a browser CORS setting.
+AI_ACCESS_CONTROL_ORIGINS = ""
+AI_ACCESS_STATE_DIR = "/var/lib/company-ai-access"
+AI_ACCESS_DATABASE_URL = "postgresql://localhost/ai_gateway"
+AI_ACCESS_DB_SCHEMA = "company_ai_access"
+AI_ACCESS_LITELLM_URL = "http://127.0.0.1:4000"
+AI_ACCESS_MASTER_KEY = "REPLACE_WITH_EXISTING_LITELLM_MASTER_KEY"
+AI_ACCESS_MODELS = "gemini-3.8-flash,gemini-3.5-flash-lite,gemini-4-argon"
+# Optional Codex enablement: use the SAME complete model list as Claude above.
+# Only the approved release and its catalog need additional configuration.
+# Legacy AI_ACCESS_CODEX_MODELS, if set, must exactly match AI_ACCESS_MODELS.
+# AI_ACCESS_CODEX_RELEASE = "REPLACE_WITH_APPROVED_EXACT_CLI_RELEASE"
+# AI_ACCESS_CODEX_CATALOG = "/etc/company-ai-access/codex-models.json"
+# Public metadata only. Resource credentials are separate from model/device keys.
+# AI_ACCESS_MCP_URL = "https://ai.changdar-server.mooo.com/company-mcp"
+# AI_ACCESS_MCP_CODEX_CLIENT = "changdar-codex-mcp"
+# AI_ACCESS_MCP_CLAUDE_CLIENT = "changdar-claude-mcp"
+# Explicit office network; never use all private/CGNAT space as a VPN allowlist.
+AI_ACCESS_INFERENCE_CIDRS = "127.0.0.0/8,192.168.1.0/24"
+# Reject the router so inbound SNAT cannot turn public clients into LAN clients.
+AI_ACCESS_INFERENCE_DENY_CIDRS = "192.168.1.1/32"
+AI_ACCESS_ISSUER = "https://changdar-server.mooo.com/keycloak/realms/visionnaire"
+AI_ACCESS_DIRECTORY_CLIENT = "company-ai-access-directory"
+AI_ACCESS_DIRECTORY_SECRET = "REPLACE_WITH_READ_ONLY_CLIENT_SECRET"
+AI_ACCESS_ROLE_CLIENT_UUID = "REPLACE_WITH_COMPANY_AI_PERMISSION_CLIENT_UUID"
+AI_ACCESS_REQUIRED_ROLES = "openwebui-user,openwebui-admin"
+AI_ACCESS_ADMIN_ROLES = "openwebui-admin"
+# Fixed audience of the OIDC access token forwarded by the existing company BFF.
+AI_ACCESS_OIDC_AUDIENCE = "visionnaire-api"
+AI_ACCESS_APPROVAL_PATH = "/company-ai/portal/"
+# Optional loopback-only WebUI bridge. Leave unset in a BFF-only deployment.
+# AI_ACCESS_BRIDGE_KEY = "REPLACE_WITH_RANDOM_48_BYTE_SECRET"
+
+[ai_usage]
+# Only the ai-usage process receives this section.
+# Keep config.local.toml private and fill in this section before starting.
+# Do not project LITELLM_MASTER_KEY, provider keys, WebUI keys, or an IdP client
+# secret into ai-usage. Those belong to other sections, not this reader process.
+
+# LiteLLM Proxy and a virtual key limited to GET /spend/logs/v2 only.
+AI_USAGE_LITELLM_BASE_URL = "http://127.0.0.1:4000"
+LITELLM_USAGE_READER_KEY = "sk-REPLACE_WITH_VISIONNAIRE_USAGE_READER_KEY"
+
+# Keep this aligned with litellm_settings.max_end_user_budget_id's budget.
+AI_USAGE_DAILY_BUDGET_USD = "4.00"
+AI_USAGE_TIMEZONE = "Asia/Taipei"
+
+# Keycloak resource-server settings.  These are public verification values;
+# no Keycloak client secret is required.  Values may match Visionnaire's
+# existing OIDC_* settings, but AI_USAGE_* keeps this service self-contained.
+AI_USAGE_OIDC_ISSUER_URL = "https://changdar-server.mooo.com/keycloak/realms/visionnaire"
+AI_USAGE_OIDC_JWKS_URL = "https://changdar-server.mooo.com/keycloak/realms/visionnaire/protocol/openid-connect/certs"
+AI_USAGE_OIDC_AUDIENCE = "visionnaire-api"
+AI_USAGE_OIDC_ALGORITHMS = "RS256"
+AI_USAGE_OIDC_JWKS_CACHE_SECONDS = "300"
+AI_USAGE_OIDC_JWKS_TIMEOUT_SECONDS = "5"
+
+# Optional administrator dashboard: a READ-ONLY connection to Visionnaire's
+# account database (SELECT on users, user_identities, user_profiles, group_info,
+# tenants). Omit to keep only the personal usage API enabled. Never use a
+# superuser/database owner. Requires sqlalchemy and asyncpg in the service env.
+# AI_USAGE_ADMIN_DATABASE_URL = "postgresql+asyncpg://usage_reader:REPLACE@127.0.0.1:5432/visionnaire"
+AI_USAGE_OIDC_IDENTITY_PROVIDER = "keycloak"
+
+# Optional complete-ledger visibility, ONLY for a gateway dedicated to this
+# tenant. Use the authoritative active deployment's tenant UUID. Super admins
+# of that tenant can include unallocated historical costs; group/user filters
+# always remain attributed-only. Never set this for a shared multi-tenant gateway.
+# AI_USAGE_GATEWAY_TENANT_ID = "REPLACE_WITH_DEPLOYMENT_TENANT_UUID"
+
+# SHA256 of the dedicated OFFICIAL_DOCUMENT_LITELLM_API_KEY, calculated on the
+# server. This is a fingerprint, not the key. Only this key's persisted actor
+# metadata may attribute service-paid document usage to a local account.
+# AI_USAGE_OFFICIAL_DOCUMENT_KEY_HASH = "REPLACE_WITH_64_CHARACTER_SHA256"
+
+# Bounded internal query settings.  A request fails closed instead of showing
+# inaccurate totals if the query exceeds this cap. Administrator date ranges
+# scan all selected upstream traffic; split probes and pages share the cap.
+AI_USAGE_REQUEST_TIMEOUT_SECONDS = "15"
+AI_USAGE_LOG_PAGE_SIZE = "1000"
+AI_USAGE_MAX_LOG_PAGES = "100"
+AI_USAGE_MAX_RECORD_LIMIT = "100"
+AI_USAGE_MAX_RANGE_DAYS = "366"
+
+# Used only for presentation; LiteLLM's actual recorded spend remains the
+# source of truth.  Add local deployments here when they are introduced.
+AI_USAGE_LOCAL_MODEL_NAMES = "qwen3.5-35b-a3b,gpt-oss-20b"
+
+# Optional management/BFF deployment; this is a separate authority and database.
+# This example selects local authentication. Configure OIDC explicitly for an IdP deployment.
+[identity]
+DATABASE_URL = "postgresql+asyncpg://identity:REPLACE_WITH_IDENTITY_DB_PASSWORD@127.0.0.1:5432/identity"
+JWT_SECRET_KEY = "REPLACE_WITH_INDEPENDENT_IDENTITY_SIGNING_SECRET"
+BFF_TOKEN_ENCRYPTION_KEY = "REPLACE_WITH_INDEPENDENT_BFF_SESSION_SECRET"
+REDIS_HOST = "127.0.0.1"
+REDIS_PORT = "6379"
+REDIS_PASSWORD = "REPLACE_WITH_REDIS_PASSWORD"
+AUTO_CREATE_SCHEMA = "false"
+OIDC_ENABLED = "false"
+
+# Optional EIP sample-download tool credentials. Enable only for explicit acceptance work.
+# This section is projected only to the eip_samples tool; it is not a WebUI binding.
+# [eip_samples]
+# EIP_SAMPLE_IDENTITY = "REPLACE_WITH_VERIFIED_EIP_IDENTITY"
+# EIP_SAMPLE_ACCOUNT = "REPLACE_WITH_EIP_SAMPLE_ACCOUNT"
+# EIP_SAMPLE_PASSWORD = "REPLACE_WITH_EIP_SAMPLE_PASSWORD"
+
+# Optional manual company AI smoke operator; not a runtime directory credential.
+# Enable only for explicit OIDC/device acceptance checks.
+# [company_ai_smoke]
+# KC_BOOTSTRAP_ADMIN_USERNAME = "REPLACE_WITH_SMOKE_OPERATOR"
+# KC_BOOTSTRAP_ADMIN_PASSWORD = "REPLACE_WITH_SMOKE_OPERATOR_PASSWORD"

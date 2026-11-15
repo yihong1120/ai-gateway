@@ -1,0 +1,14 @@
+[Unit]
+Description=Open WebUI with Visionnaire Keycloak SSO
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/changdar/Documents/ai-gateway
+ExecStart=/home/changdar/.conda/envs/webui_env/bin/python -m examples.deployment.cli exec webui -- /home/changdar/.conda/envs/webui_env/bin/python -m examples.openwebui.serve
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
