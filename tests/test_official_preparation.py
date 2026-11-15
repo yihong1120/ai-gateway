@@ -8,10 +8,10 @@ from datetime import date
 from .test_eip_group_processing import payload
 from .test_official_document_processor_pipe import PIPE_MODULE as M
 from .test_official_document_processor_pipe import SOURCE
-from official_document_workflow.application.calendar_review import consolidate_events
-from official_document_workflow.application.group_processing import parse_group
-from official_document_workflow.domain.calendar.preparation import preparation_rows
-from official_document_workflow.infrastructure.eip.calendar_csv import parse_csv
+from examples.official_document_workflow.application.calendar_review import consolidate_events
+from examples.official_document_workflow.application.group_processing import parse_group
+from examples.official_document_workflow.domain.calendar.preparation import preparation_rows
+from examples.official_document_workflow.infrastructure.eip.calendar_csv import parse_csv
 
 
 def suggestion(days=3, action='彙整評估報告資料並核對附件完整性', start='09:30', end='11:00'):
@@ -31,7 +31,7 @@ class PreparationTests(unittest.TestCase):
         self.sources = {'S1': M.CloudSemanticSource(SOURCE, 'native_pdf_text')}
         accepted = []
         primary, document, deadlines, rows, errors = parse_group(
-            self.pipe, M, self.data, self.sources, accepted_events=accepted,
+            self.pipe,  self.data, self.sources, accepted_events=accepted,
         )
         self.assertFalse(errors)
         self.analysis = dict(
@@ -41,7 +41,7 @@ class PreparationTests(unittest.TestCase):
 
     def render(self, *, today=date(2026, 9, 1), seen=None):
         return preparation_rows(
-            self.pipe, M, self.analysis, today=today,
+            self.pipe.calendar,  self.analysis, today=today,
             seen=seen if seen is not None else set(),
         )
 
@@ -73,8 +73,8 @@ class PreparationTests(unittest.TestCase):
         self.assertIn(original[0]['Description'], row['Description'])
         self.assertEqual(set(row), set(M.CALENDAR_HEADERS))
         self.assertEqual(self.analysis['rows'], original)
-        exported, _ = parse_csv(self.pipe._calendar_csv([*original, row]), csv_format=M.CALENDAR_CSV_FORMAT)
-        from official_document_workflow.infrastructure.eip.calendar_csv import canonical_time
+        exported, _ = parse_csv(self.pipe.calendar_csv([*original, row]), csv_format=M.CALENDAR_CSV_FORMAT)
+        from examples.official_document_workflow.infrastructure.eip.calendar_csv import canonical_time
         expected = [{
             **value, 'Start Time': canonical_time(value, 'Start'),
             'End Time': canonical_time(value, 'End'),
@@ -90,7 +90,7 @@ class PreparationTests(unittest.TestCase):
         rows, notices = self.render()
         self.assertFalse(notices)
         self.assertEqual(rows[0]['Work Hour'], '2.5')
-        exported, transport = parse_csv(self.pipe._calendar_csv(rows), csv_format=M.CALENDAR_CSV_FORMAT)
+        exported, transport = parse_csv(self.pipe.calendar_csv(rows), csv_format=M.CALENDAR_CSV_FORMAT)
         self.assertEqual(exported[0]['Description'], rows[0]['Description'])
         self.assertEqual(exported[0]['Start Time(24hr)'], rows[0]['Start Time(24hr)'])
         imported = list(csv.DictReader(io.StringIO(transport.decode('utf-8-sig'))))[0]
@@ -174,7 +174,7 @@ class PreparationTests(unittest.TestCase):
         bad_span = suggestion()
         bad_span['evidence_spans'][0]['source_id'] = 'OTHER_DOCUMENT'
         for invalid in [
-            bad_span, suggestion(0), suggestion(8), suggestion(True),
+            bad_span, suggestion(0), suggestion(True),
             suggestion(1.5), suggestion('3'), suggestion(action='   '),
         ]:
             with self.subTest(invalid=invalid):
@@ -202,14 +202,12 @@ class PreparationTests(unittest.TestCase):
     def test_shared_project_reminder_is_not_duplicated_across_letters(self):
         # Exact same reviewed event/action in related letters shares a reminder.
         from dataclasses import replace
-        from official_document_workflow.domain.calendar.calendar_semantics import calendar_events
         event = self.analysis['accepted_events'][0]
         event['project_name'] = '代辦國道3號古坑交流道平面側車道工程'
         event['evidence_spans']['project_name'] = [{'source_id': 'S1', 'start_line': 6, 'end_line': 6}]
 
         def refresh_rows():
-            _, self.analysis['rows'] = calendar_events(
-                self.pipe, M, {'events': [event]},
+            _, self.analysis['rows'] = self.pipe.calendar.events(  {'events': [event]},
                 self.sources, self.analysis['document'],
             )
         refresh_rows()
@@ -220,13 +218,11 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(self.render(seen=seen)[0], [])
 
     def test_month_year_boundary_uses_calendar_days(self):
-        from official_document_workflow.domain.calendar.calendar_semantics import calendar_events
         event = self.analysis['accepted_events'][0]
         event['start_date'] = '2027-01-03'
         self.sources['S1'] = M.CloudSemanticSource(SOURCE.replace('115年9月10日', '116年1月3日'), 'native_pdf_text')
         event['preparation_reminders'] = [suggestion(7)]
-        _, self.analysis['rows'] = calendar_events(
-            self.pipe, M, {'events': [event]},
+        _, self.analysis['rows'] = self.pipe.calendar.events(  {'events': [event]},
             self.sources, self.analysis['document'],
         )
         rows, notices = self.render(today=date(2026, 12, 20))

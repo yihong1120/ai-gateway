@@ -1,6 +1,9 @@
 """Replay must survive rewrites, concurrency, legacy receipts and user isolation."""
 from __future__ import annotations
 
+from tests.eip_calendar_fixture import new_calendar_matches
+
+import asyncio
 import tempfile
 from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
@@ -9,12 +12,12 @@ from unittest.mock import patch
 
 from .test_eip_connector import remote
 from .test_eip_connector import row
-from official_document_workflow.application import integration
-from official_document_workflow.application.integration import annotate_csv_sources
-from official_document_workflow.infrastructure.eip.calendar_identity import prepare_source_replay
-from official_document_workflow.infrastructure.eip.calendar_sync import verified_events
-from official_document_workflow.infrastructure.eip.calendar_sync import write_events
-from official_document_workflow.infrastructure.storage.state import Journal
+from examples.official_document_workflow.application import integration
+from examples.official_document_workflow.application.integration import annotate_csv_sources
+from examples.official_document_workflow.infrastructure.eip.calendar_identity import prepare_source_replay
+from examples.official_document_workflow.infrastructure.eip.calendar_sync import verified_events
+from examples.official_document_workflow.infrastructure.eip.calendar_sync import write_events
+from examples.official_document_workflow.infrastructure.storage.state import Journal
 from tests.eip_postgres import EIPPostgresTestCase
 
 
@@ -24,7 +27,7 @@ class SourceReplayTests(EIPPostgresTestCase, IsolatedAsyncioTestCase):
         self.root = tempfile.TemporaryDirectory()
         self.addCleanup(self.root.cleanup)
         self.journal = Journal()
-        self.adapter = SimpleNamespace(commit=AsyncMock(return_value={'event_id': '123', 'detail_verified': True}))
+        self.adapter = SimpleNamespace(commit=AsyncMock(return_value={'event_id': '123', 'detail_verified': True}), calendar_import_matches=AsyncMock(side_effect=new_calendar_matches))
 
     def events(self, title='原名稱', user='17', day='2026/09/10', prior=()):
         r = {
@@ -45,6 +48,30 @@ class SourceReplayTests(EIPPostgresTestCase, IsolatedAsyncioTestCase):
         self.journal = Journal()
         second = await self.prepare(self.events('完全不同的顯示名稱'))
         self.assertEqual(await write_events(self.adapter, second, self.journal), {'created': 0, 'skipped': 1})
+        self.adapter.commit.assert_awaited_once()
+
+    async def test_overlapping_automatic_and_manual_writes_create_once(self):
+        automatic = await self.prepare(self.events())
+        manual = await self.prepare(self.events('手動路徑重新產生的名稱'))
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def commit(_):
+            entered.set()
+            await release.wait()
+            return {'event_id': '123', 'detail_verified': True}
+
+        self.adapter.commit.side_effect = commit
+        running = asyncio.create_task(write_events(self.adapter, automatic, self.journal))
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=2)
+            with self.assertRaisesRegex(ValueError, '先前匯入結果不明'):
+                await write_events(self.adapter, manual, Journal())
+            self.adapter.commit.assert_awaited_once()
+        finally:
+            release.set()
+            result = await running
+        self.assertEqual(result, {'created': 1, 'skipped': 0})
+        self.assertEqual(await write_events(self.adapter, manual, Journal()), {'created': 0, 'skipped': 1})
         self.adapter.commit.assert_awaited_once()
 
     async def test_changed_date_requires_reconciliation(self):
@@ -100,7 +127,7 @@ class SourceReplayTests(EIPPostgresTestCase, IsolatedAsyncioTestCase):
         self.journal.reserve_event(previous['key'], previous['aliases'])
         self.journal.done(previous['key'], aliases=previous['aliases'])
         with patch(
-            'official_document_workflow.application.integration.read_csv', new_callable=AsyncMock,
+            'examples.official_document_workflow.application.integration.read_csv', new_callable=AsyncMock,
             return_value=([old], b'old-csv'),
         ) as read:
             events = self.events('重產的標題', prior=['old-id'])
@@ -121,7 +148,7 @@ class SourceReplayTests(EIPPostgresTestCase, IsolatedAsyncioTestCase):
         r['Description'] = '工程名稱：本次來源工程\n原文內容'
         events = verified_events([r], [remote(r)], '17', self.journal)
         with patch(
-            'official_document_workflow.application.integration.read_csv', new_callable=AsyncMock,
+            'examples.official_document_workflow.application.integration.read_csv', new_callable=AsyncMock,
             return_value=([old], b'old'),
         ):
             await prepare_source_replay(events, '17', self.journal, AsyncMock(return_value=[remote(old)]), integration.read_csv)
@@ -137,7 +164,7 @@ class SourceReplayTests(EIPPostgresTestCase, IsolatedAsyncioTestCase):
         r['Description'] = '工程名稱：本次工程\n来源'
         events = verified_events([r], [remote(r)], '17', self.journal)
         with patch(
-            'official_document_workflow.application.integration.read_csv', new_callable=AsyncMock,
+            'examples.official_document_workflow.application.integration.read_csv', new_callable=AsyncMock,
             return_value=([old], b'old'),
         ):
             with self.assertRaises(ValueError):

@@ -13,7 +13,7 @@ from unittest.mock import patch
 import pymupdf
 
 from .test_official_document_processor_pipe import PIPE_MODULE as M
-from official_document_workflow.infrastructure.office import office_input
+from examples.official_document_workflow.infrastructure.office import office_input
 
 
 def pdf_bytes(pages=1):
@@ -71,19 +71,19 @@ class MixedOfficeUploads(unittest.IsolatedAsyncioTestCase):
         self.add('private.docx', owner='bob')
         self.attachments.append(self.attachments[0])
         with patch.object(office_input, 'to_pdf', AsyncMock()) as convert:
-            kind, files = await self.pipe._get_owned_source_files(self.attachments, 'alice')
+            kind, files = await self.pipe.owned_sources(self.attachments, 'alice')
         self.assertEqual(kind, 'pdf')  # Normalized batch route, including Office inputs.
         self.assertEqual([f.filename.split('.')[0] for f in files], [f'file-{n}' for n in range(1, 11)])
         convert.assert_not_awaited()
         self.add('file-11.odt')
         with self.assertRaisesRegex(M.ProcessingError, '10 份文件'):
-            await self.pipe._get_owned_source_files(self.attachments, 'alice')
+            await self.pipe.owned_sources(self.attachments, 'alice')
 
     async def test_office_and_photos_remain_separate_upload_modes(self):
         self.add('main.odt')
         self.add('photo.png')
         with self.assertRaisesRegex(M.ProcessingError, '圖片請另批上傳'):
-            await self.pipe._get_owned_source_files(self.attachments, 'alice')
+            await self.pipe.owned_sources(self.attachments, 'alice')
 
     async def test_mixed_preparation_preserves_originals_and_cleans_converted_pdfs(self):
         pdf = pdf_bytes()
@@ -91,7 +91,7 @@ class MixedOfficeUploads(unittest.IsolatedAsyncioTestCase):
             self.add('source' + suffix, pdf if suffix == '.pdf' else b'office-' + suffix.encode())
         before = {f.path: Path(f.path).read_bytes() for f in self.files.values()}
         converted = pdf_bytes(2)
-        with patch.object(office_input, 'to_pdf', AsyncMock(side_effect=lambda *_: (io.BytesIO(converted), 'source.pdf'))) as convert:
+        with patch.object(office_input, 'to_pdf', AsyncMock(side_effect=lambda *_, **kwargs: (io.BytesIO(converted), 'source.pdf'))) as convert:
             prepared = await self.pipe._prepare_source_documents(self.attachments, 'alice')
         self.assertEqual(len(prepared), 4)
         self.assertEqual(convert.await_count, 3)
@@ -152,14 +152,14 @@ class MixedOfficeUploads(unittest.IsolatedAsyncioTestCase):
         self.add('main.docx')
         seen = []
 
-        async def batch(pipe, module, owner, items, *args):
+        async def batch(pipe, owner, items, *args):
             self.assertEqual(owner, 'alice')
             self.assertEqual(items[0].kind, 'office')
             self.assertTrue(items[0].pdf_path.exists())
             seen.extend(item.pdf_path for item in items)
             return 'batch output'
         with patch.object(office_input, 'to_pdf', AsyncMock(return_value=(io.BytesIO(pdf_bytes()), 'main.pdf'))), \
-                patch('official_document_workflow.application.upload_batch.process_uploads', AsyncMock(side_effect=batch)) as run:
+                patch('examples.official_document_workflow.application.upload_batch.process_uploads', AsyncMock(side_effect=batch)) as run:
             result = await self.pipe.pipe({'messages': []}, __user__={'id': 'alice'}, __files__=self.attachments)
         self.assertEqual(result, 'batch output')
         run.assert_awaited_once()

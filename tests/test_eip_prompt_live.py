@@ -15,10 +15,10 @@ from unittest import skipUnless
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
 
-from eip_prompt_cases import BLIND_CASES
-from eip_prompt_cases import CASES
-from eip_prompt_cases import HOLDOUT_CASES
-from eip_prompt_cases import ROLE_DATE_CASES
+from tests.eip_prompt_cases import BLIND_CASES
+from tests.eip_prompt_cases import CASES
+from tests.eip_prompt_cases import HOLDOUT_CASES
+from tests.eip_prompt_cases import ROLE_DATE_CASES
 
 
 @skipUnless(os.environ.get('EIP_PROMPT_LIVE') == '1', 'Live provider calls are opt-in')
@@ -26,13 +26,12 @@ class PromptLiveTests(IsolatedAsyncioTestCase):
     async def test_contrast_cases_through_document_workflow(self):
         from langsmith import tracing_context
 
-        from official_document_workflow.application.integration import (
+        from examples.official_document_workflow.application.integration import (
             configured_pipe,
-            pipe_module,
         )
-        from official_document_workflow.application.multi_agent import DocumentAgent
+        from examples.official_document_workflow.application.multi_agent import DocumentAgent
 
-        module = pipe_module()
+        from examples.official_document_workflow.domain import documents as module
         provider_failure = False
         cases = ROLE_DATE_CASES + HOLDOUT_CASES + BLIND_CASES + CASES
         selected = set(filter(None, os.environ.get('EIP_EVAL_CASES', '').split(',')))
@@ -42,9 +41,9 @@ class PromptLiveTests(IsolatedAsyncioTestCase):
         for case in cases:
             with self.subTest(case=case['name']):
                 pipe = await configured_pipe()
-                pipe._emit_processing_status = AsyncMock()
-                pipe._canonical_ocr_context = AsyncMock(return_value=((), None))
-                pipe._cloud_semantic_source_text = Mock(
+                pipe.emit_status = AsyncMock()
+                pipe.ocr_context = AsyncMock(return_value=((), None))
+                pipe.semantic_source = Mock(
                     side_effect=[
                         module.CloudSemanticSource(text=text, kind='native_pdf_text') for text in case['sources']
                     ],
@@ -57,7 +56,7 @@ class PromptLiveTests(IsolatedAsyncioTestCase):
                     for i in range(len(case['sources']))
                 ]
                 with tracing_context(enabled=False):
-                    state = await DocumentAgent(pipe, module, None).run(members, 1, 1)
+                    state = await DocumentAgent(pipe,  None).run(members, 1, 1)
                 rows = sorted(
                     state.get('rows', []),
                     key=lambda r: (

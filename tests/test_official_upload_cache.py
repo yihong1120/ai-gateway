@@ -17,8 +17,8 @@ from . import test_official_upload_groups as fixtures
 from .eip_postgres import EIPPostgresTestCase
 from .test_eip_group_processing import payload
 from .test_official_document_processor_pipe import PIPE_MODULE as M
-from official_document_workflow.infrastructure.storage.automation_store import AutomationStore
-from official_document_workflow.infrastructure.storage.processing_cache import active_requests
+from examples.official_document_workflow.infrastructure.storage.automation_store import AutomationStore
+from examples.official_document_workflow.infrastructure.storage.processing_cache import active_requests
 
 
 class UploadCacheTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
@@ -32,7 +32,13 @@ class UploadCacheTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         fixtures.UploadGroupTests.setUp(self)
         self.pipe.valves.document_analysis_cache_enabled = True
         self.db = AutomationStore(Path(self.tmp.name) / 'key')
-        p = patch('official_document_workflow.infrastructure.storage.automation_store.store', return_value=self.db)
+        async def verified_user(owner):
+            return {'id': owner, 'role': 'user', 'oauth': {'oidc': {'sub': f'oidc-{owner}'}}}
+
+        p = patch('examples.identity.adapters.webui.verified_user', side_effect=verified_user)
+        p.start()
+        self.addCleanup(p.stop)
+        p = patch('examples.official_document_workflow.infrastructure.storage.automation_store.store', return_value=self.db)
         p.start()
         self.addCleanup(p.stop)
         self.client = AsyncMock()
@@ -55,6 +61,65 @@ class UploadCacheTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             __user__={'id': owner}, __files__=[{'id': p.source_file.id} for p in self.prepared],
         )
 
+    async def test_cache_commit_failure_preserves_document_success_and_downloads(self):
+        from examples.official_document_workflow.infrastructure.storage.processing_cache import CachedRequests, upload_outcome
+        report = {'status': 'error'}
+        token = upload_outcome.set(report)
+        try:
+            with patch.object(CachedRequests, 'commit', side_effect=OSError('cache unavailable')):
+                answer = await self.run_pipe()
+        finally:
+            upload_outcome.reset(token)
+        self.assertIn('整理為 1 組', answer)
+        self.assertEqual(report['status'], 'done')
+        self.assertTrue(self.saved)
+        self.assertIn('/api/v1/files/', answer)
+        self.assertIsNone(active_requests.get())
+
+    async def test_unavailable_cache_read_or_setup_falls_back_to_validated_processing(self):
+        from examples.official_document_workflow.infrastructure.storage.processing_cache import ProcessingCache
+        with patch.object(ProcessingCache, 'get', side_effect=OSError('cache read unavailable')):
+            self.assertIn('整理為 1 組', await self.run_pipe())
+        with patch('examples.official_document_workflow.infrastructure.storage.automation_store.store', side_effect=OSError('cache setup unavailable')):
+            self.assertIn('整理為 1 組', await self.run_pipe())
+        self.assertEqual(self.client.post.await_count, 2)
+
+    async def test_batch_cache_write_rolls_back_all_entries_on_failure(self):
+        from examples.official_document_workflow.infrastructure.storage.processing_cache import ProcessingCache
+        with self.db.db() as db:
+            db.execute("""CREATE FUNCTION reject_cache_entry() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN IF NEW.key='broken' THEN RAISE EXCEPTION 'injected failure'; END IF; RETURN NEW; END $$;
+                CREATE TRIGGER reject_cache BEFORE INSERT ON processing_chunks FOR EACH ROW EXECUTE FUNCTION reject_cache_entry();""")
+        cache = ProcessingCache(self.db, 'owner')
+        self.assertFalse(cache.put_many({'good': {'ok': True}, 'broken': {'bad': True}}))
+        with self.db.db() as db:
+            self.assertEqual(db.execute('SELECT count(*) AS n FROM processing_chunks').fetchone()['n'], 0)
+        self.assertTrue(cache.put_many({'a': {'x': 1}, 'b': {'x': 2}}))
+        with self.db.db() as db:
+            self.assertEqual(db.execute('SELECT count(DISTINCT updated) AS n FROM processing_chunks').fetchone()['n'], 1)
+
+    async def test_cancelled_cache_commit_is_drained_before_releasing_the_batch(self):
+        from threading import Event
+        from examples.official_document_workflow.infrastructure.storage.processing_cache import CachedRequests
+        entered, release = Event(), Event()
+        def commit():
+            entered.set()
+            if not release.wait(4):
+                raise AssertionError('cache commit timed out')
+        with patch.object(CachedRequests, 'commit', side_effect=commit):
+            task = asyncio.create_task(self.run_pipe())
+            try:
+                self.assertTrue(await asyncio.to_thread(entered.wait, 3))
+                task.cancel()
+                await asyncio.sleep(0)
+                self.assertFalse(task.done())
+                self.assertTrue(self.saved)
+            finally:
+                release.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.assertIsNone(active_requests.get())
+
     async def test_reupload_new_id_reuses_result_but_exports_current_source_ids(self):
         first = await self.run_pipe()
         self.assertIn('整理為 1 組', first)
@@ -70,7 +135,7 @@ class UploadCacheTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                 for f in self.saved if f['kind'] != 'calendar_csv'
             ),
         )
-        self.assertEqual(self.pipe._get_owned_source_files.await_count, 2)
+        self.assertEqual(self.pipe.owned_sources.await_count, 2)
         self.assertIsNone(active_requests.get())
         with self.db.db() as db:
             rows = db.execute('SELECT owner,payload FROM processing_chunks').fetchall()
@@ -121,7 +186,7 @@ class UploadCacheTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         await self.run_pipe()
         self.pipe.valves.cloud_ocr_text_model = 'gemini-3.5-flash-lite'
         await self.run_pipe()
-        with patch('official_document_workflow.application.upload_batch.GROUPING_PROMPT', '新版分組規則'):
+        with patch('examples.official_document_workflow.application.upload_batch.GROUPING_PROMPT', '新版分組規則'):
             await self.run_pipe()
         path = self.prepared[0].pdf_path
         old = self.source_by_path[path]
@@ -136,7 +201,7 @@ class UploadCacheTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         path.write_bytes(path.read_bytes() + b'\n% revised PDF metadata\n')
         await self.run_pipe()
         self.pipe.valves.calendar_ai_preparation_reminders = True
-        with patch('official_document_workflow.application.upload_batch.datetime') as clock:
+        with patch('examples.official_document_workflow.application.upload_batch.datetime') as clock:
             clock.now.side_effect = [datetime(2026, 9, 23), datetime(2026, 9, 24)]
             await self.run_pipe()
             await self.run_pipe()
@@ -154,8 +219,8 @@ class UploadCacheTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
 
     async def test_file_permission_is_checked_before_reading_any_cached_result(self):
         await self.run_pipe()
-        self.pipe._get_owned_source_files.side_effect = M.ProcessingError('無法存取附件')
-        with patch('official_document_workflow.infrastructure.storage.automation_store.store') as store:
+        self.pipe.owned_sources.side_effect = M.ProcessingError('無法存取附件')
+        with patch('examples.official_document_workflow.infrastructure.storage.automation_store.store') as store:
             answer = await self.run_pipe()
         self.assertIn('無法存取附件', answer)
         store.assert_not_called()
@@ -178,10 +243,14 @@ class UploadCacheTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         good = copy.deepcopy(self.answer)
         self.answer['grouping']['groups'][0]['main_pages'] = ['S9:P1']
         await self.run_pipe()
+        self.assertEqual(self.client.post.await_count, 2)  # Initial result and the one bounded repair.
+        self.assertEqual(self.saved, [])
         self.answer = good
         answer = await self.run_pipe()
         self.assertIn('整理為 1 組', answer)
-        self.assertEqual(self.client.post.await_count, 2)
+        self.assertEqual(self.client.post.await_count, 3)
+        await self.run_pipe()
+        self.assertEqual(self.client.post.await_count, 3)  # Only the validated result is reusable.
 
     async def test_cancellation_releases_lock_and_does_not_cache_partial_work(self):
         started = asyncio.Event()
@@ -226,7 +295,7 @@ class UploadCacheTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
     async def test_cached_response_is_still_validated_against_current_source(self):
         await self.run_pipe()
         # A validation rule change must not make stored model output trusted.
-        with patch.object(self.pipe, '_cloud_document_from_payload', side_effect=ValueError('來源證據不符')):
+        with patch.object(self.pipe, 'cloud_document_from_payload', side_effect=ValueError('來源證據不符')):
             answer = await self.run_pipe()
         self.assertIn('來源證據不符', answer)
         self.assertIn('日期主旨待確認', answer)
@@ -243,7 +312,7 @@ class UploadCacheTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.client.post.await_count, 3)
 
     async def test_background_tasks_do_not_open_cache_or_send_model_requests(self):
-        with patch('official_document_workflow.infrastructure.storage.automation_store.store') as store:
+        with patch('examples.official_document_workflow.infrastructure.storage.automation_store.store') as store:
             answer = await self.pipe.pipe({}, __user__={'id': 'owner'}, __task__='title_generation')
         self.assertEqual(json.loads(answer), {'title': ''})
         store.assert_not_called()

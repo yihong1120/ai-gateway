@@ -11,12 +11,12 @@ import unittest
 
 from pydantic import ValidationError
 
-from official_document_workflow.application.instruction_planner import current_user_message_from_body
-from official_document_workflow.application.instruction_planner import plan_current_instruction
-from official_document_workflow.application.instruction_planner import resolve_pending_reminder_choice
-from official_document_workflow.application.pending import PendingClarificationScope
-from official_document_workflow.application.pending import PendingClarificationStore
-from official_document_workflow.domain.calendar.operations import apply_calendar_operations
+from examples.official_document_workflow.application.instruction_planner import current_user_message_from_body
+from examples.official_document_workflow.application.instruction_planner import plan_current_instruction
+from examples.official_document_workflow.application.instruction_planner import resolve_pending_reminder_choice
+from examples.official_document_workflow.application.pending import PendingClarificationScope
+from examples.official_document_workflow.application.pending import PendingClarificationStore
+from examples.official_document_workflow.domain.calendar.operations import apply_calendar_operations
 
 
 def _valid_plan(
@@ -526,7 +526,7 @@ class PendingClarificationStoreTests(unittest.TestCase):
 
 class RetiredOutputTests(unittest.TestCase):
     def test_old_output_preference_is_discarded_without_mutating_saved_plan(self):
-        from official_document_workflow.domain.workflow import JobPlan, OutputSelection
+        from examples.official_document_workflow.domain.workflow import JobPlan, OutputSelection
         old = {'searchable_ocr_pdf': True, 'editable_docx': False}
         plan = JobPlan.model_validate({'outputs': old})
         self.assertTrue(old['searchable_ocr_pdf'])
@@ -535,13 +535,13 @@ class RetiredOutputTests(unittest.TestCase):
         self.assertNotIn('searchable_ocr_pdf', OutputSelection.model_json_schema()['properties'])
 
     def test_retiring_one_preference_does_not_accept_other_unknown_fields(self):
-        from official_document_workflow.domain.workflow import JobPlan
+        from examples.official_document_workflow.domain.workflow import JobPlan
         from pydantic import ValidationError
         with self.assertRaises(ValidationError):
             JobPlan(outputs={'searchable_ocr_pdf': True, 'upload_url': 'https://invalid.example'})
 
     def test_shared_clarification_validation_rejects_multiline_and_nul(self):
-        from official_document_workflow.domain.workflow import JobPlan, PendingReminderResolution
+        from examples.official_document_workflow.domain.workflow import JobPlan, PendingReminderResolution
         from pydantic import ValidationError
         for value in ('第一行\n第二行', '第一行\r第二行', '第一行\x00第二行'):
             for model, fields in (

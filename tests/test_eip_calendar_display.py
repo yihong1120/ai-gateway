@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from official_document_workflow.domain.calendar.presentation import clean_ocr_presentation
+from examples.official_document_workflow.domain.calendar.presentation import clean_ocr_presentation
 
 
 class DisplayTests(unittest.TestCase):

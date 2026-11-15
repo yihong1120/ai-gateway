@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock
 from unittest.mock import Mock
 from unittest.mock import patch
 
-from official_document_workflow.infrastructure.eip import automatic_session
-from official_document_workflow.infrastructure.eip.automatic_session import (
+from examples.official_document_workflow.infrastructure.eip import automatic_session
+from examples.official_document_workflow.infrastructure.eip.automatic_session import (
     AutomaticSession,
 )
 

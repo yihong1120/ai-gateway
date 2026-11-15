@@ -3,16 +3,16 @@ from __future__ import annotations
 
 import unittest
 
-from eip_prompt_cases import BLIND_CASES
-from eip_prompt_cases import CASES
-from eip_prompt_cases import HOLDOUT_CASES
-from eip_prompt_cases import ROLE_DATE_CASES
+from tests.eip_prompt_cases import BLIND_CASES
+from tests.eip_prompt_cases import CASES
+from tests.eip_prompt_cases import HOLDOUT_CASES
+from tests.eip_prompt_cases import ROLE_DATE_CASES
 
-from official_document_workflow.application.prompts import EVENT_POLICY
-from official_document_workflow.application.prompts import group_prompt
-from official_document_workflow.application.prompts import REPAIR_PROMPT
-from official_document_workflow.application.prompts import REVIEW_PROMPT
-from official_document_workflow.application.prompts import SCAN_PROMPT
+from examples.official_document_workflow.application.prompts import EVENT_POLICY
+from examples.official_document_workflow.application.prompts import group_prompt
+from examples.official_document_workflow.application.prompts import REPAIR_PROMPT
+from examples.official_document_workflow.application.prompts import REVIEW_PROMPT
+from examples.official_document_workflow.application.prompts import SCAN_PROMPT
 
 
 class PromptContractTests(unittest.TestCase):

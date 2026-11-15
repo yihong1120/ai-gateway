@@ -5,9 +5,9 @@ from copy import deepcopy
 from types import SimpleNamespace
 from unittest import TestCase
 
-from official_document_workflow.domain.calendar.calendar_semantics import assignment_event
-from official_document_workflow.domain.calendar.calendar_semantics import optional_event_fields
-from official_document_workflow.domain.calendar.calendar_semantics import verify_event_date
+from examples.official_document_workflow.domain.calendar.calendar_semantics import assignment_event
+from examples.official_document_workflow.domain.calendar.calendar_semantics import optional_event_fields
+from examples.official_document_workflow.domain.calendar.calendar_semantics import verify_event_date
 
 
 class AssignmentTests(TestCase):

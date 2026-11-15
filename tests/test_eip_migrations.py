@@ -9,8 +9,8 @@ from unittest.mock import patch
 import psycopg
 from psycopg import sql
 
-from official_document_workflow.infrastructure.storage import migrations
-from official_document_workflow.infrastructure.storage.state import Journal
+from examples.official_document_workflow.infrastructure.storage import migrations
+from examples.official_document_workflow.infrastructure.storage.state import Journal
 from tests.eip_postgres import EIPPostgresTestCase
 
 
@@ -35,10 +35,12 @@ class MigrationTests(EIPPostgresTestCase, unittest.TestCase):
             self.assertEqual(
                 tables, {
                     'schema_migrations', 'accounts', 'tasks', 'scan_origins',
-                    'task_timeline', 'writes', 'event_receipts', 'source_manifests', 'processing_chunks',
+                    'task_timeline', 'writes', 'event_receipts', 'source_manifests', 'processing_chunks', 'pending_clarifications', 'clarification_outputs', 'clarification_output_reviews', 'shared_content_cache',
+                    'document_analysis_results', 'document_analysis_uses', 'document_analysis_resolutions',
+                    'calendar_managed_events', 'calendar_creation_intents',
                 },
             )
-            self.assertEqual(db.execute('SELECT version FROM schema_migrations').fetchall(), [(2,)])
+            self.assertEqual(db.execute('SELECT version FROM schema_migrations ORDER BY version').fetchall(), [(n,) for n in range(2, migrations.VERSION + 1)])
         self.assertEqual(journal.reserve_event('event'), 'reserved')
         journal.done('event', receipt={'event_id': 'remote-id', 'detail_verified': True})
         self.assertEqual(Journal().reserve_event('event'), 'done')
@@ -134,17 +136,63 @@ class MigrationTests(EIPPostgresTestCase, unittest.TestCase):
             for future in futures:
                 future.result(timeout=15)
         with self.connect() as db:
-            self.assertEqual(db.execute('SELECT count(*) FROM schema_migrations').fetchone()[0], 1)
+            self.assertEqual(db.execute('SELECT count(*) FROM schema_migrations').fetchone()[0], migrations.VERSION - 1)
 
     def test_newer_database_is_not_downgraded(self):
         self.migrate()
         with self.connect() as db:
-            db.execute('INSERT INTO schema_migrations(version) VALUES (3)')
+            db.execute('INSERT INTO schema_migrations(version) VALUES (99)')
         with self.assertRaises(ValueError):
             self.migrate()
         with self.connect() as db:
             self.assertEqual(
                 db.execute(
                     'SELECT version FROM schema_migrations ORDER BY version',
-                ).fetchall(), [(2,), (3,)],
+                ).fetchall(), [(n,) for n in range(2, migrations.VERSION + 1)] + [(99,)],
             )
+
+    def test_version_three_upgrade_preserves_existing_receipts(self):
+        self.migrate()
+        with self.connect() as db:
+            db.execute("INSERT INTO writes VALUES ('existing-write','unknown',12)")
+            db.execute('DROP TABLE pending_clarifications')
+            db.execute('DELETE FROM schema_migrations WHERE version>=4')
+        self.migrate()
+        with self.connect() as db:
+            self.assertEqual(db.execute('SELECT key,status FROM writes').fetchall(), [('existing-write', 'unknown')])
+            self.assertEqual(db.execute('SELECT max(version) FROM schema_migrations').fetchone()[0], migrations.VERSION)
+            self.assertEqual(db.execute('SELECT count(*) FROM pending_clarifications').fetchone()[0], 0)
+
+    def test_version_nine_upgrade_only_adds_shared_content_and_preserves_private_bytes(self):
+        self.migrate()
+        with self.connect() as db:
+            db.execute('DROP TABLE shared_content_cache')
+            db.execute('DELETE FROM schema_migrations WHERE version>=10')
+            db.execute("INSERT INTO processing_chunks VALUES('owner','private',%s,123)", (b'original-ciphertext',))
+            db.execute("INSERT INTO writes VALUES('uncertain','unknown',456)")
+            original = db.execute('SELECT * FROM schema_migrations WHERE version<10 ORDER BY version').fetchall()
+        with patch.object(migrations, '_version_nine', side_effect=AssertionError('v9 migration repeated')):
+            self.migrate()
+        with self.connect() as db:
+            self.assertEqual(db.execute('SELECT * FROM processing_chunks').fetchall(), [('owner', 'private', b'original-ciphertext', 123)])
+            self.assertEqual(db.execute('SELECT * FROM writes').fetchall(), [('uncertain', 'unknown', 456)])
+            self.assertEqual(db.execute('SELECT * FROM schema_migrations WHERE version<10 ORDER BY version').fetchall(), original)
+            self.assertIsNotNone(db.execute("SELECT to_regclass('shared_content_cache')").fetchone()[0])
+
+    def test_version_eleven_upgrade_adds_calendar_provenance_without_rewriting_private_data(self):
+        self.migrate()
+        with self.connect() as db:
+            db.execute('DROP TABLE calendar_managed_events,calendar_creation_intents')
+            db.execute('DELETE FROM schema_migrations WHERE version=12')
+            db.execute("INSERT INTO processing_chunks VALUES('owner','private',%s,123)", (b'original-ciphertext',))
+            db.execute("INSERT INTO writes VALUES('calendar-done','done',456),('calendar-unknown','unknown',789)")
+            db.execute("INSERT INTO event_receipts VALUES('calendar-done','original-event',456)")
+            original=db.execute('SELECT * FROM schema_migrations ORDER BY version').fetchall()
+        self.migrate()
+        with self.connect() as db:
+            self.assertEqual(db.execute('SELECT * FROM processing_chunks').fetchall(), [('owner','private',b'original-ciphertext',123)])
+            self.assertEqual(db.execute('SELECT key,status FROM writes ORDER BY key').fetchall(), [('calendar-done','done'),('calendar-unknown','unknown')])
+            self.assertEqual(db.execute('SELECT * FROM event_receipts').fetchall(), [('calendar-done','original-event',456)])
+            self.assertEqual(db.execute('SELECT * FROM schema_migrations WHERE version<12 ORDER BY version').fetchall(), original)
+            self.assertEqual(db.execute('SELECT count(*) FROM calendar_managed_events').fetchone()[0],0)
+            self.assertEqual(db.execute('SELECT count(*) FROM calendar_creation_intents').fetchone()[0],0)

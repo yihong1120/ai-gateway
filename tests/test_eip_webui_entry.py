@@ -4,8 +4,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from official_document_workflow.infrastructure.eip.webui_entry import ensure_entry
-from official_document_workflow.infrastructure.eip.webui_entry import ENTRY_ID
+from examples.official_document_workflow.infrastructure.eip.webui_entry import ensure_entry
+from examples.official_document_workflow.infrastructure.eip.webui_entry import ENTRY_ID
 
 
 class WebUIEntryTests(unittest.IsolatedAsyncioTestCase):

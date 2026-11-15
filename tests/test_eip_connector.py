@@ -1,6 +1,8 @@
 """Offline EIP contract, authorization, preview, and replay-safety tests."""
 from __future__ import annotations
 
+from tests.eip_calendar_fixture import new_calendar_matches
+
 import asyncio
 import csv
 import importlib
@@ -13,6 +15,7 @@ import types
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock
+from unittest.mock import Mock
 from unittest.mock import patch
 
 import httpx
@@ -20,19 +23,19 @@ from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi import Request
 
-from official_document_workflow.application import integration
-from official_document_workflow.domain.calendar import csv_schema as SCHEMA
-from official_document_workflow.infrastructure.eip import calendar_csv
-from official_document_workflow.infrastructure.eip.netask import import_line
-from official_document_workflow.infrastructure.eip.netask import js_escape
-from official_document_workflow.infrastructure.eip.netask import Netask
-from official_document_workflow.infrastructure.eip.netask import parse_rpc
-from official_document_workflow.infrastructure.storage.automation_store import (
+from examples.official_document_workflow.application import integration
+from examples.official_document_workflow.domain.calendar import csv_schema as SCHEMA
+from examples.official_document_workflow.infrastructure.eip import calendar_csv
+from examples.official_document_workflow.infrastructure.eip.netask import import_line
+from examples.official_document_workflow.infrastructure.eip.netask import js_escape
+from examples.official_document_workflow.infrastructure.eip.netask import Netask
+from examples.official_document_workflow.infrastructure.eip.netask import parse_rpc
+from examples.official_document_workflow.infrastructure.storage.automation_store import (
     AutomationStore,
 )
-from official_document_workflow.infrastructure.storage.state import Journal
-from official_document_workflow.infrastructure.storage.state import Link
-from official_document_workflow.infrastructure.storage.state import State
+from examples.official_document_workflow.infrastructure.storage.state import Journal
+from examples.official_document_workflow.infrastructure.storage.state import Link
+from examples.official_document_workflow.infrastructure.storage.state import State
 from tests.eip_postgres import EIPPostgresTestCase
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -120,10 +123,10 @@ def remote(r=None):
 
 class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
     def test_uppercase_description_preview_writes_original_case(self):
-        from official_document_workflow.infrastructure.eip.calendar_sync import (
+        from examples.official_document_workflow.infrastructure.eip.calendar_sync import (
             verified_events,
         )
-        from official_document_workflow.infrastructure.eip.calendar_read import unescape
+        from examples.official_document_workflow.infrastructure.eip.calendar_read import unescape
 
         source = {
             **row(),
@@ -142,7 +145,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(staged[19], original_preview)
 
     def test_exact_preview_preserves_existing_wire_and_dedup_key(self):
-        from official_document_workflow.infrastructure.eip.calendar_sync import (
+        from examples.official_document_workflow.infrastructure.eip.calendar_sync import (
             verified_events,
         )
 
@@ -160,7 +163,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             self.assertEqual(journal.status(event['key']), 'done')
 
     def test_uppercase_preview_does_not_accept_dates_text_or_unicode_changes(self):
-        from official_document_workflow.infrastructure.eip.calendar_sync import (
+        from examples.official_document_workflow.infrastructure.eip.calendar_sync import (
             verified_events,
         )
 
@@ -203,7 +206,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             await n.close()
 
     def test_calendar_wire_preserves_plus_in_description(self):
-        from official_document_workflow.infrastructure.eip.calendar_read import unescape
+        from examples.official_document_workflow.infrastructure.eip.calendar_read import unescape
 
         source = {**row(), 'Description': '0K+000～0K+100 100% %2B'}
         line = import_line(remote(source), '1709')
@@ -211,7 +214,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(unescape(line.split(',')[19]), source['Description'])
 
     async def test_plus_escape_fix_cannot_bypass_unknown_legacy_write(self):
-        from official_document_workflow.infrastructure.eip.calendar_sync import (
+        from examples.official_document_workflow.infrastructure.eip.calendar_sync import (
             verified_events,
             write_events,
         )
@@ -224,7 +227,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             journal.reserve_event(old_key)
             events = verified_events([source], [remote(source)], '1709', journal)
             self.assertIn(old_key, events[0]['aliases'])
-            adapter = types.SimpleNamespace(commit=AsyncMock(return_value=None))
+            adapter = types.SimpleNamespace(commit=AsyncMock(return_value=None), calendar_import_matches=AsyncMock(side_effect=new_calendar_matches))
             with self.assertRaises(ValueError):
                 await write_events(adapter, events, journal)
             adapter.commit.assert_not_awaited()
@@ -234,7 +237,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         original['Subject'] = '工程稽核缺失改善與後續提報' * 15
         payload = csv_bytes([original])
         before = bytes(payload)
-        with patch.object(integration, 'pipe_module', return_value=SCHEMA):
+        with patch.object(integration, 'module', new=SCHEMA):
             rows, transport = calendar_csv.parse_csv(payload)
         self.assertEqual(payload, before)
         self.assertLessEqual(len(rows[0]['Subject'].encode('utf-8')), 200)
@@ -388,7 +391,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                 'End Time(24hr)': '12:00',
             },
         )
-        with patch.object(integration, 'pipe_module', return_value=SCHEMA):
+        with patch.object(integration, 'module', new=SCHEMA):
             rows, payload = calendar_csv.parse_csv(csv_bytes([r]))
         parsed = list(csv.DictReader(io.StringIO(payload.decode('utf-8-sig'))))
         self.assertEqual(len(parsed), 1)
@@ -403,7 +406,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             {'End Date': '2026/09/09'},
             {'Start Time(24hr)': '09:00', 'Start Time': '下午09:00:00'},
         ]:
-            with patch.object(integration, 'pipe_module', return_value=SCHEMA):
+            with patch.object(integration, 'module', new=SCHEMA):
                 with self.assertRaises((ValueError, ValueError)):
                     calendar_csv.parse_csv(csv_bytes([{**row(), **changes}]))
 
@@ -418,7 +421,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             'End Time(24hr)': '',
         }
         original = csv_bytes([r])
-        with patch.object(integration, 'pipe_module', return_value=SCHEMA):
+        with patch.object(integration, 'module', new=SCHEMA):
             with self.assertRaises((ValueError, ValueError)):
                 calendar_csv.parse_csv(original)
             rows, transport = calendar_csv.parse_csv(
@@ -431,7 +434,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         parsed = list(csv.DictReader(io.StringIO(transport.decode('utf-8-sig'))))[0]
         self.assertEqual(parsed['Start Time'], '上午09:50:00')
         self.assertEqual(parsed['End Time'], '上午10:50:00')
-        from official_document_workflow.infrastructure.eip.calendar_sync import (
+        from examples.official_document_workflow.infrastructure.eip.calendar_sync import (
             verified_events,
             write_events,
         )
@@ -439,7 +442,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as _:
             journal = Journal()
             events = verified_events(rows, [remote(parsed)], '12', journal)
-            adapter = types.SimpleNamespace(commit=AsyncMock(return_value=None))
+            adapter = types.SimpleNamespace(commit=AsyncMock(return_value=None), calendar_import_matches=AsyncMock(side_effect=new_calendar_matches))
             self.assertEqual(
                 await write_events(adapter, events, journal),
                 {'created': 1, 'skipped': 0},
@@ -470,7 +473,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         ):
             with (
                 self.subTest(changes=changes),
-                patch.object(integration, 'pipe_module', return_value=SCHEMA),
+                patch.object(integration, 'module', new=SCHEMA),
             ):
                 with self.assertRaises((ValueError, ValueError)):
                     calendar_csv.parse_csv(
@@ -487,7 +490,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             'End Time': '',
             'End Time(24hr)': '',
         }
-        with patch.object(integration, 'pipe_module', return_value=SCHEMA):
+        with patch.object(integration, 'module', new=SCHEMA):
             rows, _ = calendar_csv.parse_csv(
                 csv_bytes([base]), default_duration_minutes=60,
             )
@@ -504,7 +507,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             'End Time': '',
             'End Time(24hr)': '',
         }
-        with patch.object(integration, 'pipe_module', return_value=SCHEMA):
+        with patch.object(integration, 'module', new=SCHEMA):
             rows, _ = calendar_csv.parse_csv(
                 csv_bytes([base]), default_duration_minutes=120,
             )
@@ -540,7 +543,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                 calendar_csv.automatic_duration_minutes()
 
     async def test_overnight_segments_preserve_minutes_and_deduplicate(self):
-        from official_document_workflow.infrastructure.eip.calendar_sync import (
+        from examples.official_document_workflow.infrastructure.eip.calendar_sync import (
             verified_events,
             write_events,
         )
@@ -553,7 +556,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             'End Time(24hr)': '06:00',
         }
         source = csv_bytes([original])
-        with patch.object(integration, 'pipe_module', return_value=SCHEMA):
+        with patch.object(integration, 'module', new=SCHEMA):
             rows, transport = calendar_csv.parse_csv(source)
         parsed = list(csv.DictReader(io.StringIO(transport.decode('utf-8-sig'))))
         self.assertEqual(len(rows), 2)
@@ -567,7 +570,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                 [e['line'].split(',')[2:5:2] for e in events],
                 [['1260', '1440'], ['0', '360']],
             )
-            adapter = types.SimpleNamespace(commit=AsyncMock(return_value=None))
+            adapter = types.SimpleNamespace(commit=AsyncMock(return_value=None), calendar_import_matches=AsyncMock(side_effect=new_calendar_matches))
             self.assertEqual(
                 await write_events(adapter, events, journal),
                 {'created': 2, 'skipped': 0},
@@ -577,6 +580,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                 {'created': 0, 'skipped': 2},
             )
             self.assertEqual(adapter.commit.await_count, 2)
+
             # Old full-interval writes cannot be bypassed by the new segments.
             prior = {
                 **original,
@@ -592,9 +596,71 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             journal.done(legacy)
             with self.assertRaisesRegex(ValueError, '既有跨日'):
                 verified_events(rows, [remote(r) for r in parsed], '12', journal)
+            # Daily downloads must still look up the old full-interval receipt.
+            download = calendar_csv.export_eip_csv([original])
+            restored, downloaded_transport = calendar_csv.parse_csv(
+                download, csv_format=calendar_csv.CALENDAR_CSV_FORMAT,
+            )
+            staged = list(csv.DictReader(io.StringIO(downloaded_transport.decode('utf-8-sig'))))
+            with self.assertRaisesRegex(ValueError, '既有跨日'):
+                verified_events(restored, [remote(r) for r in staged], '12', journal)
+
+
+    async def test_multiday_all_day_is_split_and_legacy_receipt_blocks_replay(self):
+        from examples.official_document_workflow.infrastructure.eip.calendar_sync import verified_events, write_events
+        from examples.official_document_workflow.infrastructure.eip.netask import import_line
+
+        original = {**row(), 'Start Date': '2026/10/24', 'End Date': '2026/10/26'}
+        rows, transport = calendar_csv.parse_csv(csv_bytes([original]))
+        staged = list(csv.DictReader(io.StringIO(transport.decode('utf-8-sig'))))
+        self.assertEqual([r['Start Date'] for r in rows], ['2026/10/24', '2026/10/25', '2026/10/26'])
+        self.assertTrue(all(r['Start Date'] == r['End Date'] and r['All day event'] == '真' for r in rows))
+        self.assertTrue(all(r['_source_interval']['End Date'] == '2026/10/26' for r in rows))
+        journal = Journal()
+        events = verified_events(rows, [remote(r) for r in staged], '12', journal)
+        adapter = types.SimpleNamespace(commit=AsyncMock(return_value=None), calendar_import_matches=AsyncMock(side_effect=new_calendar_matches))
+        self.assertEqual(await write_events(adapter, events, journal), {'created': 3, 'skipped': 0})
+        self.assertEqual(await write_events(adapter, events, journal), {'created': 0, 'skipped': 3})
+        self.assertEqual(adapter.commit.await_count, 3)
+
+        previous = Journal()
+        prior_line = import_line(remote(original), '12')
+        previous.reserve(previous.key('12', {'import': prior_line}))
+        with self.assertRaisesRegex(ValueError, '既有跨日'):
+            verified_events(rows, [remote(r) for r in staged], '12', previous)
+
+        download = calendar_csv.export_eip_csv([original])
+        restored, _ = calendar_csv.parse_csv(download, csv_format=calendar_csv.CALENDAR_CSV_FORMAT)
+        self.assertEqual(len(restored), 3)
+        self.assertTrue(all(r['_source_interval']['End Date'] == '2026/10/26' for r in restored))
+        incomplete = csv_bytes([r for r in staged if r['Start Date'] != '2026/10/25'], translation=False)
+        with self.assertRaisesRegex(ValueError, '跨日分段不完整'):
+            calendar_csv.parse_csv(incomplete)
+
+    def test_long_all_day_interval_and_unsplit_wire_fail_before_write(self):
+        from examples.official_document_workflow.infrastructure.eip.calendar_verification import validate_wire
+        from examples.official_document_workflow.infrastructure.eip.netask import import_line
+
+        original = {**row(), 'Start Date': '2026/11/01', 'End Date': '2027/03/31'}
+        with self.assertRaisesRegex(ValueError, '100 筆上限'):
+            calendar_csv.parse_csv(csv_bytes([original]))
+        with self.assertRaisesRegex(ValueError, '必須先分為單日'):
+            validate_wire(import_line(remote(original), '12'), '12')
+
+    async def test_unsplit_attachment_is_rejected_before_journal_reservation(self):
+        from examples.official_document_workflow.infrastructure.eip.calendar_sync import write_attachments
+        from examples.official_document_workflow.infrastructure.eip.netask import import_line
+        original = {**row(), 'Start Date': '2026/10/24', 'End Date': '2026/10/26'}
+        event = {'line': import_line(remote(original), '12'), 'receipt': {'event_id': 'event'}}
+        adapter = types.SimpleNamespace(user_id='12', attach_calendar_files=AsyncMock())
+        journal = Mock()
+        with self.assertRaisesRegex(ValueError, '必須先分為單日'):
+            await write_attachments(adapter, [event], [('document.pdf', b'pdf')], journal)
+        journal.reserve_event.assert_not_called()
+        adapter.attach_calendar_files.assert_not_awaited()
 
     def test_midnight_boundaries_and_segment_capacity(self):
-        from official_document_workflow.infrastructure.eip.netask import csv_minutes
+        from examples.official_document_workflow.infrastructure.eip.netask import csv_minutes
 
         self.assertEqual(csv_minutes('上午24:00:00', allow_end_of_day=True), '1440')
         for clock in ('上午24:01:00', '下午24:00:00', '上午24:00:01'):
@@ -609,7 +675,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             'End Date': '2026/09/11',
             'End Time(24hr)': '00:00',
         }
-        with patch.object(integration, 'pipe_module', return_value=SCHEMA):
+        with patch.object(integration, 'module', new=SCHEMA):
             rows, _ = calendar_csv.parse_csv(csv_bytes([base]))
             self.assertEqual(len(rows), 1)  # No phantom midnight event.
             self.assertEqual(rows[0]['End Time(24hr)'], '24:00')
@@ -622,7 +688,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                     calendar_csv.parse_csv(csv_bytes([{**base, **changes}]))
 
     async def test_legacy_wire_receipt_still_blocks_duplicate_after_fix(self):
-        from official_document_workflow.infrastructure.eip.calendar_sync import (
+        from examples.official_document_workflow.infrastructure.eip.calendar_sync import (
             verified_events,
             write_events,
         )
@@ -632,7 +698,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             legacy = journal.key('12', {'import': import_line(remote(), '12') + '\n'})
             journal.reserve(legacy)
             events = verified_events([row()], [remote()], '12', journal)
-            adapter = types.SimpleNamespace(commit=AsyncMock(return_value=None))
+            adapter = types.SimpleNamespace(commit=AsyncMock(return_value=None), calendar_import_matches=AsyncMock(side_effect=new_calendar_matches))
             with self.assertRaises(ValueError):
                 await write_events(adapter, events, journal)
             journal.done(legacy)
@@ -651,7 +717,7 @@ class ContractTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             'End Time': '14:50:00',
             'End Time(24hr)': '14:50',
         }
-        with patch.object(integration, 'pipe_module', return_value=SCHEMA):
+        with patch.object(integration, 'module', new=SCHEMA):
             rows, payload = calendar_csv.parse_csv(csv_bytes([r]))
         parsed = list(csv.DictReader(io.StringIO(payload.decode('utf-8-sig'))))[0]
         self.assertEqual(parsed['Start Time'], '下午01:50:00')
@@ -691,22 +757,32 @@ async def verified(request: Request):
 
 
 class RouterTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
+    async def test_workflow_health_is_admin_only_and_excludes_connection_settings(self):
+        denied = await self.client.get('/api/v1/eip/health',headers={'test-owner':'alice'})
+        self.assertEqual(denied.status_code,403)
+        visible = await self.client.get('/api/v1/eip/health',headers={'test-owner':'alice','test-role':'admin'})
+        self.assertEqual(visible.status_code,200)
+        self.assertEqual(set(visible.json()['workers']),{'scheduler','cleanup','outputs'})
+        self.assertNotIn('postgresql',visible.text)
+        self.assertNotIn('password',visible.text)
+
     async def asyncSetUp(self):
         auth = types.ModuleType('open_webui.utils.auth')
         auth.get_verified_user = verified
         auth.get_current_user = verified
         with patch.dict(sys.modules, {'open_webui.utils.auth': auth}):
             self.module = importlib.import_module(
-                'official_document_workflow.api.routes',
+                'examples.official_document_workflow.api.routes',
             )
         self.state = State()
+        self._workflow.state = self.state
         self.tmp = tempfile.TemporaryDirectory()
         self.journal = Journal()
         self.auto = AutomationStore(Path(self.tmp.name) / 'keys/key')
         self.patches = [
-            patch.object(self.module, 'STATE', self.state),
-            patch.object(self.module, 'JOURNAL', self.journal),
-            patch.object(self.module.automation, 'store', return_value=self.auto),
+            patch.object(self._workflow, 'state', self.state),
+            patch.object(self._workflow, '_journal', self.journal),
+            patch.object(self._workflow, '_store', self.auto),
         ]
         for p in self.patches:
             p.start()
@@ -714,6 +790,7 @@ class RouterTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             user_id='1709',
             stage=AsyncMock(return_value=[remote()]),
             commit=AsyncMock(return_value=None),
+            calendar_import_matches=AsyncMock(side_effect=new_calendar_matches),
             close=AsyncMock(),
         )
         self.state.links['alice'] = Link(self.adapter, 'account-a')
@@ -797,6 +874,19 @@ class RouterTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             response.json()['automatic_results'][0]['subject'], 'Bob private',
         )
+
+    async def test_validation_issues_are_returned_only_to_the_task_owner(self):
+        from examples.official_document_workflow.domain.validation import ContentValidationError
+        issue = ContentValidationError('event_date_evidence_mismatch', group_index=1,
+                                       event_index=2, field='start_date', repair_attempted=True).as_issue()
+        self.auto.discover('alice', '1709', [{'id': '10', 'subject': '公文', 'folder': 'inbox'}])
+        task = self.auto.tasks('alice')[0]
+        self.auto.save_task(task, 'needs_review', {**task['payload'], 'output': {'validation_issues': [issue]}})
+        response = await self.client.get('/api/v1/eip/status')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['automatic_results'][0]['validation_issues'], [issue])
+        response = await self.client.get('/api/v1/eip/status', headers={'test-owner': 'bob'})
+        self.assertEqual(response.json()['automatic_results'], [])
 
     async def test_history_empty_and_invalid_pagination(self):
         value = (await self.client.get('/api/v1/eip/status?automatic_page=10')).json()

@@ -53,7 +53,7 @@
 
 ### 程式覆蓋率
 
-完整量測 `official_document_workflow` 的 EIP application／domain／infrastructure 模組，沒有排除檔案來拉高分數：
+完整量測 `examples.official_document_workflow` 的 EIP application／domain／infrastructure 模組，沒有排除檔案來拉高分數：
 
 - 敘述行：2889／3313，87.20%。
 - 分支：1008／1272，79.25%。

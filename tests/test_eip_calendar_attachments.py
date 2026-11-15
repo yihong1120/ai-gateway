@@ -4,8 +4,8 @@ import copy
 import unittest
 from unittest.mock import AsyncMock
 
-from official_document_workflow.infrastructure.eip.calendar_attachments import attach_event
-from official_document_workflow.infrastructure.eip.calendar_attachments import attachment_parameters
+from examples.official_document_workflow.infrastructure.eip.calendar_attachments import attach_event
+from examples.official_document_workflow.infrastructure.eip.calendar_attachments import attachment_parameters
 from tests.test_eip_calendar_verification import EVENT
 from tests.test_eip_calendar_verification import fixture
 

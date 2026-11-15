@@ -2,20 +2,20 @@ from __future__ import annotations
 
 import copy
 import unittest
+from unittest.mock import patch
 
 from . import test_eip_group_processing as group_tests
 from .test_official_document_processor_pipe import PIPE_MODULE as M
-from official_document_workflow.application.group_processing import parse_group
-from official_document_workflow.domain.calendar.calendar_semantics import assignment_event
-from official_document_workflow.domain.calendar.calendar_semantics import calendar_events
-from official_document_workflow.domain.calendar.calendar_semantics import literal_source_candidates
-from official_document_workflow.domain.calendar.calendar_semantics import resolve_spans
-from official_document_workflow.domain.calendar.calendar_semantics import temporal_source_candidates
-from official_document_workflow.domain.calendar.calendar_semantics import uncovered_time_candidates
-from official_document_workflow.domain.calendar.calendar_semantics import verify_date
-from official_document_workflow.domain.calendar.calendar_semantics import verify_event_date
-from official_document_workflow.domain.calendar.calendar_semantics import verify_next_day_end
-from official_document_workflow.domain.calendar.calendar_semantics import verify_time
+from examples.official_document_workflow.application.group_processing import parse_group
+from examples.official_document_workflow.domain.calendar.calendar_semantics import assignment_event
+from examples.official_document_workflow.domain.calendar.calendar_semantics import literal_source_candidates
+from examples.official_document_workflow.domain.calendar.calendar_semantics import resolve_spans
+from examples.official_document_workflow.domain.calendar.calendar_semantics import temporal_source_candidates
+from examples.official_document_workflow.domain.calendar.calendar_semantics import uncovered_time_candidates
+from examples.official_document_workflow.domain.calendar.calendar_semantics import verify_date
+from examples.official_document_workflow.domain.calendar.calendar_semantics import verify_event_date
+from examples.official_document_workflow.domain.calendar.calendar_semantics import verify_next_day_end
+from examples.official_document_workflow.domain.calendar.calendar_semantics import verify_time
 
 payload = group_tests.payload
 
@@ -65,6 +65,22 @@ def event():
 
 
 class CalendarSemanticsTests(unittest.TestCase):
+    def test_unrelated_clock_does_not_force_a_calendar_error(self):
+        from examples.official_document_workflow.application.multi_agent import DocumentAgent
+
+        agent = DocumentAgent(None, None)
+        candidate = {'status': 'current', 'start_time': '09:00'}
+        state = {'payload': {'events': [candidate]}, 'sources': {'S1': M.CloudSemanticSource(
+            '會議於上午9時召開。\n前次工作於下午3時完成。', 'native_pdf_text',
+        )}, 'analysis_attempts': 2}
+        with patch.object(agent, 'document_source', return_value=None), patch(
+            'examples.official_document_workflow.application.multi_agent.parse_group',
+            return_value=('source', 'document', [], [{'Subject': '會議'}], []),
+        ):
+            result = agent.validate(state)
+        self.assertEqual(result['csv_errors'], [])
+        self.assertEqual(result['analysis_status'], 'validated')
+
     def test_explicit_event_without_date_evidence_stays_pending(self):
         candidate = event()
         candidate['assignment'] = {
@@ -82,7 +98,7 @@ class CalendarSemanticsTests(unittest.TestCase):
         self.assertEqual(result['status'], 'needs_review')
         self.assertIsNone(result['start_date'])
 
-    def test_primary_document_reference_keeps_dated_milestone_current(self):
+    def test_historical_milestone_is_not_promoted_by_document_reference(self):
         candidate = event()
         candidate.update(status='historical', kind='project_milestone')
         candidate['assignment'] = {
@@ -96,7 +112,7 @@ class CalendarSemanticsTests(unittest.TestCase):
             'S2': M.CloudSemanticSource(ATTACHMENT, 'native_pdf_text'),
         }
         result = assignment_event(candidate, sources, 'S1')
-        self.assertEqual(result['status'], 'current')
+        self.assertEqual(result['status'], 'historical')
 
     def test_temporal_index_is_literal_bounded_and_includes_cross_day_context(self):
         sources = {
@@ -192,9 +208,8 @@ class CalendarSemanticsTests(unittest.TestCase):
         }
 
     def parse(self, events=None):
-        return calendar_events(
-            self.pipe,
-            M,
+        return self.pipe.calendar.events(
+
             {'events': events if events is not None else [event()]},
             self.sources,
             None,
@@ -280,7 +295,7 @@ class CalendarSemanticsTests(unittest.TestCase):
         data['events'] = [event()]
         _ = []
         with self.assertRaises(M.CloudExtractionError):
-            parse_group(self.pipe, M, data, self.sources)
+            parse_group(self.pipe,  data, self.sources)
 
     def test_metadata_known_ocr_wrappers_do_not_cause_false_subject_failure(self):
         data = payload()
@@ -294,24 +309,24 @@ class CalendarSemanticsTests(unittest.TestCase):
             'S2': M.CloudSemanticSource(group_tests.DEADLINE_EVIDENCE, 'native_pdf_text'),
         }
         diagnostics = []
-        _, doc, _, _, errors = parse_group(self.pipe, M, data, sources, diagnostics=diagnostics)
+        _, doc, _, _, errors = parse_group(self.pipe,  data, sources, diagnostics=diagnostics)
         self.assertIsNotNone(doc)
         self.assertEqual(doc.subject, subject)
         self.assertFalse(diagnostics)
         self.assertFalse(errors)
         self.assertEqual(sources['S1'].text, wrapped)
         data['document']['subject'] = '沒有來源的另一個工程主旨'
-        _, doc, _, _, _ = parse_group(self.pipe, M, data, sources)
+        _, doc, _, _, _ = parse_group(self.pipe,  data, sources)
         self.assertEqual(doc.subject, subject)
         data['document']['evidence']['subject'] = '沒有來源的另一個工程主旨'
         with self.assertRaises(M.CloudExtractionError):
-            parse_group(self.pipe, M, data, sources)
+            parse_group(self.pipe,  data, sources)
 
     def test_one_bad_event_aborts_before_returning_partial_rows(self):
         bad = event()
         bad['start_date'] = '2026-09-09'
         with self.assertRaises(ValueError):
-            calendar_events(self.pipe, M, {'events': [event(), bad]}, self.sources, None)
+            self.pipe.calendar.events( {'events': [event(), bad]}, self.sources, None)
 
     def test_metadata_native_pdf_wrap_between_chinese_and_digits(self):
         data = payload()
@@ -327,7 +342,7 @@ class CalendarSemanticsTests(unittest.TestCase):
         }
         before = copy.deepcopy(data)
         diagnostics = []
-        _, doc, _, _, errors = parse_group(self.pipe, M, data, sources, diagnostics=diagnostics)
+        _, doc, _, _, errors = parse_group(self.pipe,  data, sources, diagnostics=diagnostics)
         self.assertIsNotNone(doc)
         self.assertEqual(doc.subject, subject)
         self.assertEqual(diagnostics, [])
@@ -343,10 +358,10 @@ class CalendarSemanticsTests(unittest.TestCase):
                 data['document']['subject'] = claimed
                 data['document']['evidence']['subject'] = claimed
                 with self.assertRaises(M.CloudExtractionError):
-                    parse_group(self.pipe, M, data, sources)
+                    parse_group(self.pipe,  data, sources)
 
     def test_metadata_wrap_does_not_join_separate_numbers_or_latin_words(self):
-        from official_document_workflow.application.group_processing import (
+        from examples.official_document_workflow.application.group_processing import (
             metadata_text,
         )
 
@@ -368,7 +383,7 @@ class CalendarSemanticsTests(unittest.TestCase):
             'S2': M.CloudSemanticSource(group_tests.DEADLINE_EVIDENCE, 'native_pdf_text'),
         }
         diagnostics = []
-        _, doc, _, _, errors = parse_group(self.pipe, M, data, sources, diagnostics=diagnostics)
+        _, doc, _, _, errors = parse_group(self.pipe,  data, sources, diagnostics=diagnostics)
         self.assertIsNotNone(doc)
         self.assertEqual(diagnostics, [])
         self.assertEqual(errors, [])
@@ -377,10 +392,10 @@ class CalendarSemanticsTests(unittest.TestCase):
         # A different number is not a typography variant.
         data['document']['evidence']['issued_date'] = '中華民國999年1月1日'
         with self.assertRaises(M.CloudExtractionError):
-            parse_group(self.pipe, M, data, sources)
+            parse_group(self.pipe,  data, sources)
 
     def test_metadata_normalization_preserves_compatibility_distinctions(self):
-        from official_document_workflow.application.group_processing import (
+        from examples.official_document_workflow.application.group_processing import (
             metadata_text,
         )
 
@@ -403,13 +418,13 @@ class CalendarSemanticsTests(unittest.TestCase):
             'S2': M.CloudSemanticSource(group_tests.DEADLINE_EVIDENCE, 'native_pdf_text'),
         }
         diagnostics = []
-        _, doc, _, _, errors = parse_group(self.pipe, M, data, sources, diagnostics=diagnostics)
+        _, doc, _, _, errors = parse_group(self.pipe,  data, sources, diagnostics=diagnostics)
         self.assertIsNotNone(doc)
         self.assertEqual(doc.subject, subject)
         self.assertEqual(diagnostics, [])
         self.assertEqual(errors, [])
         self.assertEqual(sources['S1'].text, source)
-        from official_document_workflow.application.group_processing import (
+        from examples.official_document_workflow.application.group_processing import (
             metadata_text,
         )
 
@@ -737,12 +752,12 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         result = await self.run_group()
         self.assertTrue(result['calendar_ready'], result['errors'])
         self.review.assert_awaited_once()
-        candidate = self.review.await_args.args[3][0]
+        candidate = self.review.await_args.args[2][0]
         self.assertEqual(candidate['evidence_spans']['title'], e['evidence_spans']['action'])
         self.assertEqual(e['evidence_spans']['title'], [])
 
     async def test_rejected_independent_candidate_is_quarantined_not_exported(self):
-        from official_document_workflow.application.multi_agent import DocumentAgent
+        from examples.official_document_workflow.application.multi_agent import DocumentAgent
 
         first = event()
         second = event()
@@ -770,17 +785,17 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
                 },
             ],
         }
-        state = await DocumentAgent(self.pipe, M, None).run(self.items, 1, 1)
+        state = await DocumentAgent(self.pipe,  None).run(self.items, 1, 1)
         self.assertEqual(state['payload'], original)
         self.assertEqual(len(state['rows']), 1)
         self.assertEqual(state['accepted_events'][0]['title'], '獨立核准會勘')
         self.assertEqual(state['pending_events'][0]['status'], 'needs_review')
         self.assertIsNone(state['pending_events'][0]['start_date'])
         self.assertIn('第一筆責任需核對', state['csv_errors'][0])
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
+        self.pipe.analyze_text.assert_awaited_once()
         self.review.assert_awaited_once()
 
-    async def test_long_action_raises_without_correction(self):
+    async def test_long_action_is_corrected_without_losing_source(self):
         data = payload()
         e = event()
         e['action'] = '具體工作內容' * 30
@@ -788,10 +803,9 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         corrected = payload()
         corrected.update(calendar_contract_version=2, events=[event()])
         self.install_payloads(data, corrected)
-        with self.assertRaises(ValueError):
-            await self.run_group()
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
-        self.pipe._store_derived_bytes.assert_not_awaited()
+        result = await self.run_group()
+        self.assertTrue(result['calendar_ready'], result['errors'])
+        self.assertEqual(self.pipe.analyze_text.await_count, 2)
 
     async def test_pending_item_keeps_independently_verified_calendar_row(self):
         data = payload()
@@ -805,10 +819,10 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result['csv_ids'])
         self.assertTrue(result['calendar_ready'])
         self.assertIn('日期待補', result['errors'][0])
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
+        self.pipe.analyze_text.assert_awaited_once()
         self.review.assert_awaited_once()
 
-    async def test_mixed_missing_date_raises_without_partial_result(self):
+    async def test_mixed_missing_date_keeps_corrected_independent_calendar_row(self):
         pending = event()
         pending.update(status='needs_review', start_date=None)
         bad = event()
@@ -818,10 +832,12 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         second = payload()
         second.update(calendar_contract_version=2, events=[pending, event()])
         self.install_payloads(first, second)
-        with self.assertRaises(ValueError):
-            await self.run_group()
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
-        self.pipe._store_derived_bytes.assert_not_awaited()
+        result = await self.run_group()
+        self.assertEqual(result['status'], 'partial')
+        self.assertTrue(result['calendar_ready'])
+        self.assertTrue(result['csv_ids'])
+        self.assertIn('日期待補', result['errors'][0])
+        self.assertEqual(self.pipe.analyze_text.await_count, 2)
 
     async def test_unverified_optional_label_not_fabricated_or_calendar_blocker(self):
         data = payload()
@@ -832,7 +848,7 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         self.install_payloads(data)
         result = await self.run_group()
         self.assertTrue(result['calendar_ready'])
-        candidate = self.review.await_args.args[3][0]
+        candidate = self.review.await_args.args[2][0]
         self.assertIsNone(candidate['responsible_party'])
         self.assertTrue(candidate['_field_notices'])
         self.assertEqual(data['events'][0]['responsible_party'], '來源未載明的完整稱呼')
@@ -851,7 +867,7 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['status'], 'partial')
         self.assertEqual(len(result['files']), 4)
         self.assertFalse(result['csv_ids'])
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
+        self.pipe.analyze_text.assert_awaited_once()
         self.review.assert_awaited_once()
 
     def setUp(self):
@@ -859,7 +875,7 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
 
         group_tests.GroupTests.setUp(self)
         review = patch(
-            'official_document_workflow.application.multi_agent.review_calendar',
+            'examples.official_document_workflow.application.multi_agent.review_calendar',
             new_callable=AsyncMock,
             return_value={'approved': True, 'issues': []},
         )
@@ -873,28 +889,28 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
             'S1': M.CloudSemanticSource(MAIN, 'native_pdf_text'),
             'S2': M.CloudSemanticSource(ATTACHMENT, 'native_pdf_text'),
         }
-        self.pipe._cloud_semantic_source_text.side_effect = list(self.sources.values())
-        self.pipe._cloud_ocr_text_request.side_effect = list(values)
+        self.pipe.semantic_source.side_effect = list(self.sources.values())
+        self.pipe.analyze_text.side_effect = list(values)
 
-    async def test_one_bounded_format_correction_is_not_attempted(self):
+    async def test_one_bounded_format_correction_can_recover(self):
         good = payload()
         good.update(calendar_contract_version=2, events=[event()])
         bad = copy.deepcopy(good)
         bad['events'] = None
         self.install_payloads(bad, good)
-        with self.assertRaises(ValueError):
-            await self.run_group()
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
-        self.pipe._store_derived_bytes.assert_not_awaited()
+        result = await self.run_group()
+        self.assertTrue(result['calendar_ready'], result['errors'])
+        self.assertEqual(self.pipe.analyze_text.await_count, 2)
 
-    async def test_format_correction_stops_at_first_error(self):
+    async def test_repeated_format_error_keeps_documents_without_calendar(self):
         bad = payload()
         bad.update(calendar_contract_version=2, events=None)
         self.install_payloads(bad, bad)
-        with self.assertRaises(ValueError):
-            await self.run_group()
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
-        self.pipe._store_derived_bytes.assert_not_awaited()
+        result = await self.run_group()
+        self.assertFalse(result['calendar_ready'])
+        self.assertFalse(result['csv_ids'])
+        self.assertEqual(len(result['files']), 4)
+        self.assertEqual(self.pipe.analyze_text.await_count, 2)
 
     async def test_current_without_date_exports_without_correction_or_calendar(self):
         good = payload()
@@ -906,7 +922,7 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result['files']), 4)
         self.assertFalse(result['csv_ids'])
         self.assertIn('日期待補', result['errors'][0])
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
+        self.pipe.analyze_text.assert_awaited_once()
 
     async def test_current_missing_date_keeps_documents_without_invention(self):
         bad = payload()
@@ -919,12 +935,12 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({f['kind'] for f in result['files']}, {'document_pdf', 'document_docx'})
         self.assertFalse(result['calendar_ready'])
         self.assertEqual(result['calendar_status'], 'needs_review')
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
+        self.pipe.analyze_text.assert_awaited_once()
 
     async def test_classified_merge_is_revalidated_before_export(self):
         from unittest.mock import Mock
 
-        self.pipe._calendar_csv = Mock(wraps=self.pipe._calendar_csv)
+        self.pipe.calendar_csv = Mock(wraps=self.pipe.calendar_csv)
         one = event()
         two = copy.deepcopy(one)
         one['action'] = '準備會勘'
@@ -943,20 +959,20 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         result = await self.run_group()
         self.assertTrue(result['calendar_ready'], result['errors'])
         self.assertEqual(len(result['csv_ids']), 1)
-        rows = self.pipe._calendar_csv.call_args.args[0]
+        rows = self.pipe.calendar_csv.call_args.args[0]
         self.assertEqual(len(rows), 1)
         self.assertIn('請攜帶設計圖至現場討論。', rows[0]['Description'])
 
-    async def test_project_reference_correction_still_requires_exact_source(self):
+    async def test_unverified_project_is_corrected_from_source(self):
         good = payload()
         good.update(calendar_contract_version=2, events=[event()])
         bad = copy.deepcopy(good)
         bad['events'][0]['project_name'] = '不存在的工程'
         self.install_payloads(bad, good)
-        with self.assertRaises(ValueError):
-            await self.run_group()
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
-        self.pipe._store_derived_bytes.assert_not_awaited()
+        result = await self.run_group()
+        self.assertTrue(result['calendar_ready'], result['errors'])
+        self.assertEqual(self.review.await_args.args[2][0]['project_name'], '古坑工程')
+        self.assertEqual(self.pipe.analyze_text.await_count, 2)
 
     async def test_no_retry_for_semantic_uncertainty_or_missing_date(self):
         for change in (
@@ -969,17 +985,18 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
                 e.update(change)
                 data['events'] = [e]
                 self.install_payloads(data)
-                self.pipe._cloud_ocr_text_request.reset_mock()
+                self.pipe.analyze_text.reset_mock()
                 if e['start_date'] is None:
                     result = await self.run_group()
                     self.assertFalse(result['csv_ids'])
                     self.assertEqual(len(result['files']), 4)
                 else:
-                    with self.assertRaises(ValueError):
-                        await self.run_group()
-                self.pipe._cloud_ocr_text_request.assert_awaited_once()
+                    result = await self.run_group()
+                    self.assertFalse(result['csv_ids'])
+                    self.assertEqual(len(result['files']), 4)
+                self.pipe.analyze_text.assert_awaited_once()
 
-    async def test_date_provenance_failure_propagates(self):
+    async def test_date_provenance_error_can_be_corrected_once(self):
         bad = payload()
         e = event()
         e['start_date'] = '2026-09-09'
@@ -987,12 +1004,11 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         good = payload()
         good.update(calendar_contract_version=2, events=[event()])
         self.install_payloads(bad, good)
-        with self.assertRaises(ValueError):
-            await self.run_group()
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
-        self.pipe._store_derived_bytes.assert_not_awaited()
+        result = await self.run_group()
+        self.assertTrue(result['calendar_ready'], result['errors'])
+        self.assertEqual(self.pipe.analyze_text.await_count, 2)
 
-    async def test_date_correction_is_not_attempted_after_validation_error(self):
+    async def test_date_correction_can_leave_the_item_pending(self):
 
         bad = payload()
         e = event()
@@ -1001,12 +1017,13 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         pending = copy.deepcopy(bad)
         pending['events'][0].update(status='needs_review', start_date=None, start_time=None)
         self.install_payloads(bad, pending)
-        with self.assertRaises(ValueError):
-            await self.run_group()
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
-        self.pipe._store_derived_bytes.assert_not_awaited()
+        result = await self.run_group()
+        self.assertFalse(result['calendar_ready'])
+        self.assertFalse(result['csv_ids'])
+        self.assertIn('日期待補', result['errors'][0])
+        self.assertEqual(self.pipe.analyze_text.await_count, 2)
 
-    async def test_missing_overnight_end_raises_without_correction(self):
+    async def test_missing_overnight_end_can_be_corrected_from_source(self):
         good = payload()
         e = event()
         e.update(start_time='21:00', end_date='2026-09-09', end_time='06:00')
@@ -1016,28 +1033,28 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         bad = copy.deepcopy(good)
         bad['events'][0].update(end_date=None, end_time=None)
         self.install_payloads(bad, good)
-        self.pipe._cloud_semantic_source_text.side_effect = [
+        self.pipe.semantic_source.side_effect = [
             self.sources['S1'],
             M.CloudSemanticSource(
                 '本次施工\n115年9月8日晚間9時至翌日6時封閉道路。\n工程東側起點鄰149甲線路口\n施工',
                 'native_pdf_text',
             ),
         ]
-        with self.assertRaises(ValueError):
-            await self.run_group()
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
-        self.pipe._store_derived_bytes.assert_not_awaited()
+        result = await self.run_group()
+        self.assertTrue(result['calendar_ready'], result['errors'])
+        self.assertEqual(self.pipe.analyze_text.await_count, 2)
 
-    async def test_date_provenance_correction_stops_without_retry(self):
+    async def test_repeated_date_provenance_error_keeps_documents(self):
         bad = payload()
         e = event()
         e['start_date'] = '2026-09-09'
         bad.update(calendar_contract_version=2, events=[e])
         self.install_payloads(bad, bad)
-        with self.assertRaises(ValueError):
-            await self.run_group()
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
-        self.pipe._store_derived_bytes.assert_not_awaited()
+        result = await self.run_group()
+        self.assertFalse(result['calendar_ready'])
+        self.assertFalse(result['csv_ids'])
+        self.assertEqual(len(result['files']), 4)
+        self.assertEqual(self.pipe.analyze_text.await_count, 2)
 
     async def test_failure_does_not_drop_previously_detected_event(self):
         bad = payload()
@@ -1047,10 +1064,11 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         empty = copy.deepcopy(bad)
         empty['events'] = []
         self.install_payloads(bad, empty)
-        with self.assertRaises(ValueError):
-            await self.run_group()
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
-        self.pipe._store_derived_bytes.assert_not_awaited()
+        result = await self.run_group()
+        self.assertFalse(result['calendar_ready'])
+        self.assertFalse(result['csv_ids'])
+        self.assertEqual(result['validation_issues'][0]['code'], 'event_repair_omitted_items')
+        self.assertEqual(self.pipe.analyze_text.await_count, 2)
 
     async def test_failure_does_not_silently_reduce_two_events_to_one(self):
         good = payload()
@@ -1059,10 +1077,11 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         bad['events'].append(event())
         bad['events'][1]['evidence_spans']['start_date'] = spans('S2', 999)
         self.install_payloads(bad, good)
-        with self.assertRaises(ValueError):
-            await self.run_group()
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
-        self.pipe._store_derived_bytes.assert_not_awaited()
+        result = await self.run_group()
+        self.assertFalse(result['calendar_ready'])
+        self.assertFalse(result['csv_ids'])
+        self.assertEqual(result['validation_issues'][0]['code'], 'event_repair_omitted_items')
+        self.assertEqual(self.pipe.analyze_text.await_count, 2)
 
     async def test_event_capacity_exceeded_is_not_retried_or_truncated(self):
         bad = payload()
@@ -1071,10 +1090,10 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
             events=[event()] * (self.pipe.valves.cloud_max_events + 1),
         )
         self.install_payloads(bad)
-        with self.assertRaises(ValueError):
-            await self.run_group()
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
-        self.pipe._store_derived_bytes.assert_not_awaited()
+        result = await self.run_group()
+        self.assertFalse(result['calendar_ready'])
+        self.assertFalse(result['csv_ids'])
+        self.pipe.analyze_text.assert_awaited_once()
 
     async def test_metadata_warning_raises_before_exports(self):
         data = payload()
@@ -1086,12 +1105,13 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
             'S1': M.CloudSemanticSource(MAIN, 'native_pdf_text'),
             'S2': M.CloudSemanticSource(ATTACHMENT, 'native_pdf_text'),
         }
-        self.pipe._cloud_semantic_source_text.side_effect = list(self.sources.values())
-        self.pipe._cloud_ocr_text_request.return_value = data
-        with self.assertRaises(M.CloudExtractionError):
+        self.pipe.semantic_source.side_effect = list(self.sources.values())
+        self.pipe.analyze_text.return_value = data
+        from examples.official_document_workflow.domain.validation import ContentValidationError
+        with self.assertRaises(ContentValidationError):
             await self.run_group()
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
-        self.pipe._store_derived_bytes.assert_not_awaited()
+        self.assertEqual(self.pipe.analyze_text.await_count, 2)
+        self.pipe.store_output.assert_not_awaited()
 
     async def test_semantic_reviewer_rejection_does_not_rewrite_candidates(self):
         good = payload()
@@ -1107,14 +1127,14 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result['files']), 4)
         self.assertIn('語意核對', ' '.join(result['calendar_errors']))
         self.review.assert_awaited_once()
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
+        self.pipe.analyze_text.assert_awaited_once()
         self.assertFalse(result['orchestration']['agents'][1]['semantic_review']['approved'])
 
     async def test_incorrect_review_cannot_replace_a_correct_candidate_and_self_approve(
         self,
     ):
         from copy import deepcopy
-        from official_document_workflow.application.multi_agent import DocumentAgent
+        from examples.official_document_workflow.application.multi_agent import DocumentAgent
 
         good = payload()
         good.update(calendar_contract_version=2, events=[event()])
@@ -1126,14 +1146,14 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
             {'approved': False, 'issues': ['改成無來源的新責任人。']},
             {'approved': True, 'issues': []},
         ]
-        state = await DocumentAgent(self.pipe, M, None).run(self.items, 1, 1)
+        state = await DocumentAgent(self.pipe,  None).run(self.items, 1, 1)
         self.assertEqual(state['payload'], original)
         self.assertEqual(state['analysis_attempts'], 1)
         self.assertEqual(state['repair_history'], [])
         self.assertFalse(state['rows'])
         self.assertTrue(state['accepted_events'])
         self.review.assert_awaited_once()
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
+        self.pipe.analyze_text.assert_awaited_once()
 
     async def test_semantic_reviewer_failure_never_exports_calendar(self):
         good = payload()
@@ -1142,8 +1162,8 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         self.review.side_effect = RuntimeError('private response')
         with self.assertRaises(RuntimeError):
             await self.run_group()
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
-        self.pipe._store_derived_bytes.assert_not_awaited()
+        self.pipe.analyze_text.assert_awaited_once()
+        self.pipe.store_output.assert_not_awaited()
 
     async def test_semantic_reviewer_rate_limit_raises_without_deferral(self):
         good = payload()
@@ -1152,5 +1172,5 @@ class CalendarGraphTests(unittest.IsolatedAsyncioTestCase):
         self.review.side_effect = M.CloudRateLimited('HTTP 429')
         with self.assertRaises(M.CloudRateLimited):
             await self.run_group()
-        self.pipe._cloud_ocr_text_request.assert_awaited_once()
-        self.pipe._store_derived_bytes.assert_not_awaited()
+        self.pipe.analyze_text.assert_awaited_once()
+        self.pipe.store_output.assert_not_awaited()

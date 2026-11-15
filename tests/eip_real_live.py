@@ -17,7 +17,7 @@ from pathlib import Path
 
 class RequestCapture:
     def __init__(self, pipe, folder):
-        self.original = pipe._cloud_ocr_text_request
+        self.original = pipe.analyze_text
         self.original_text = pipe._responses_output_text
         self.original_json = pipe._cloud_json_object
         pipe._responses_output_text = self.response_text
@@ -60,20 +60,19 @@ class RequestCapture:
 
 async def evaluate_document(record, folder, *, model=None):
     from langsmith import tracing_context
-    from official_document_workflow.application.integration import (
+    from examples.official_document_workflow.application.integration import (
         configured_pipe,
-        pipe_module,
     )
-    from official_document_workflow.application.multi_agent import DocumentAgent
+    from examples.official_document_workflow.application.multi_agent import DocumentAgent
 
     pipe = await configured_pipe()
     if model:
         pipe.valves = type(pipe.valves)(**{**pipe.valves.model_dump(), 'cloud_ocr_text_model': model})
     ids = record['payload']['source_ids']
-    kind, owned = await pipe._get_owned_source_files([{'id': fid, 'type': 'file'} for fid in ids], record['owner'])
-    prepared = await pipe._prepare_owned_source_documents(kind, owned)
+    kind, owned = await pipe.owned_sources([{'id': fid, 'type': 'file'} for fid in ids], record['owner'])
+    prepared = await pipe.prepare_owned_source_documents(kind, owned)
     capture = RequestCapture(pipe, folder)
-    pipe._cloud_ocr_text_request = capture
+    pipe.analyze_text = capture
     try:
         manifest = [
             {
@@ -84,7 +83,7 @@ async def evaluate_document(record, folder, *, model=None):
         ]
         (folder / 'sources.json').write_text(json.dumps(manifest))
         with tracing_context(enabled=False):
-            state = await DocumentAgent(pipe, pipe_module(), None).run(list(prepared), 1, 1)
+            state = await DocumentAgent(pipe, None).run(list(prepared), 1, 1)
         result = {
             key: state.get(key)
             for key in (
@@ -111,7 +110,7 @@ async def evaluate_document(record, folder, *, model=None):
         for sid, source in state.get('sources', {}).items():
             (folder / f"{sid}.txt").write_text(source.text)
         if state.get('rows'):
-            (folder / 'calendar.csv').write_bytes(pipe._calendar_csv(state['rows']))
+            (folder / 'calendar.csv').write_bytes(pipe.calendar_csv(state['rows']))
         (folder / 'result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2))
         return result
     finally:
@@ -126,8 +125,8 @@ async def run_batch(records, output, evaluate=evaluate_document):
         raise ValueError('Unique numeric document IDs required')
     repo = Path(__file__).resolve().parents[1]
     paths = [
-        *sorted((repo / 'official_document_workflow').glob('**/*.py')),
-        repo / 'openwebui/functions/official_document_processor_pipe.py',
+        *sorted((repo / 'examples/official_document_workflow').glob('**/*.py')),
+        repo / 'examples/openwebui/functions/official_document_processor_pipe.py',
     ]
     (output / 'code-hashes.json').write_text(
         json.dumps(

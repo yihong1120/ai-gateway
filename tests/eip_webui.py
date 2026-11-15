@@ -29,7 +29,7 @@ def load_application_modules(first=None):
         if first is not None:
             importlib.import_module(first)
         for name in ('application.integration', 'application.automation', 'infrastructure.eip.webui_entry'):
-            importlib.import_module('official_document_workflow.' + name)
+            importlib.import_module('examples.official_document_workflow.' + name)
     finally:
         for name, module in previous.items():
             if module is None:

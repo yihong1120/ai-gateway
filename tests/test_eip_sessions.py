@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.eip_calendar_fixture import new_calendar_matches
+
 import asyncio
 import tempfile
 import unittest
@@ -10,13 +12,13 @@ from unittest.mock import Mock
 
 import httpx
 
-from official_document_workflow.infrastructure.eip.calendar_sync import write_events
-from official_document_workflow.infrastructure.eip.netask import Netask
-from official_document_workflow.infrastructure.eip.sessions import manual_session
-from official_document_workflow.infrastructure.storage.automation_store import AutomationStore
-from official_document_workflow.infrastructure.storage.state import Journal
-from official_document_workflow.infrastructure.storage.state import Link
-from official_document_workflow.infrastructure.storage.state import State
+from examples.official_document_workflow.infrastructure.eip.calendar_sync import write_events
+from examples.official_document_workflow.infrastructure.eip.netask import Netask
+from examples.official_document_workflow.infrastructure.eip.sessions import manual_session
+from examples.official_document_workflow.infrastructure.storage.automation_store import AutomationStore
+from examples.official_document_workflow.infrastructure.storage.state import Journal
+from examples.official_document_workflow.infrastructure.storage.state import Link
+from examples.official_document_workflow.infrastructure.storage.state import State
 from tests.eip_postgres import EIPPostgresTestCase
 
 
@@ -24,6 +26,7 @@ def adapter():
     return SimpleNamespace(
         user_id='17', login=AsyncMock(), close=AsyncMock(),
         documents=AsyncMock(return_value=[]), commit=AsyncMock(return_value=None),
+        calendar_import_matches=AsyncMock(side_effect=new_calendar_matches),
     )
 
 

@@ -14,15 +14,15 @@ import pymupdf
 from cryptography.fernet import InvalidToken
 
 from .test_official_document_processor_pipe import PIPE_MODULE as M
-from official_document_workflow.application.long_source import group_text
-from official_document_workflow.application.long_source import source_lines
-from official_document_workflow.application.long_source import windows
-from official_document_workflow.domain.calendar.calendar_semantics import resolve_spans
-from official_document_workflow.infrastructure.eip import calendar_csv
-from official_document_workflow.infrastructure.eip.netask import Netask
-from official_document_workflow.infrastructure.office.office_input import validate
-from official_document_workflow.infrastructure.storage.automation_store import AutomationStore
-from official_document_workflow.infrastructure.storage.processing_cache import ProcessingCache
+from examples.official_document_workflow.application.long_source import group_text
+from examples.official_document_workflow.application.long_source import source_lines
+from examples.official_document_workflow.application.long_source import windows
+from examples.official_document_workflow.domain.calendar.calendar_semantics import resolve_spans
+from examples.official_document_workflow.infrastructure.eip import calendar_csv
+from examples.official_document_workflow.infrastructure.eip.netask import Netask
+from examples.official_document_workflow.infrastructure.office.office_input import validate
+from examples.official_document_workflow.infrastructure.storage.automation_store import AutomationStore
+from examples.official_document_workflow.infrastructure.storage.processing_cache import ProcessingCache
 from tests.eip_postgres import EIPPostgresTestCase
 
 
@@ -48,7 +48,7 @@ class CompactSourceTests(unittest.IsolatedAsyncioTestCase):
         expected = [(1, '<page index="1">'), (3, '第一段原文'), (7, ' 第二段原文 '), (9, '</page>'), (10, '<ocr-block>')]
         self.assertEqual(source_lines(source), expected)
         pipe = M.Pipe()
-        result, reading = await group_text(pipe, M, [SimpleNamespace(source_file=SimpleNamespace(filename='a.pdf'))], {'S1': source})
+        result, reading = await group_text(pipe,  [SimpleNamespace(source_file=SimpleNamespace(filename='a.pdf'))], {'S1': source})
         self.assertEqual(json.loads(result)['sources'][0]['lines'], [list(v) for v in expected])
         self.assertEqual(reading['mode'], 'complete')
         fragments = [item for chunk in windows({'S1': source}, 2000) for item in chunk]
@@ -68,7 +68,7 @@ class LargeSourceTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.pipe = M.Pipe()
         self.pipe.valves.eip_large_sources = True
         self.pipe.valves.cloud_ocr_text_max_input_characters = 3000
-        self.pipe._emit_processing_status = AsyncMock()
+        self.pipe.emit_status = AsyncMock()
         self.db = AutomationStore(self.root/'key')
         self.pipe._eip_processing_cache = ProcessingCache(self.db, 'alice')
         self.members = [
@@ -87,8 +87,8 @@ class LargeSourceTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             calls.append(json.loads(source.text)['fragments'])
             self.assertLessEqual(len(source.text), 3000)
             return answer_for(source, lambda i: i['source_id'] == 'S1' or '本次會勘' in i['text'])
-        self.pipe._cloud_ocr_text_request = AsyncMock(side_effect=scan)
-        text, reading = await group_text(self.pipe, M, self.members, self.sources)
+        self.pipe.analyze_text = AsyncMock(side_effect=scan)
+        text, reading = await group_text(self.pipe,  self.members, self.sources)
         data = json.loads(text)
         self.assertGreater(reading['windows'], 10)
         self.assertIn('115年9月8日', text)
@@ -96,7 +96,7 @@ class LargeSourceTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         actual = ''.join(i['text'] for chunk in calls for i in chunk if i['source_id'] == 'S2')
         self.assertEqual(actual, ''.join(self.sources['S2'].text.splitlines()))
         before = len(calls)
-        again = await group_text(self.pipe, M, self.members, self.sources)
+        again = await group_text(self.pipe,  self.members, self.sources)
         self.assertEqual(again, (text, reading))
         self.assertEqual(len(calls), before)
 
@@ -109,26 +109,29 @@ class LargeSourceTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             if count == 2:
                 raise ValueError('temporary failure')
             return answer_for(source, lambda i: i['source_id'] == 'S1' or '本次會勘' in i['text'])
-        self.pipe._cloud_ocr_text_request = AsyncMock(side_effect=scan)
+        self.pipe.analyze_text = AsyncMock(side_effect=scan)
         with self.assertRaisesRegex(ValueError, 'temporary'):
-            await group_text(self.pipe, M, self.members, self.sources)
+            await group_text(self.pipe,  self.members, self.sources)
         self.assertEqual(count, 2)
-        _, reading = await group_text(self.pipe, M, self.members, self.sources)
+        _, reading = await group_text(self.pipe,  self.members, self.sources)
         self.assertEqual(count, reading['windows']+1)
 
     async def test_incomplete_or_fabricated_ranges_never_accepted(self):
+        from examples.official_document_workflow.domain.validation import ContentValidationError
         for update in (
             {'read_count': 0}, {'first_id': 'other'}, {'uncertain': True},
             {'keep_ranges': [[0, 1]]}, {'keep_ranges': [[1, 1], [1, 2]]},
         ):
             async def scan(source, **kwargs): return {**answer_for(source, lambda i: True), **update}
-            self.pipe._cloud_ocr_text_request = AsyncMock(side_effect=scan)
-            with self.assertRaises(ValueError):
-                await group_text(self.pipe, M, self.members, self.sources)
+            self.pipe.analyze_text = AsyncMock(side_effect=scan)
+            with self.assertRaises(ContentValidationError) as caught:
+                await group_text(self.pipe,  self.members, self.sources)
+            self.assertEqual(caught.exception.code, 'source_reading_unverified')
+            self.assertFalse(caught.exception.can_auto_repair)
 
     async def test_date_context_and_short_main_survive_empty_model_selection(self):
-        self.pipe._cloud_ocr_text_request = AsyncMock(side_effect=lambda s, **kw: answer_for(s, lambda i: False))
-        text, _ = await group_text(self.pipe, M, self.members, self.sources)
+        self.pipe.analyze_text = AsyncMock(side_effect=lambda s, **kw: answer_for(s, lambda i: False))
+        text, _ = await group_text(self.pipe,  self.members, self.sources)
         self.assertIn('115年9月8日', text)
         self.assertIn('主旨：會勘通知', text)
 
@@ -138,7 +141,7 @@ class LargeSourceTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         client.post.return_value = httpx.Response(429, json={'error': 'private provider body'})
         with patch.object(self.pipe, '_official_document_litellm_connection', return_value=('http://127.0.0.1:4000/v1', 'test-key')), patch.object(M.httpx, 'AsyncClient', return_value=client):
             with self.assertRaisesRegex(M.ProcessingError, 'HTTP 429') as error:
-                await self.pipe._cloud_ocr_text_request(M.CloudSemanticSource('test', 'native_pdf_text'))
+                await self.pipe.analyze_text(M.CloudSemanticSource('test', 'native_pdf_text'))
         self.assertNotIn('private provider', str(error.exception))
         client.post.assert_awaited_once()
 
@@ -157,7 +160,7 @@ class LargeSourceTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, json=incomplete if len(budgets) == 1 else complete)
         client.post.side_effect = respond
         with patch.object(self.pipe, '_official_document_litellm_connection', return_value=('http://127.0.0.1:4000/v1', 'test-key')), patch.object(M.httpx, 'AsyncClient', return_value=client):
-            result = await self.pipe._cloud_ocr_text_request(M.CloudSemanticSource('test', 'native_pdf_text'))
+            result = await self.pipe.analyze_text(M.CloudSemanticSource('test', 'native_pdf_text'))
         self.assertEqual(result, {'events': []})
         self.assertEqual(
             budgets, [
@@ -176,7 +179,7 @@ class LargeSourceTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             }, )
         with patch.object(self.pipe, '_official_document_litellm_connection', return_value=('http://127.0.0.1:4000/v1', 'test-key')), patch.object(M.httpx, 'AsyncClient', return_value=client):
             with self.assertRaisesRegex(M.ProcessingError, '未完整產生'):
-                await self.pipe._cloud_ocr_text_request(M.CloudSemanticSource('test', 'native_pdf_text'))
+                await self.pipe.analyze_text(M.CloudSemanticSource('test', 'native_pdf_text'))
         self.assertEqual(client.post.await_count, 2)
 
     async def test_other_incomplete_reason_is_not_retried(self):
@@ -189,7 +192,7 @@ class LargeSourceTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             }, )
         with patch.object(self.pipe, '_official_document_litellm_connection', return_value=('http://127.0.0.1:4000/v1', 'test-key')), patch.object(M.httpx, 'AsyncClient', return_value=client):
             with self.assertRaisesRegex(M.ProcessingError, '未完整產生'):
-                await self.pipe._cloud_ocr_text_request(M.CloudSemanticSource('test', 'native_pdf_text'))
+                await self.pipe.analyze_text(M.CloudSemanticSource('test', 'native_pdf_text'))
         client.post.assert_awaited_once()
 
     async def test_truncation_at_configured_ceiling_is_not_retried(self):
@@ -204,23 +207,46 @@ class LargeSourceTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         )
         with patch.object(self.pipe, '_official_document_litellm_connection', return_value=('http://127.0.0.1:4000/v1', 'test-key')), patch.object(M.httpx, 'AsyncClient', return_value=client):
             with self.assertRaisesRegex(M.ProcessingError, '未完整產生'):
-                await self.pipe._cloud_ocr_text_request(M.CloudSemanticSource('test', 'native_pdf_text'))
+                await self.pipe.analyze_text(M.CloudSemanticSource('test', 'native_pdf_text'))
         client.post.assert_awaited_once()
 
     def test_large_csv_description_is_preserved_not_truncated(self):
-        from official_document_workflow.application import integration
+        from examples.official_document_workflow.application import integration
         from .test_eip_connector import row, csv_bytes
         item = row()
         item['Description'] = '完整內容與標點，保持換行。\n'*80000
-        with patch.object(integration, 'pipe_module', return_value=M):
+        with patch.object(integration, 'module', new=M):
             rows, transport = calendar_csv.parse_csv(csv_bytes([item]))
         self.assertEqual(rows[0]['Description'], item['Description'])
         self.assertGreater(len(transport), 1024*1024)
 
     async def test_dense_relevant_content_not_summarized_or_discarded_to_force_success(self):
-        self.pipe._cloud_ocr_text_request = AsyncMock(side_effect=lambda s, **kw: answer_for(s, lambda i: True))
-        with self.assertRaisesRegex(ValueError, '尚未完成整組整合'):
-            await group_text(self.pipe, M, self.members, self.sources)
+        from examples.official_document_workflow.domain.validation import ContentValidationError
+        self.pipe.analyze_text = AsyncMock(side_effect=lambda s, **kw: answer_for(s, lambda i: True))
+        with self.assertRaises(ContentValidationError) as caught:
+            await group_text(self.pipe,  self.members, self.sources)
+        self.assertEqual(caught.exception.code, 'source_evidence_capacity_exceeded')
+        self.assertFalse(caught.exception.can_auto_repair)
+
+    async def test_mandatory_evidence_over_budget_stops_before_paid_window_calls(self):
+        from examples.official_document_workflow.domain.validation import ContentValidationError
+        original = ('115年10月28日期限：保留本件完整原文證據。\n' * 300)
+        sources = {'S1': M.CloudSemanticSource(original, 'native_pdf_text')}
+        self.pipe.analyze_text = AsyncMock()
+        with self.assertRaises(ContentValidationError) as caught:
+            await group_text(self.pipe,  self.members[:1], sources)
+        self.assertEqual(caught.exception.code, 'source_evidence_capacity_exceeded')
+        self.pipe.analyze_text.assert_not_awaited()
+        self.assertEqual(sources['S1'].text, original)
+
+    async def test_layout_wrappers_do_not_count_as_mandatory_evidence(self):
+        text = '<ocr-block>\n115年10月28日期限\n</ocr-block>\n' * 100
+        structural = frozenset(n for n, line in enumerate(text.splitlines(), 1) if '<' in line)
+        sources = {'S1': M.CloudSemanticSource(text, 'paddle_layout_ocr', structural)}
+        self.pipe.analyze_text = AsyncMock(side_effect=lambda s, **kw: answer_for(s, lambda i: True))
+        result, _ = await group_text(self.pipe,  self.members[:1], sources)
+        self.assertIn('115年10月28日期限', result)
+        self.assertNotIn('<ocr-block>', result)
 
     def test_long_single_line_and_escaped_characters_are_losslessly_partitioned(self):
         original = '\\"漢字'*40000
@@ -245,7 +271,9 @@ class LargeSourceTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         with self.db.db() as db:
             db.execute('UPDATE processing_chunks SET payload=%s WHERE owner=%s', (b'bad', 'alice'))
         with self.assertRaises(InvalidToken):
-            cache.get('key')
+            self.db.decode('alice', b'bad')
+        # Rebuildable checkpoints reject corrupt content without failing the document.
+        self.assertIsNone(cache.get('key'))
 
     def test_source_bytes_pages_text_and_description_no_legacy_total_caps(self):
         path = self.root/'large.pdf'

@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import unittest
 import uuid
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 import psycopg
@@ -31,6 +33,14 @@ class EIPPostgresTestCase:
             },
         )
         self._eip_test_env.start()
+
+        from examples.official_document_workflow.runtime import WorkflowResources, WorkflowSettings
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self._workflow = WorkflowResources(WorkflowSettings(dsn, self._eip_test_schema, Path(temporary.name) / 'key'))
+        binding = self._workflow.bind()
+        binding.__enter__()
+        self.addCleanup(binding.__exit__, None, None, None)
 
     def tearDown(self):
         try:

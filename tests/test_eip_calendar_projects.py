@@ -7,20 +7,20 @@ from unittest.mock import AsyncMock
 
 from .test_eip_calendar_verification import EVENT
 from .test_eip_calendar_verification import fixture
-from official_document_workflow.infrastructure.eip.calendar_projects import assign_project
-from official_document_workflow.infrastructure.eip.calendar_projects import match_project
-from official_document_workflow.infrastructure.eip.calendar_projects import project_assignment_parameters
-from official_document_workflow.infrastructure.eip.calendar_projects import project_name_from_description
-from official_document_workflow.infrastructure.eip.calendar_projects import verify_project_assignment_detail
-from official_document_workflow.infrastructure.eip.calendar_sync import write_project_assignments
-from official_document_workflow.infrastructure.eip.netask import JSArrayResponseParser
-from official_document_workflow.infrastructure.storage.state import Journal
+from examples.official_document_workflow.infrastructure.eip.calendar_projects import assign_project
+from examples.official_document_workflow.infrastructure.eip.calendar_projects import match_project
+from examples.official_document_workflow.infrastructure.eip.calendar_projects import project_assignment_parameters
+from examples.official_document_workflow.infrastructure.eip.calendar_projects import project_name_from_description
+from examples.official_document_workflow.infrastructure.eip.calendar_projects import verify_project_assignment_detail
+from examples.official_document_workflow.infrastructure.eip.calendar_sync import write_project_assignments
+from examples.official_document_workflow.infrastructure.eip.netask import JSArrayResponseParser
+from examples.official_document_workflow.infrastructure.storage.state import Journal
 from tests.eip_postgres import EIPPostgresTestCase
 
 
 class ProjectMatchingTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
     def test_midnight_end_survives_project_and_attachment_parameters(self):
-        from official_document_workflow.infrastructure.eip.calendar_attachments import attachment_parameters
+        from examples.official_document_workflow.infrastructure.eip.calendar_attachments import attachment_parameters
         line, detail, _ = fixture()
         fields = line.split(',')
         fields[2] = '1260'
@@ -139,10 +139,11 @@ class ProjectMatchingTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase
         adapter.rpc.assert_not_awaited()
 
     async def test_unknown_project_update_never_replayed(self):
+        line, _, _ = fixture()
         adapter = type('Adapter', (), {'user_id': '1709'})()
         adapter.assign_calendar_project = AsyncMock(side_effect=ValueError('unknown'))
         event = {
-            'receipt': {'event_id': EVENT}, 'line': 'wire', 'project_match': {
+            'receipt': {'event_id': EVENT}, 'line': line, 'project_match': {
                 'status': 'matched', 'project': {'id': '77', 'name': '工程', 'members': ['Ru1709']},
             },
         }

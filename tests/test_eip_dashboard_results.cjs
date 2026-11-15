@@ -19,7 +19,7 @@ const context={URLSearchParams,Date,Set,
   // Initial status polling stays pending. No HTTP request is made.
   fetch:()=>new Promise(()=>{}),
 };
-vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../official_document_workflow/frontend/assets/app.js'),'utf8'),context);
+vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../examples/official_document_workflow/frontend/assets/app.js'),'utf8'),context);
 assert.match(context.taipeiTimestamp('2026-09-03T08:26:59Z'),/2026\/09\/03.*16:26:59/);
 assert.equal(context.taipeiTimestamp(null),null);
 assert.equal(context.taipeiTimestamp('<script>'),null);
@@ -78,12 +78,38 @@ assert.equal(context.visibleDocumentExport(ocr),false);
 assert.equal(context.visibleDocumentExport({...ocr,kind:undefined}),false);
 assert.equal(context.visibleDocumentExport({...ocr,kind:'document_pdf'}),true);
 (async()=>{
+  let prevented=false;
+  context.confirm=()=>false;
+  const backup=context.downloadLink(csv,true);
+  backup.onclick({preventDefault(){prevented=true;}});
+  assert.equal(prevented,true);
+  assert.match(backup.textContent,/已同步・CSV 備份/);
+  prevented=false;context.confirm=()=>true;
+  backup.onclick({preventDefault(){prevented=true;}});
+  assert.equal(prevented,false);
+  assert.equal(context.validSyncCounts({created:0,skipped:1}),true);
+  assert.equal(context.validSyncCounts({created:0,skipped:0}),false);
+  assert.equal(Boolean(context.validSyncCounts(null)),false);
+  get('csv').value=csv.id;
+  const calendarRow={'Subject':'會勘[AI產生]','Start Date':'2026/09/10','End Date':'2026/09/10','Start Time(24hr)':'10:00','End Time(24hr)':'11:00','All day event':'假'};
+  for(const [statuses,disabled] of [[['existing'],true],[['done'],true],[['new','existing'],false],[['new','conflict'],true],[['unknown'],true]]){
+    context.fetch=async()=>({ok:true,json:async()=>({token:'preview',account:'fixture',visibility:'私人',limitations:'',events:statuses.map(status=>({status,row:calendarRow,reason:status==='conflict'?'請核對原行程':''}))})});
+    await context.preview();assert.equal(get('confirm').disabled,disabled);
+    if(statuses.includes('conflict'))assert.match(get('events').textContent,/請核對原行程/);
+    if(statuses[0]==='existing')assert.match(get('notice').textContent,/無須再次匯入/);
+  }
   context.fetch=async()=>({ok:true,json:async()=>({jobs:[],automatic_results:[{phase:'needs_review',subject:'公文',errors:['CSV 證據不足 <script>'],files:[pdf,ocr,csv,{...ocr,kind:undefined}]}]})});
   await context.status();
   const links=get('automatic-results').children[0].children.filter(n=>n.tag==='a');
   assert.equal(links.length,2);
-  assert.deepEqual(links.map(n=>n.textContent),[pdf.name,csv.name]);
+  assert.deepEqual(links.map(n=>n.textContent),[pdf.name,`CSV 備份：${csv.name}`]);
   assert.match(get('automatic-results').textContent,/CSV 證據不足 <script>/);
+  context.fetch=async()=>({ok:true,json:async()=>({jobs:[],automatic_results:[{
+    phase:'needs_review',subject:'行程已同步但附件待核對',calendar_sync:{created:0,skipped:1},files:[pdf,csv]}]})});
+  await context.status();
+  assert.match(get('automatic-results').textContent,/新增 0 筆、略過 1 筆/);
+  assert.match(get('automatic-results').textContent,/無須再次上傳 CSV/);
+  assert.match(get('automatic-results').textContent,/已同步・CSV 備份/);
   context.fetch=async()=>({ok:true,json:async()=>({jobs:[],automatic_results:[{
     phase:'done',subject:'舊版部分完成紀錄',notice:'文件輸出仍有待核對項目',
     errors:['時間條件未核對'],calendar_pending:['時間條件未核對'],files:[pdf,csv]}]})});
@@ -128,5 +154,18 @@ assert.equal(context.visibleDocumentExport({...ocr,kind:'document_pdf'}),true);
   await context.status();
   assert.match(get('automatic-results').textContent,/尚無自動處理紀錄/);
   assert.equal(get('automatic-next').disabled,true);assert.equal(get('automatic-previous').disabled,true);
+  // The manual action sends all ten files, and blocks eleven before HTTP.
+  let submitted=null;
+  get('process').dataset={maxAttachments:'10'};
+  context.document.querySelectorAll=()=>Array.from({length:10},(_,i)=>({value:`file-${i}`}));
+  context.api=async(path,data)=>{assert.equal(path,'process');submitted=data;return {job_id:'limit-test'};};
+  context.showJob=async()=>{};
+  await get('process').onclick();
+  assert.equal(submitted.handles.length,10);
+  submitted=null;
+  context.document.querySelectorAll=()=>Array.from({length:11},(_,i)=>({value:`file-${i}`}));
+  await get('process').onclick();
+  assert.equal(submitted,null);
+  assert.match(get('notice').textContent,/1 至 10/);
   console.log('Dashboard result, hourly download filtering and safe-text tests passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

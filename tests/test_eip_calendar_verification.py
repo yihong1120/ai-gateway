@@ -1,20 +1,22 @@
 from __future__ import annotations
 
+from tests.eip_calendar_fixture import new_calendar_matches
+
 import copy
 import json
 import tempfile
 import unittest
 from unittest.mock import AsyncMock
 
-from official_document_workflow.infrastructure.eip.calendar_repair import fingerprint
-from official_document_workflow.infrastructure.eip.calendar_repair import repair_parameters
-from official_document_workflow.infrastructure.eip.calendar_sync import write_events
-from official_document_workflow.infrastructure.eip.calendar_verification import validate_wire
-from official_document_workflow.infrastructure.eip.calendar_verification import verify_detail
-from official_document_workflow.infrastructure.eip.netask import js_escape
-from official_document_workflow.infrastructure.eip.netask import Netask
-from official_document_workflow.infrastructure.eip.netask import parse_rpc
-from official_document_workflow.infrastructure.storage.state import Journal
+from examples.official_document_workflow.infrastructure.eip.calendar_repair import fingerprint
+from examples.official_document_workflow.infrastructure.eip.calendar_repair import repair_parameters
+from examples.official_document_workflow.infrastructure.eip.calendar_sync import write_events
+from examples.official_document_workflow.infrastructure.eip.calendar_verification import validate_wire
+from examples.official_document_workflow.infrastructure.eip.calendar_verification import verify_detail
+from examples.official_document_workflow.infrastructure.eip.netask import js_escape
+from examples.official_document_workflow.infrastructure.eip.netask import Netask
+from examples.official_document_workflow.infrastructure.eip.netask import parse_rpc
+from examples.official_document_workflow.infrastructure.storage.state import Journal
 from tests.eip_postgres import EIPPostgresTestCase
 
 EVENT = '2026-09-07 21:24:14.709;791504605'
@@ -41,6 +43,26 @@ def fixture():
 
 
 class VerificationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
+    async def test_midnight_uses_padded_transport_without_changing_canonical_receipts(self):
+        line, detail, listing = fixture()
+        fields = line.split(',')
+        fields[2] = '0'
+        detail[0][11] = listing[9] = '0'
+        canonical = ','.join(fields)
+        n = Netask()
+        n.calendar_import_matches = AsyncMock(side_effect=new_calendar_matches)
+        n.user_id = '1709'
+        n.rpc = AsyncMock(side_effect=[[[0, '']], [[0, ''], listing], [[0, ''], *detail]])
+        try:
+            receipt = await n.commit(canonical)
+            self.assertTrue(receipt['detail_verified'])
+            sent = n.rpc.await_args_list[0].kwargs['import_data'].split(',')
+            self.assertEqual(sent[2], '0000')
+            self.assertEqual(canonical.split(',')[2], '0')
+            self.assertEqual(n.rpc.await_count, 3)
+        finally:
+            await n.close()
+
     def test_all_day_edit_omits_time_fields_like_official_form(self):
         line, detail, _ = fixture()
         fields = line.split(',')
@@ -63,6 +85,7 @@ class VerificationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
     async def test_commit_requires_detail_verification_and_records_receipt(self):
         line, detail, listing = fixture()
         n = Netask()
+        n.calendar_import_matches = AsyncMock(side_effect=new_calendar_matches)
         n.user_id = '1709'
         n.rpc = AsyncMock(side_effect=[[[0, '']], [[0, ''], listing], [[0, ''], *detail]])
         try:
@@ -85,6 +108,7 @@ class VerificationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         line, detail, listing = fixture()
         detail[0][15] = 'Ru1709\n'
         n = Netask()
+        n.calendar_import_matches = AsyncMock(side_effect=new_calendar_matches)
         n.user_id = '1709'
         n.rpc = AsyncMock(side_effect=[[[0, '']], [[0, ''], listing], [[0, ''], *detail]])
         try:

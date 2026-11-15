@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock
 
-from eip_real_live import run_batch
+from tests.eip_real_live import run_batch
 
 
 class RealRunnerTests(IsolatedAsyncioTestCase):

@@ -1,7 +1,9 @@
 """No live EIP writes: exercise durable opt-in automation with fake services."""
 from __future__ import annotations
+from examples.official_document_workflow.runtime import current_resources
 
 import asyncio
+import os
 import tempfile
 import time
 import types
@@ -13,15 +15,16 @@ from unittest.mock import Mock
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from official_document_workflow.application import automatic_task
-from official_document_workflow.application import automation
-from official_document_workflow.application import integration
-from official_document_workflow.infrastructure.eip.netask import Netask
-from official_document_workflow.infrastructure.storage.automation_store import (
+from examples.official_document_workflow.application import automatic_task
+from examples.official_document_workflow.application import automation
+from examples.official_document_workflow.application import integration
+from examples.official_document_workflow.infrastructure.eip.netask import Netask
+from examples.official_document_workflow.infrastructure.storage.automation_store import (
     AutomationStore,
 )
-from official_document_workflow.infrastructure.storage.state import Journal
-from official_document_workflow.infrastructure.storage.state import State
+from examples.official_document_workflow.infrastructure.storage.state import Journal
+from examples.official_document_workflow.infrastructure.storage.state import State
+from tests.eip_calendar_fixture import new_calendar_matches
 from tests.eip_postgres import EIPPostgresTestCase
 
 
@@ -55,7 +58,12 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             stage=AsyncMock(return_value=[]),
             calendar_projects=AsyncMock(return_value=[]),
             commit=AsyncMock(return_value=None),
+            calendar_import_matches=AsyncMock(side_effect=new_calendar_matches),
         )
+        async def document_detail(*args):
+            return {'fields': [], 'attachments': await self.adapter.attachments(*args)}
+
+        self.adapter.document_detail = AsyncMock(side_effect=document_detail)
         self.output = {
             'complete': True,
             'files': [{'id': 'word-id', 'name': 'document.docx'}],
@@ -65,7 +73,7 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         }
         self.event = {'key': 'test-key', 'line': 'verified-import-line', 'row': {}}
         self.patches = [
-            patch.object(automatic_task, 'STATE', State()),
+            patch.object(current_resources(), 'state', State()),
             patch.object(
                 integration,
                 'source_file',
@@ -91,31 +99,33 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
 
     async def run_once(self, verify=None, factory=None):
         # Run a complete scheduler iteration, including its account boundary.
-        worker = automation.run_account
-
-        async def run(*args):
-            return await worker(
-                *args,
-                factory=factory or (lambda: self.adapter),
-                verify=verify or AsyncMock(return_value=True),
-            )
-
+        account = automation.AutomaticAccount(
+            self.db, self.journal, self._workflow.state.processing,
+            factory=factory or (lambda: self.adapter),
+            verify=verify or AsyncMock(return_value=True),
+        )
+        scheduler = automation.AutomaticScheduler(
+            self.db, self.journal, self._workflow.state,
+            self._workflow.health['scheduler'], account,
+        )
         with (
-            patch.object(automation, 'store', return_value=self.db),
             patch.object(
-                self.db,
-                'claim_due',
+                self.db, 'claim_due',
                 return_value=[{'owner': 'alice', 'generation': self.generation}],
             ),
-            patch.object(automation, 'run_account', side_effect=run),
             patch.object(
-                automation.asyncio, 'sleep', side_effect=asyncio.CancelledError,
+                automation, 'asyncio', types.SimpleNamespace(**{**vars(asyncio), 'sleep': AsyncMock(side_effect=asyncio.CancelledError)}),
             ),
         ):
             with self.assertRaises(asyncio.CancelledError):
-                await automation.scheduler(self.journal)
+                await scheduler.run()
 
     async def test_project_then_attachment_uses_verified_scope_and_no_replay(self):
+        from .test_eip_connector import remote, row
+        from examples.official_document_workflow.infrastructure.eip.netask import import_line
+
+        line = import_line(remote(row()), '17')
+        self.event['line'] = line
         self.db.set_calendar_attach_renamed_pdf('alice', True)
         self.adapter.calendar_projects.return_value = [
             {'id': '77', 'name': '01-工程甲', 'members': ['Ru17', 'Ru18']},
@@ -137,7 +147,7 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         )
         with (
             patch(
-                'official_document_workflow.infrastructure.eip.calendar_projects.assign_project',
+                'examples.official_document_workflow.infrastructure.eip.calendar_projects.assign_project',
                 AsyncMock(
                     return_value={
                         'event_id': 'test-event',
@@ -148,7 +158,7 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                 ),
             ) as assign,
             patch(
-                'official_document_workflow.infrastructure.eip.calendar_attachments.attach_event',
+                'examples.official_document_workflow.infrastructure.eip.calendar_attachments.attach_event',
                 AsyncMock(return_value={'attachment_verified': True}),
             ) as attach,
             patch.object(
@@ -166,7 +176,7 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             assign.assert_awaited_once_with(
                 self.adapter,
                 'test-event',
-                'verified-import-line',
+                line,
                 '77',
                 sharing=['Ru17', 'Ru18'],
             )
@@ -297,7 +307,7 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.tasks('alice')[0]['phase'], 'needs_review')
 
     def replacement(self):
-        return types.SimpleNamespace(
+        adapter = types.SimpleNamespace(
             user_id='17',
             login=AsyncMock(),
             close=AsyncMock(),
@@ -307,7 +317,13 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             stage=AsyncMock(return_value=[]),
             calendar_projects=AsyncMock(return_value=[]),
             commit=AsyncMock(return_value=None),
+            calendar_import_matches=AsyncMock(side_effect=new_calendar_matches),
         )
+        async def document_detail(*args):
+            return {'fields': [], 'attachments': await adapter.attachments(*args)}
+
+        adapter.document_detail = AsyncMock(side_effect=document_detail)
+        return adapter
 
     async def test_hourly_run_starts_with_new_login_even_without_browser_session(self):
         first, second = self.replacement(), self.replacement()
@@ -364,14 +380,13 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                 getattr(adapter, method).side_effect = failure
                 factory = Mock(return_value=adapter)
                 with self.assertRaises(ConnectionError) as caught:
-                    await automation.run_account(
+                    await automation.AutomaticAccount(
                         self.db,
                         self.journal,
-                        'alice',
-                        self.generation,
+                        self._workflow.state.processing,
                         factory=factory,
                         verify=AsyncMock(return_value=True),
-                    )
+                    ).run('alice', self.generation)
                 self.assertIs(caught.exception, failure)
                 factory.assert_called_once()
                 adapter.login.assert_awaited_once()
@@ -490,7 +505,7 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(original, time.time() - 86400, delta=5)
         self.db.pause('alice')
         with patch(
-            'official_document_workflow.infrastructure.storage.automation_store.time.time',
+            'examples.official_document_workflow.infrastructure.storage.automation_store.time.time',
             return_value=time.time() + 7 * 86400,
         ):
             self.db.bind('alice', '17', 'test-account', 'new-password')
@@ -504,7 +519,7 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         old = self.db.account('alice')['scan_start']
         future = time.time() + 7 * 86400
         with patch(
-            'official_document_workflow.infrastructure.storage.automation_store.time.time',
+            'examples.official_document_workflow.infrastructure.storage.automation_store.time.time',
             return_value=future,
         ):
             self.db.bind('alice', '18', 'other-account', 'other-password')
@@ -571,7 +586,7 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
     async def test_downtime_does_not_move_origin_forward(self):
         original = self.db.account('alice')['scan_start']
         with patch(
-            'official_document_workflow.infrastructure.storage.automation_store.time.time',
+            'examples.official_document_workflow.infrastructure.storage.automation_store.time.time',
             return_value=time.time() + 7 * 86400,
         ):
             await self.run_once()
@@ -588,9 +603,60 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.adapter.commit.assert_awaited_once_with('verified-import-line')
         integration.process.assert_awaited_once_with(
             'alice', ['source-id'], '', None, groups=[['source-id']],
+            date_context=automatic_task.ReceiptContext('10', '', None),
         )
         self.assertEqual(self.db.tasks('alice')[0]['phase'], 'done')
         self.assertEqual(self.journal.status('test-key'), 'done')
+
+    async def test_server_receipt_context_is_loaded_from_the_same_flow(self):
+        self.adapter.document_detail.return_value = {
+            'fields': [{'label': '發文字號', 'value': '測試第115號'},
+                       {'label': '收文日期', 'value': '115年10月1日'}],
+            'attachments': [{'name': 'a.pdf', 'url': '/fo/a'}],
+        }
+        self.adapter.document_detail.side_effect = None
+        await self.run_once()
+        self.assertEqual(integration.process.await_args.kwargs['date_context'],
+                         automatic_task.ReceiptContext('10', '測試第115號', '2026-10-01'))
+        self.adapter.document_detail.assert_awaited_once_with('10', 'inbox')
+
+    async def test_imported_relative_estimate_is_visible_in_automatic_history(self):
+        self.output['date_estimates'] = [{'estimated': True, 'deadline': '2026-10-08'}]
+        await self.run_once()
+        task = self.db.tasks('alice')[0]
+        self.assertEqual(task['phase'], 'done')
+        self.assertIn('1 筆 AI 推估期限', task['payload']['notice'])
+
+    async def test_relative_recheck_requires_an_actual_estimate_before_marking_done(self):
+        self.db.discover('alice', '17', [document()])
+        task = self.db.tasks('alice')[0]
+        retained = [{'id': 'existing-pdf', 'kind': 'document_pdf', 'name': 'document.pdf'}]
+        p = {**task['payload'], 'relative_date_recheck': {
+            'revision': 'eip-relative-date-estimate-v1', 'retained_exports': retained,
+            'retained_sha256': {'existing-pdf': 'verified-hash'},
+        }}
+        self.db.save_task(task, 'discovered', p)
+        with patch.object(integration, 'retained_document_exports', AsyncMock(return_value=retained)):
+            await self.run_once()
+        current = self.db.tasks('alice')[0]
+        self.assertEqual(current['phase'], 'needs_review')
+        self.assertFalse(current['payload']['output']['complete'])
+        self.assertIn(retained[0], current['payload']['output']['files'])
+        self.assertTrue(integration.process.await_args.kwargs['calendar_only'])
+        self.adapter.commit.assert_not_awaited()
+
+    async def test_ai_tentative_import_reports_eip_review_and_does_not_replay(self):
+        from examples.official_document_workflow.domain.calendar.scheduling import EIP_REVIEW_NOTICE
+        from examples.official_document_workflow.domain.calendar.scheduling import TENTATIVE_NOTICE
+
+        integration.read_csv.return_value = ([{'Description': TENTATIVE_NOTICE}], b'csv')
+        await self.run_once()
+        await self.run_once()
+        task = self.db.tasks('alice')[0]
+        self.assertEqual(task['phase'], 'done')
+        self.assertIn('AI 暫排', task['payload']['notice'])
+        self.assertIn(EIP_REVIEW_NOTICE, task['payload']['notice'])
+        self.adapter.commit.assert_awaited_once_with('verified-import-line')
 
     async def test_discovery_checkpoint_precedes_detail_read_side_effect(self):
         async def detail(*args):
@@ -649,7 +715,7 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         task = self.db.tasks('alice')[0]
         self.assertEqual(task['phase'], 'needs_review')
         self.assertEqual(task['payload']['output']['files'], exports)
-        self.assertIn('PDF 與可編輯 Word 已保留供下載', task['payload']['notice'])
+        self.assertIn('已確認完成的檔案已保留供下載', task['payload']['notice'])
         self.adapter.commit.assert_not_awaited()
 
     async def test_undated_event_ignores_eip_due_date_and_keeps_exports(self):
@@ -702,7 +768,7 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             {'name': 'added.docx', 'url': '/fo/new'},
         ]
         with patch(
-            'official_document_workflow.infrastructure.storage.automation_store.time.time',
+            'examples.official_document_workflow.infrastructure.storage.automation_store.time.time',
             return_value=task['updated'] + 3601,
         ):
             await self.run_once()
@@ -719,7 +785,7 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         await self.run_once()
         checked = self.db.tasks('alice')[0]['updated']
         with patch(
-            'official_document_workflow.infrastructure.storage.automation_store.time.time',
+            'examples.official_document_workflow.infrastructure.storage.automation_store.time.time',
             return_value=checked + 3601,
         ):
             await self.run_once()
@@ -733,7 +799,7 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         await self.run_once()
         checked = self.db.tasks('alice')[0]['updated']
         with patch(
-            'official_document_workflow.infrastructure.storage.automation_store.time.time',
+            'examples.official_document_workflow.infrastructure.storage.automation_store.time.time',
             return_value=checked + 3601,
         ):
             await self.run_once()
@@ -741,7 +807,7 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         # A later hourly inbox scan sees the same document but must not read its
         # attachment list a third time.  New attachments require manual restart.
         with patch(
-            'official_document_workflow.infrastructure.storage.automation_store.time.time',
+            'examples.official_document_workflow.infrastructure.storage.automation_store.time.time',
             return_value=checked + 7202,
         ):
             await self.run_once()
@@ -754,7 +820,7 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         checked = self.db.tasks('alice')[0]['updated']
         self.adapter.automatic_documents.return_value = []
         with patch(
-            'official_document_workflow.infrastructure.storage.automation_store.time.time',
+            'examples.official_document_workflow.infrastructure.storage.automation_store.time.time',
             return_value=checked + 3601,
         ):
             await self.run_once()
@@ -842,19 +908,28 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.tasks('alice')[0]['phase'], 'needs_review')
 
     async def test_incomplete_document_stops_even_when_calendar_is_ready(self):
+        confirmed = [{'id': 'pdf-id', 'name': 'document.pdf', 'kind': 'document_pdf'}]
         integration.process.return_value = {
             **self.output,
             'complete': False,
+            'status': 'partial',
+            'files': confirmed,
             'calendar_ready': True,
-            'errors': ['DOCX failed'],
+            'errors': ['第 1 組：DOCX 結果不明，請核對'],
         }
         await self.run_once()
+        self.db.recover()
+        await self.run_once()
+        integration.process.assert_awaited_once()
         self.adapter.commit.assert_not_awaited()
         task = self.db.tasks('alice')[0]
         self.assertEqual(task['phase'], 'needs_review')
         self.assertTrue(task['payload']['output']['errors'])
+        self.assertEqual(task['payload']['output']['files'], confirmed)
+        self.assertNotIn('文件轉檔已完成', task['payload']['notice'])
+        self.assertIn('不會自動重送', task['payload']['notice'])
 
-    async def test_pending_calendar_stops_without_partial_import_or_retry(self):
+    async def test_verified_partial_calendar_imports_once_and_preserves_pending_items(self):
         integration.process.return_value = {
             **self.output,
             'complete': False,
@@ -864,13 +939,40 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         }
         await self.run_once()
         await self.run_once()
-        self.adapter.commit.assert_not_awaited()
+        self.adapter.commit.assert_awaited_once()
         integration.process.assert_awaited_once()
         task = self.db.tasks('alice')[0]
         self.assertEqual(task['phase'], 'needs_review')
         self.assertEqual(
             task['payload']['output']['calendar_pending'], ['行程 2 日期待補'],
         )
+        self.assertEqual(task['payload']['import'], {'created': 1, 'skipped': 0})
+        self.assertIn('其餘項目保留待核對', task['payload']['notice'])
+
+    async def test_partial_calendar_with_unrelated_document_error_still_stops(self):
+        integration.process.return_value = {
+            **self.output, 'complete': False, 'calendar_ready': True,
+            'calendar_pending': ['行程 2 日期待補'],
+            'errors': ['行程 2 日期待補', 'DOCX failed'],
+        }
+        await self.run_once()
+        self.adapter.commit.assert_not_awaited()
+        self.assertEqual(self.db.tasks('alice')[0]['phase'], 'needs_review')
+
+    async def test_empty_partial_calendar_is_not_marked_as_imported(self):
+        integration.process.return_value = {
+            **self.output, 'complete': False, 'calendar_ready': True,
+            'calendar_pending': ['行程 2 日期待補'], 'errors': ['行程 2 日期待補'],
+        }
+        with patch.object(automatic_task.calendar_sync, 'verified_events', return_value=[]):
+            await self.run_once()
+        self.adapter.commit.assert_not_awaited()
+        self.assertEqual(self.db.tasks('alice')[0]['phase'], 'needs_review')
+
+    async def test_tracking_reminders_are_passed_only_for_authorized_binding(self):
+        with patch.dict(os.environ, {'EIP_TRACKING_REMINDER_ACCOUNTS': 'alice:17'}):
+            await self.run_once()
+        self.assertTrue(integration.process.await_args.kwargs['tracking_reminders'])
 
     def legacy_calendar_gate_task(self):
         self.db.discover('alice', '17', [document()])
@@ -951,7 +1053,7 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
                 self.adapter.commit.assert_not_awaited()
 
     async def test_pause_during_conversion_prevents_import(self):
-        async def process(owner, ids, instruction, emitter, *, groups):
+        async def process(owner, ids, instruction, emitter, *, groups, date_context=None):
             self.assertEqual(groups, [ids])
             self.assertEqual(instruction, '')
             self.db.pause('alice')
@@ -1002,14 +1104,13 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
     async def test_cancel_propagates_and_closes_session_without_retry(self):
         self.adapter.download.side_effect = asyncio.CancelledError()
         with self.assertRaises(asyncio.CancelledError):
-            await automation.run_account(
+            await automation.AutomaticAccount(
                 self.db,
                 self.journal,
-                'alice',
-                self.generation,
+                self._workflow.state.processing,
                 factory=lambda: self.adapter,
                 verify=AsyncMock(return_value=True),
-            )
+            ).run('alice', self.generation)
         self.adapter.close.assert_awaited_once()
         self.adapter.commit.assert_not_awaited()
         self.assertEqual(self.db.account('alice')['failures'], 0)
@@ -1051,6 +1152,10 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.db.account('alice')['enabled'])
         bad = next(t for t in self.db.tasks('alice') if t['document_id'] == '10')
         self.assertEqual(bad['payload']['last_error']['stage'], 'processing')
+        self.assertEqual(bad['payload']['last_error']['site']['function'], 'analyze')
+        self.assertEqual(
+            set(bad['payload']['last_error']['site']), {'module', 'function', 'line'},
+        )
         self.assertNotIn('test-password', str(bad))
         integration.process.assert_awaited_once()
         self.adapter.commit.assert_not_awaited()
@@ -1060,6 +1165,70 @@ class AutomationTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             {'10': 'needs_review', '20': 'done'},
         )
         self.assertEqual(integration.process.await_count, 2)
+
+    async def test_attachment_limit_marks_only_that_document_for_review_and_continues(self):
+        self.adapter.automatic_documents.return_value = [document(), {**document(), 'id': '20'}]
+        self.adapter.attachments.side_effect = [
+            [{'name': f'{index}.pdf', 'url': f'/fo/{index}'} for index in range(11)],
+            [{'name': 'valid.pdf', 'url': '/fo/valid'}],
+        ]
+        await self.run_once()
+        tasks = {task['document_id']: task for task in self.db.tasks('alice')}
+        self.assertEqual(tasks['10']['phase'], 'needs_review')
+        self.assertEqual(
+            tasks['10']['payload']['input_issue'], {
+                'code': 'too_many_attachments', 'attachment_count': 11, 'max_attachments': 10,
+            },
+        )
+        self.assertNotIn('source_ids', tasks['10']['payload'])
+        self.assertNotIn('last_error', tasks['10']['payload'])
+        self.assertEqual(tasks['20']['phase'], 'done')
+        self.assertEqual(self.db.account('alice')['failures'], 0)
+        self.adapter.download.assert_awaited_once_with('/fo/valid', 'valid.pdf')
+        integration.process.assert_awaited_once()
+        await self.run_once()
+        self.assertEqual(self.adapter.attachments.await_count, 2)
+        integration.process.assert_awaited_once()
+
+    async def test_exactly_ten_attachments_are_processed(self):
+        self.adapter.attachments.return_value = [
+            {'name': f'{index}.pdf', 'url': f'/fo/{index}'} for index in range(10)
+        ]
+        await self.run_once()
+        self.assertEqual(self.db.tasks('alice')[0]['phase'], 'done')
+        self.assertEqual(self.adapter.download.await_count, 10)
+        integration.process.assert_awaited_once()
+
+    async def test_document_validation_failure_preserves_sources_and_continues(self):
+        self.adapter.automatic_documents.return_value = [document(), {**document(), 'id': '20'}]
+        integration.process.side_effect = [integration.DocumentValidationError('private response'), self.output]
+        await self.run_once()
+        tasks = {task['document_id']: task for task in self.db.tasks('alice')}
+        self.assertEqual(tasks['10']['phase'], 'needs_review')
+        self.assertEqual(tasks['10']['payload']['input_issue']['code'], 'document_validation_failed')
+        self.assertTrue(tasks['10']['payload']['source_ids'])
+        self.assertNotIn('output', tasks['10']['payload'])
+        self.assertNotIn('import', tasks['10']['payload'])
+        self.assertNotIn('private response', str(tasks['10']))
+        self.assertEqual(tasks['20']['phase'], 'done')
+        self.assertEqual(self.db.account('alice')['failures'], 0)
+        self.assertEqual(self.adapter.commit.await_count, 1)
+        await self.run_once()
+        self.assertEqual(integration.process.await_count, 2)
+
+    async def test_classified_content_failure_shows_resolution_and_continues(self):
+        from examples.official_document_workflow.domain.validation import ContentValidationError
+        issue = ContentValidationError('document_group_ambiguous', group_index=1).as_issue()
+        self.adapter.automatic_documents.return_value = [document(), {**document(), 'id': '20'}]
+        integration.process.side_effect = [integration.DocumentValidationError('ignored private output', issue=issue), self.output]
+        await self.run_once()
+        tasks = {t['document_id']: t for t in self.db.tasks('alice')}
+        self.assertEqual(tasks['10']['phase'], 'needs_review')
+        self.assertEqual(tasks['10']['payload']['input_issue'], issue)
+        self.assertIn('分組選取', tasks['10']['payload']['notice'])
+        self.assertNotIn('ignored private output', str(tasks['10']))
+        self.assertEqual(tasks['20']['phase'], 'done')
+        self.assertEqual(self.db.account('alice')['failures'], 0)
 
     async def test_download_failure_does_not_resume_saved_attachments(self):
         self.adapter.attachments.return_value = [
@@ -1362,6 +1531,39 @@ class PendingInboxTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result[0]['flow_number'], row[18])
         finally:
             await n.close()
+
+
+class IntegrationValidationClassificationTests(unittest.IsolatedAsyncioTestCase):
+    async def invoke(self, error):
+        class InvalidDocument(RuntimeError):
+            pass
+
+        failure = InvalidDocument('private model output') if error == 'validation' else error
+        module = types.SimpleNamespace(CloudExtractionError=InvalidDocument)
+        pipe = types.SimpleNamespace(valves=types.SimpleNamespace(document_analysis_cache_enabled=False))
+        with patch.object(integration, 'configured_pipe', AsyncMock(return_value=pipe)), \
+                patch.object(integration, 'module', new=module), \
+                patch.object(integration, 'store', return_value=None), \
+                patch.object(integration, 'process_with_team', AsyncMock(side_effect=failure)):
+            return await integration.process('alice', ['source'], '', None, groups=[['source']])
+
+    async def test_only_document_validation_is_classified_as_input_issue(self):
+        with self.assertRaises(integration.DocumentValidationError) as caught:
+            await self.invoke('validation')
+        self.assertNotIn('private model output', str(caught.exception))
+
+    async def test_structured_content_issue_survives_integration_boundary(self):
+        from examples.official_document_workflow.domain.validation import ContentValidationError
+        error = ContentValidationError('document_metadata_unverified', group_index=1, repair_attempted=True)
+        with self.assertRaises(integration.DocumentValidationError) as caught:
+            await self.invoke(error)
+        self.assertEqual(caught.exception.issue, error.as_issue())
+
+    async def test_connection_timeout_and_unexpected_errors_keep_stop_semantics(self):
+        for error in (ConnectionError('offline'), TimeoutError('busy'), RuntimeError('unexpected'), ValueError('invalid')):
+            with self.subTest(error=type(error).__name__), self.assertRaises(type(error)) as caught:
+                await self.invoke(error)
+            self.assertIs(caught.exception, error)
 
 
 if __name__ == '__main__':

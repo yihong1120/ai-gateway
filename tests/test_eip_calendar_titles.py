@@ -6,10 +6,10 @@ from unittest.mock import patch
 from .test_eip_connector import csv_bytes
 from .test_eip_connector import row
 from .test_eip_connector import SCHEMA
-from official_document_workflow.application import integration
-from official_document_workflow.domain.calendar.presentation import format_ai_title
-from official_document_workflow.domain.calendar.presentation import split_ai_title
-from official_document_workflow.infrastructure.eip import calendar_csv
+from examples.official_document_workflow.application import integration
+from examples.official_document_workflow.domain.calendar.presentation import format_ai_title
+from examples.official_document_workflow.domain.calendar.presentation import split_ai_title
+from examples.official_document_workflow.infrastructure.eip import calendar_csv
 
 
 class CalendarTitleTests(unittest.TestCase):
@@ -47,7 +47,7 @@ class CalendarTitleTests(unittest.TestCase):
         self.assertIn(source['Subject'], converted['Description'])
         self.assertEqual(source, before)
         self.assertEqual(calendar_csv.fit_calendar_subject(converted), converted)
-        with patch.object(integration, 'pipe_module', return_value=SCHEMA):
+        with patch.object(integration, 'module', new=SCHEMA):
             rows, _ = calendar_csv.parse_csv(csv_bytes([source]))
         self.assertEqual(rows[0]['Subject'], converted['Subject'])
 

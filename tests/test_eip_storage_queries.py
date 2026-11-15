@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from psycopg.types.json import Json
+from psycopg.pq import TransactionStatus
 from sqlalchemy import Column
 from sqlalchemy import JSON
 from sqlalchemy import MetaData
@@ -15,12 +16,12 @@ from sqlalchemy import String
 from sqlalchemy import Table
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from official_document_workflow.infrastructure.eip.calendar_sync import verified_events
-from official_document_workflow.infrastructure.storage import webui_files
-from official_document_workflow.infrastructure.storage.automation_store import (
+from examples.official_document_workflow.infrastructure.eip.calendar_sync import verified_events
+from examples.official_document_workflow.infrastructure.storage import webui_files
+from examples.official_document_workflow.infrastructure.storage.automation_store import (
     AutomationStore,
 )
-from official_document_workflow.infrastructure.storage.state import Journal
+from examples.official_document_workflow.infrastructure.storage.state import Journal
 from tests.eip_postgres import EIPPostgresTestCase
 from tests.test_eip_connector import remote
 from tests.test_eip_connector import row
@@ -40,22 +41,28 @@ class StorageTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[0]['key'], legacy)
         self.assertEqual(journal.reserve_event(events[0]['key'], events[0]['aliases']), 'unknown')
 
-    def test_both_stores_commit_rollback_and_close_with_their_row_formats(self):
+    def test_both_stores_commit_rollback_and_release_with_their_row_formats(self):
         journal = Journal()
-        with TemporaryDirectory() as directory:
+        # Match the application's retained pool lifetime. A borrower-only pool
+        # is intentionally closed on context exit, so inspecting that closed
+        # handle's transaction status would not test transaction cleanup.
+        from examples.shared.runtime.database import PoolScope
+        scope = PoolScope()
+        self.addCleanup(scope.close)
+        with scope.bind(), TemporaryDirectory() as directory:
             store = AutomationStore(Path(directory) / 'key')
             for connect, expected_row in ((journal.connect, (7,)), (store.db, {'value': 7})):
                 with self.subTest(store=connect.__name__):
                     with connect() as db:
                         self.assertEqual(db.execute('SELECT 7 AS value').fetchone(), expected_row)
                         db.execute("INSERT INTO writes VALUES (%s,'done',0)", (connect.__name__,))
-                    self.assertTrue(db.closed)
+                    self.assertEqual(db.info.transaction_status, TransactionStatus.IDLE)
                     self.assertEqual(journal.status(connect.__name__), 'done')
                     with self.assertRaises(KeyboardInterrupt):
                         with connect() as aborted:
                             aborted.execute("UPDATE writes SET status='unknown'")
                             raise KeyboardInterrupt()
-                    self.assertTrue(aborted.closed)
+                    self.assertEqual(aborted.info.transaction_status, TransactionStatus.IDLE)
                     self.assertEqual(journal.status(connect.__name__), 'done')
 
     def test_batch_receipts_preserve_unknown_and_need_one_connection(self):

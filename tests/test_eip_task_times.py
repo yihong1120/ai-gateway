@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from official_document_workflow.infrastructure.eip.task_times import document_recorded_at
-from official_document_workflow.infrastructure.storage.automation_store import AutomationStore
+from examples.official_document_workflow.infrastructure.eip.task_times import document_recorded_at
+from examples.official_document_workflow.infrastructure.storage.automation_store import AutomationStore
 from tests.eip_postgres import EIPPostgresTestCase
 
 
@@ -23,21 +23,21 @@ class TaskTimesTests(EIPPostgresTestCase, unittest.TestCase):
         return self.store.task_page('alice')[0][0]
 
     def test_first_detection_survives_poll_save_and_explicit_task_replacement(self):
-        with patch('official_document_workflow.infrastructure.storage.automation_store.time.time', return_value=100):
+        with patch('examples.official_document_workflow.infrastructure.storage.automation_store.time.time', return_value=100):
             self.store.discover('alice', '17', [self.doc])
         task = self.history()
         self.assertEqual(task['first_detected_at'], 100)
         self.assertIsNone(task['last_processed_at'])
-        with patch('official_document_workflow.infrastructure.storage.automation_store.time.time', return_value=200):
+        with patch('examples.official_document_workflow.infrastructure.storage.automation_store.time.time', return_value=200):
             self.store.discover('alice', '17', [self.doc])
         self.assertEqual(self.history()['first_detected_at'], 100)
         self.assertIsNone(self.history()['last_processed_at'])
-        with patch('official_document_workflow.infrastructure.storage.automation_store.time.time', return_value=300):
+        with patch('examples.official_document_workflow.infrastructure.storage.automation_store.time.time', return_value=300):
             self.store.save_task(task, 'done', task['payload'])
         self.assertEqual(self.history()['last_processed_at'], 300)
         with self.store.db() as db:
             db.execute('DELETE FROM tasks WHERE id=%s', (task['id'],))
-        with patch('official_document_workflow.infrastructure.storage.automation_store.time.time', return_value=400):
+        with patch('examples.official_document_workflow.infrastructure.storage.automation_store.time.time', return_value=400):
             self.store.discover('alice', '17', [self.doc])
         self.assertEqual(self.history()['first_detected_at'], 100)
         self.assertEqual(self.history()['last_processed_at'], 300)

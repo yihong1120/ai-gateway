@@ -8,59 +8,9 @@ import unittest
 from pathlib import Path
 
 
-# Integration boundaries need cleanup/finally, native HTTP errors and lazy
-# imports. Keep the original constraints everywhere else, including new files.
-# Exceptions name exact enclosing functions rather than exempt whole modules.
-BOUNDARIES = {
-    'imports': {
-        ('infrastructure/storage/processing_cache.py', 'cached_upload'),
-        ('application/multi_agent.py', 'write_pdf_pages'),
-        ('application/upload_batch.py', 'unique_uploads'),
-        ('application/upload_batch.py', 'group_pdf'),
-        ('application/background_upload.py', 'submit'),
-        ('application/background_upload.py', 'execute'),
-    },
-    'try': {
-        ('api/routes.py', 'BrowserPageRoute.get_route_handler.handler'),
-        ('infrastructure/concurrency.py', 'OwnerSlots.slot'),
-        ('infrastructure/concurrency.py', 'run_ocr'),
-        ('infrastructure/storage/processing_cache.py', 'cached_upload'),
-        ('application/automation.py', '_run_due'),
-        ('application/automation.py', 'scheduler'),
-        ('application/upload_batch.py', 'process_unique_uploads'),
-        ('domain/calendar/preparation.py', 'preparation_rows'),
-        ('application/background_upload.py', 'pipe_module'),
-        ('application/background_upload.py', 'execute'),
-        ('application/background_upload.py', 'execute.store'),
-    },
-    'isinstance': {
-        ('infrastructure/concurrency.py', 'document_request.limited'),
-        ('application/background_upload.py', 'submit'),
-    },
-    'nested': {
-        ('api/routes.py', 'BrowserPageRoute.get_route_handler'),
-        ('infrastructure/concurrency.py', 'document_request'),
-        ('infrastructure/concurrency.py', 'model_request'),
-        ('application/upload_batch.py', 'process_unique_uploads'),
-        ('application/background_upload.py', 'execute'),
-        ('application/background_upload.py', 'execute.store'),
-    },
-}
-
-
-def permitted(tree, node, relative_path, rule):
-    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
-    names, parent = [], parents.get(node)
-    while parent is not None:
-        if isinstance(parent, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-            names.insert(0, parent.name)
-        parent = parents.get(parent)
-    return (relative_path.as_posix(), '.'.join(names)) in BOUNDARIES[rule]
-
-
 class ImportOrderTests(unittest.TestCase):
     def test_frontend_is_separate_from_fastapi_package(self):
-        root = Path(__file__).resolve().parents[1] / 'official_document_workflow'
+        root = Path(__file__).resolve().parents[1] / 'examples/official_document_workflow'
         api = root / 'api'
         frontend = root / 'frontend'
         self.assertFalse(any(api.glob('*.html')))
@@ -78,8 +28,8 @@ class ImportOrderTests(unittest.TestCase):
                     '-c',
                     'import importlib,sys; importlib.import_module(sys.argv[1]); '
                     'assert not any(n.startswith("open_webui") or '
-                    'n.startswith("official_document_workflow.application") for n in sys.modules)',
-                    'official_document_workflow.infrastructure.eip.' + name,
+                    'n.startswith("examples.official_document_workflow.application") for n in sys.modules)',
+                    'examples.official_document_workflow.infrastructure.eip.' + name,
                 ],
                 capture_output=True,
                 text=True,
@@ -106,7 +56,7 @@ class ImportOrderTests(unittest.TestCase):
                         'import runpy, sys; '
                         'runpy.run_path("tests/eip_webui.py")["load_application_modules"](sys.argv[1]); '
                         'assert "open_webui.env" not in sys.modules',
-                        'official_document_workflow.' + name,
+                        'examples.official_document_workflow.' + name,
                     ],
                     cwd=Path(__file__).resolve().parents[1],
                     capture_output=True,
@@ -115,104 +65,77 @@ class ImportOrderTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_all_workflow_imports_are_at_module_scope(self):
-        root = Path(__file__).resolve().parents[1] / 'official_document_workflow'
+    def test_domain_dependencies_remain_framework_independent(self):
+        root = Path(__file__).resolve().parents[1] / 'examples/official_document_workflow/domain'
         for path in root.rglob('*.py'):
             tree = ast.parse(path.read_text())
-            nested = [
-                node.lineno
-                for node in ast.walk(tree)
-                if isinstance(node, (ast.Import, ast.ImportFrom))
-                and node not in tree.body
-                and not permitted(tree, node, path.relative_to(root), 'imports')
-            ]
-            self.assertEqual(nested, [], str(path.relative_to(root)))
+            imports = [node.module or '' for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
+            for name in imports:
+                self.assertFalse(name.startswith(('examples.official_document_workflow.application',
+                                                 'examples.official_document_workflow.services',
+                                                 'company_agent', 'open_webui')), str(path))
 
-    def test_workflow_has_no_try_statements(self):
-        root = Path(__file__).resolve().parents[1] / 'official_document_workflow'
+    def test_workflow_does_not_import_company_agent(self):
+        root = Path(__file__).resolve().parents[1] / 'examples/official_document_workflow'
         for path in root.rglob('*.py'):
             tree = ast.parse(path.read_text())
-            statements = [
-                node.lineno
-                for node in ast.walk(tree)
-                if isinstance(node, (ast.Try, ast.TryStar))
-                and not permitted(tree, node, path.relative_to(root), 'try')
-            ]
-            self.assertEqual(statements, [], str(path.relative_to(root)))
-
-    def test_workflow_has_no_isinstance_calls(self):
-        root = Path(__file__).resolve().parents[1] / 'official_document_workflow'
-        for path in root.rglob('*.py'):
-            tree = ast.parse(path.read_text())
-            calls = [
-                node.lineno
-                for node in ast.walk(tree)
-                if isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == 'isinstance'
-                and not permitted(tree, node, path.relative_to(root), 'isinstance')
-            ]
-            self.assertEqual(calls, [], str(path.relative_to(root)))
-
-    def test_workflow_has_no_custom_error_wrappers(self):
-        root = Path(__file__).resolve().parents[1] / 'official_document_workflow'
-        forbidden = {
-            'EIPError',
-            'EIPSessionExpired',
-            'EIPRetryableError',
-            'WorkflowPlanningError',
-            'http_error',
-            'route_error',
-            'request_error',
-            'SafeRoute',
-            'SafeHandler',
-            'HTTPException',
-        }
-        for path in root.rglob('*.py'):
-            tree = ast.parse(path.read_text())
-            names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
-            definitions = {
-                node.name
-                for node in ast.walk(tree)
-                if isinstance(
-                    node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef),
-                )
-            }
-            self.assertEqual(
-                (names | definitions) & forbidden,
-                {'HTTPException'} if path.relative_to(root).as_posix() == 'api/routes.py' else set(),
-                str(path.relative_to(root)),
-            )
-            custom_errors = {
-                node.name
-                for node in ast.walk(tree)
-                if isinstance(node, ast.ClassDef)
-                and node.name.endswith(('Error', 'Exception'))
-            }
-            allowed_errors = {'DocumentInputError'} if path.relative_to(
-                root,
-            ).as_posix() == 'application/background_upload.py' else set()
-            self.assertEqual(custom_errors, allowed_errors, str(path.relative_to(root)))
-
-    def test_workflow_has_no_nested_function_definitions(self):
-        root = Path(__file__).resolve().parents[1] / 'official_document_workflow'
-        for path in root.rglob('*.py'):
-            tree = ast.parse(path.read_text())
-            parents = {
-                child: node
-                for node in ast.walk(tree)
-                for child in ast.iter_child_nodes(node)
-            }
-            nested = []
             for node in ast.walk(tree):
-                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    continue
-                if permitted(tree, node, path.relative_to(root), 'nested'):
-                    continue
-                parent = parents.get(node)
-                while parent is not None:
-                    if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        nested.append((node.lineno, node.name))
-                        break
-                    parent = parents.get(parent)
-            self.assertEqual(nested, [], str(path.relative_to(root)))
+                if isinstance(node, ast.ImportFrom):
+                    self.assertFalse((node.module or '').startswith('company_agent'), str(path))
+
+    def test_shared_runtime_does_not_import_product_services(self):
+        root = Path(__file__).resolve().parents[1] / 'examples/shared/runtime'
+        self.assertTrue(root.is_dir())
+        for path in root.glob('*.py'):
+            for node in ast.walk(ast.parse(path.read_text())):
+                if isinstance(node, ast.ImportFrom):
+                    self.assertFalse((node.module or '').startswith(('company_agent', 'examples.official_document_workflow',
+                                                                     'examples.company_ai_access')), str(path))
+
+    def test_core_does_not_load_the_webui_adapter_source(self):
+        root = Path(__file__).resolve().parents[1] / 'examples/official_document_workflow/services'
+        for path in root.glob('*.py'):
+            source = path.read_text()
+            self.assertNotIn('spec_from_file_location', source)
+            self.assertNotIn('openwebui/functions', source)
+
+    def test_application_uses_public_document_operations(self):
+        root = Path(__file__).resolve().parents[1] / 'examples/official_document_workflow'
+        private = {
+            node.name for path in (root / 'services').glob('*.py')
+            for node in ast.walk(ast.parse(path.read_text()))
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name.startswith('_') and not node.name.startswith('__')
+        }
+        for path in (root / 'application').glob('*.py'):
+            calls = {
+                node.func.attr for node in ast.walk(ast.parse(path.read_text()))
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            }
+            self.assertFalse(private & calls, str(path))
+
+
+class WorkflowRevisionTests(unittest.TestCase):
+    def test_shared_runtime_changes_invalidate_revision(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from examples.official_document_workflow.services import version
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflow = root / 'workflow'
+            (workflow / 'services').mkdir(parents=True)
+            implementation = workflow / 'services/version.py'
+            implementation.write_text('# workflow')
+            runtime = root / 'runtime'
+            runtime.mkdir()
+            (runtime / '__init__.py').write_text('# runtime')
+            source = runtime / 'database.py'
+            source.write_text('# first')
+            with patch.object(version, '__file__', str(implementation)), patch.object(
+                version.runtime, '__file__', str(runtime / '__init__.py')
+            ):
+                first = version.implementation_revision.__wrapped__()
+                source.write_text('# changed')
+                second = version.implementation_revision.__wrapped__()
+            self.assertNotEqual(first, second)

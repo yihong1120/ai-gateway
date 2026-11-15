@@ -5,13 +5,16 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
+from functools import partial
+from types import SimpleNamespace
+from examples.shared.runtime.workers import WorkerHealth
 from unittest.mock import patch
 
-from official_document_workflow.application import automation
-from official_document_workflow.infrastructure.concurrency import OwnerSlots
-from official_document_workflow.infrastructure.storage.automation_store import AutomationStore
-from official_document_workflow.infrastructure.storage.state import Journal
-from official_document_workflow.infrastructure.storage.state import State
+from examples.official_document_workflow.application import automation
+from examples.shared.runtime.concurrency import OwnerSlots
+from examples.official_document_workflow.infrastructure.storage.automation_store import AutomationStore
+from examples.official_document_workflow.infrastructure.storage.state import Journal
+from examples.official_document_workflow.infrastructure.storage.state import State
 from tests.eip_postgres import EIPPostgresTestCase
 
 
@@ -27,6 +30,12 @@ class ConcurrentAccountTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCa
             self.db.bind(owner, owner + '-identity', owner + '-account', 'test-password')
         with self.db.db() as db:
             db.execute('UPDATE accounts SET next_run=0')
+
+    def scheduler(self, run, state=None):
+        return automation.AutomaticScheduler(
+            self.db, self.journal, state or self.state, WorkerHealth(),
+            SimpleNamespace(run=partial(run, self.db, self.journal)),
+        )
 
     async def wait_for(self, predicate):
         async with asyncio.timeout(5):
@@ -55,20 +64,19 @@ class ConcurrentAccountTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCa
                 await release[owner].wait()
             finally:
                 cleaned.append(owner)
-        with patch.object(automation, 'store', return_value=self.db), patch.object(automation, 'STATE', self.state), patch.object(automation, 'run_account', side_effect=run):
-            task = asyncio.create_task(automation.scheduler(self.journal))
-            try:
-                await self.wait_for(lambda: len(started) == 2)
-                self.assertEqual(started, ['alice', 'bob'])
-                self.assertEqual(len(self.state.automatic_tasks), 2)
-                release['bob'].set()
-                await self.wait_for(lambda: 'carol' in started)
-                self.assertNotIn('alice', cleaned)
-                self.assertEqual(len(self.state.automatic_tasks), 2)
-            finally:
-                task.cancel()
-                with self.assertRaises(asyncio.CancelledError):
-                    await task
+        task = asyncio.create_task(self.scheduler(run).run())
+        try:
+            await self.wait_for(lambda: len(started) == 2)
+            self.assertEqual(started, ['alice', 'bob'])
+            self.assertEqual(len(self.state.automatic_tasks), 2)
+            release['bob'].set()
+            await self.wait_for(lambda: 'carol' in started)
+            self.assertNotIn('alice', cleaned)
+            self.assertEqual(len(self.state.automatic_tasks), 2)
+        finally:
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
         self.assertCountEqual(cleaned, ['alice', 'bob', 'carol'])
         self.assertFalse(self.state.automatic_tasks)
         self.assertEqual(self.db.claim_due(), [])  # Hourly tick already committed.
@@ -81,15 +89,14 @@ class ConcurrentAccountTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCa
             if owner == 'alice':
                 raise ValueError('private account error')
             db.finish(owner, generation, 'completed')
-        with patch.object(automation, 'store', return_value=self.db), patch.object(automation, 'STATE', self.state), patch.object(automation, 'run_account', side_effect=run):
-            task = asyncio.create_task(automation.scheduler(self.journal))
-            try:
-                await self.wait_for(lambda: len(calls) == 3 and not self.state.automatic_tasks)
-                self.assertFalse(task.done())
-            finally:
-                task.cancel()
-                with self.assertRaises(asyncio.CancelledError):
-                    await task
+        task = asyncio.create_task(self.scheduler(run).run())
+        try:
+            await self.wait_for(lambda: len(calls) == 3 and not self.state.automatic_tasks)
+            self.assertFalse(task.done())
+        finally:
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
         self.assertCountEqual(calls, ['alice', 'bob', 'carol'])
         alice = self.db.account('alice')
         self.assertEqual(alice['failures'], 1)
@@ -97,3 +104,32 @@ class ConcurrentAccountTests(EIPPostgresTestCase, unittest.IsolatedAsyncioTestCa
         self.assertNotIn('private', alice['message'])
         self.assertEqual(self.db.account('bob')['message'], 'completed')
         self.assertEqual(self.db.account('carol')['message'], 'completed')
+
+    async def test_second_application_cannot_recover_work_while_dispatcher_lease_is_held(self):
+        entered = asyncio.Event()
+        async def run(*args):
+            entered.set()
+            await asyncio.Event().wait()
+        with patch.object(self.db,'recover',wraps=self.db.recover) as recover:
+            first = asyncio.create_task(self.scheduler(run).run())
+            try:
+                await asyncio.wait_for(entered.wait(),3)
+                with self.assertRaises(RuntimeError):
+                    await self.scheduler(run, State()).run()
+                self.assertEqual(recover.call_count,1)
+                self.assertFalse(first.done())
+            finally:
+                first.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await first
+
+
+    async def test_capacity_profile_uses_owned_scheduler_without_legacy_patches(self):
+        from company_agent.evals.capacity import profile
+
+        result = await profile(limit=1, model_limit=2, ocr_limit=1, users=1, hold=0)
+        self.assertEqual(result['jobs'], 3)
+        self.assertEqual(result['errors'], 0)
+        self.assertEqual(result['users'], 1)
+        for lane in ('company', 'document', 'eip'):
+            self.assertEqual(result['peaks'][lane], 1)

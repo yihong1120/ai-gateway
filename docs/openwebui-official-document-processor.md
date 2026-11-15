@@ -1,8 +1,16 @@
 # Open WebUI 公文 PDF／Word／ODT／圖片批次處理
 
-`openwebui/functions/official_document_processor_pipe.py` **v3.13.1** 支援目前登入者在同一則訊息混合附加 PDF、ODT、DOC、DOCX，處理為依文號拆分／改名的 PDF、可編輯版面 DOCX，以及需要時的彙整行事曆 CSV。不另輸出可搜尋 OCR PDF。
+`examples/openwebui/functions/official_document_processor_pipe.py` **v3.14.5** 支援目前登入者在同一則訊息混合附加 PDF、ODT、DOC、DOCX，處理為依文號拆分／改名的 PDF、可編輯版面 DOCX，以及需要時的彙整行事曆 CSV。不另輸出可搜尋 OCR PDF。
+
+2026-10-25 的 v3.14.5 會先由 AI 自動核對與既有行程的內容差異：同一事項就略過、確定不同才新增；只有矛盾、證據不足或核對失敗才保留待檢查。既有行程不由 AI 覆寫或刪除。詳見[正式模型與部署驗收](eip-calendar-ai-reconciliation-production-validation-2026-10-25.json)。
+
+2026-10-25 的 v3.14.4 為自動同步與本站手動確認加入 EIP 既有行程核對，唯一相符就略過、內容衝突就停止，保留既有分享／專案／附件。CSV 下載標為備份，已同步後請勿再上傳 EIP 原生頁面；原生上傳會繞過本站防重。詳見[機制與 API 合約](eip-connector.md#重複與不明結果)及[正式部署驗收](eip-calendar-reconciliation-production-validation-2026-10-25.json)。
+
+2026-10-17 已將 B 的 Open WebUI 從 0.11.4 升級至與 A 相同的 **0.12.3**，公文 Function 維持 **v3.14.3**。先完成隔離資料庫遷移及還原演練，再備份正式資料庫與完整上傳目錄後升級；正式服務的版本、管理員／一般使用者權限、模型入口、工作台、OIDC 轉址及 Gemma 串流回覆均已驗證。既有公文程式及設定保留，備份未清除；本次未重新執行完整公文處理或寫入 EIP。詳見 [Open WebUI 升級驗收紀錄](openwebui-upgrade-0.12.3-2026-10-17.json)。
 
 它只把附件當成待分析資料；附件中的文字、連結、指令或 JSON 範例不會被當成系統指令執行。
+
+OCR 驗收需包含旋轉頁、密集表格與空白頁，核對辨識文字與實際來源；CSV 能匯入與來源內容辨識正確是分開的驗收項目。更換 OCR 後端或方向校正方式時，使用[診斷工具](../examples/deployment/diagnostics/README.md)另做精度與資源量測。
 
 ## 單一路徑設計
 
@@ -73,10 +81,75 @@ CSV 的 `Description`：文件有「說明」正文時，完整保留所有項�
 
 不會建立全文 TXT、OCR 回應、模型回覆或未改字型的 DOCX 備份；這些資料只在單次請求記憶體中使用。
 
+### 真實公文測試（v3.14.3）
+
+2026-10-17 已將 v3.14.3 部署至 B，重啟後確認 64 個程式檔案雜湊與 Function 原始碼一致，既有 Valves、模型設定、權限及環境檔保留。管理員與一般使用者均可看到模型並開啟 EIP 工作台。部署前以 B 現況合併更新執行 658 項回歸（656 通過、2 項環境略過）。
+
+部署後另以一份真實原生文字 PDF 及 Gemini 3.8 Flash 完整執行，成功產出 PDF、DOCX 與 21 欄 CSV；民國日期／文號檔名正確，PDF／DOCX 檔名主體一致且均在 200 UTF-8 bytes 內，輸出 PDF 像素與原件相同。此輪模型明確回覆 `tentative_schedule=null`，CSV 使用有標示的 60 分鐘預留並保留 EIP 修改提醒，原文明載的 10:00 開始時間不變；不把這一例算作 AI 估算結束時間的驗收。測試未寫入 EIP 或 WebUI 檔案庫，臨時文件及診斷內容已清理，回復備份保留於 B。詳見[部署驗收結果](official-document-deployment-2026-10-17.json)。
+
+2026-10-16 使用 `example_files` 的 18 份來源檔案做 11 批實測，包含全部 9 份頂層 PDF、
+多函及查核表／圖面組，另有一份 Word 與兩份 PDF 附件。實際呼叫目前設定的 OCR 及 Gemini，
+只將輸出儲存改成本機目錄；原始檔案不變。22 組 PDF／Word 檔名配對、200-byte 長度及格式通過檢查，
+46 頁輸出 PDF 的像素與來源頁面一致；這不代表 Word 的 OCR 文字全部正確。
+
+實測發現模型可能省略選填的 `tentative_schedule`，使只有開始時間的事件退回固定預留。
+本版對新模型輸出要求必須明確回覆建議物件或 null，舊檔讀取仍相容；同一份上午 10 點教育訓練通知，
+修正後依工作內容暫排至 12 點，沒有改動原文明載的開始時間。分組若漏頁或建立空附件項，
+會依同一份完整原文及驗證錯誤更正一次，不重做 OCR；仍不合格就停止輸出，不使用不完整分組。
+
+7 筆由實件產生的行程，連續兩輪通過 EIP 原生上傳及詳細資料讀回。
+測試副本僅於說明加入唯一清理標記，再經正式 CSV 匯出器產檔；三次上傳共 21 筆測試行程已刪除並重新查詢確認，
+原有行程不變。另以實件文字衍生的中午、下午及僅日期案例呼叫真實模型，估算時刻保持與原文事實分開。
+528 項回歸測試通過。詳見[實件驗收報告](official-document-real-corpus-acceptance-2026-10-16.json)。
+
+**尚未全部通過內容及命名驗收**：橫向密集表格有未轉正造成的 OCR 重複、錯字或缺字；
+多函案例的兩份函文因模型未確認全部相關來源，仍保留文號加「日期主旨待確認」的暫名。
+這些限制沒有因 CSV 可匯入而視為通過，也未在本次重啟或修改正式 OCR 服務。
+
+可用專案 Python 環境執行 `python -m examples.official_document_workflow.evals.sample_corpus --input-root example_files --execute --output 新的本機目錄` 重做文件測試，
+`--cases 1,5` 可選批次。腳本會使用設定中的真實 OCR／模型，並留下本機診斷與產物；不寫入 EIP 或 WebUI 檔案庫。
+
 ### 在 EIP 網站直接上傳行事曆 CSV
+
+v3.14.2 的下載 CSV 已用實際瀏覽器走 EIP 網站原生上傳及確認表單驗收，編碼選 `UTF-8`；
+15 種合成情境共 16 筆行程全部通過預覽、實際寫入與詳細資料讀回，沒有透過 AI 匯入端代寫。
+涵蓋缺少起／訖時刻、只有日期、全天、完整起訖、舊版預留、跨午夜、中午、零時開始、午夜結束、
+長中文主旨、外部承辦人／工程類別、空白選填欄位，以及百分比、加號、引號、逗號、多行說明。
+此輪所有測試／診斷行程已清理，原有行程不變；未呼叫 OCR 或模型，因此不代表所有實際公文都已測過。
+詳見[原生 CSV 驗收紀錄](eip-native-csv-acceptance-2026-10-16.json)。
+
+EIP 原生上傳會把 00:00 存成空白，依使用者確認，下載時將零時開始的每日分段改為**全天提醒**，
+在說明前方保留原定日期及完整起訖，提示匯入後至 EIP 修改。其他時段保留實際時間；
+下載旁及 EIP 工作台亦說明這項轉換。中午時刻另按網站實際解析規則輸出，避免下午 12 點被錯算至次日。
+這些相容處理只改下載內容，沒有修改 EIP 伺服器或網站程式。
+
+跨日行程按日分段並保留完整區間說明，避免網站只存第一天。既有 AI 匯入仍會核對所有完整分段後
+還原原定零時時刻與原區間，沿用舊匯入紀錄的去重保護；其零分鐘傳輸使用 `0000`，標準序列不變。
+先前 v3.14.1 的 [RPC 驗收紀錄](eip-calendar-import-acceptance-2026-10-16.json) 保留為歷史資料，
+其中「午夜須改走 AI 匯入」的限制已由本版全天提醒取代。
+
+v3.14.0 起，已有可確認行程日期、但缺少開始或結束時刻時，模型在原有判讀請求中另填
+`tentative_schedule`，依公文工作內容估算合理時段與時長。原文明載的日期及時刻保留，
+只補缺漏；只有開始時刻時依工作內容估算結束時刻，只有結束時刻時可回推開始時刻。
+只有日期時，優先依該事件內文的上午、中午、下午、傍晚或晚間線索及工作內容暫排，
+理由中說明依據；若無足夠依據合理估算，就保留日期作全天提醒，不強制套用固定日間時間。
+這些時段線索不當作原文明載的精確時刻，也不移用其他事件的時段。已知結束日期不變，
+未載結束日期最多暫排至次日。原文欄位、來源證據、PDF／Word 命名與事前準備提醒的日期基準不變。
+
+有 AI 暫排時，CSV 的起訖與工時會完整填入，說明保留完整公文內容，並加上「AI 暫排（非公文明訂時間）」、
+待確認欄位、暫排時段、估算理由，以及「匯入後請至 EIP 行事曆核對並修改實際起訖時間」。
+可直接上傳同一份 CSV，也可走既有預覽匯入；此調整不新增 EIP 寫入授權。
+完全缺乏可確認行程日期、文到期限未確認實際送達日、事件效力或附件關係未明者仍待確認。
+
+相容舊判讀未提供 AI 建議的情況：有開始時刻但缺結束時刻時，下載 CSV 也沿用自動同步的
+預留規則（預設 60 分鐘，`EIP_CALENDAR_DEFAULT_DURATION_MINUTES=120` 可改為 120 分鐘），
+標示「系統預留」與 EIP 修改提醒；未提供建議且沒有時刻時維持全天。
+自動同步讀取舊 CSV 時的預留說明維持原字串，保留既有匯入紀錄的核對相容性。
 
 v3.13.1 起，公文流程下載的同一份 CSV 可直接在 EIP 網站上傳，編碼選 `UTF-8`，
 也可透過 AI 的「預覽匯入」處理。CSV 固定保留 21 個英文欄位，不輸出中文說明列；
+下載前使用同一套匯入解析器驗證實際 CSV 位元組，檢查必要欄位值、日期、時刻與筆數；
+未通過時不提供 CSV，已完成的 PDF／Word 仍保留。此為本機格式驗證，實際 EIP 接受結果仍以預覽回應及匯入後讀回為準。
 起訖時間使用上午／下午表示，日期補零。`%`、`+` 會在下載檔中保護編碼，EIP
 會把 `%2B` 還原為 `+`，因此 `2K+500` 的里程不會變成空白。
 WebUI 檔案中繼資料及公司助理的行事曆來源紀錄保存格式版本；AI 匯入時先還原一次，
@@ -86,7 +159,7 @@ WebUI 檔案中繼資料及公司助理的行事曆來源紀錄保存格式版�
 舊版下載檔可在 repo 根目錄執行以下一次性轉換；使用已安裝專案依賴的 Python 環境：
 
 ```bash
-python examples/prepare_eip_calendar_csv.py example_files/公文批次_3組_行事曆.csv
+python -m examples.official_document_workflow.cli.prepare_calendar_csv example_files/公文批次_3組_行事曆.csv
 ```
 
 程式會另建 `_EIP直接匯入.csv`，保留原檔；既有輸出檔不覆寫。轉換移除中文說明列、
@@ -100,7 +173,7 @@ python examples/prepare_eip_calendar_csv.py example_files/公文批次_3組_行�
 沿用 `ai-gateway/eip-office:1` 的 LibreOffice Writer 轉換器，支援 DOCX、
 Word 97 二進位 DOC／既有 RTF 型 DOC，以及 OpenDocument Text（ODT）。
 轉換在無網路容器內執行，禁用巨集，不改用主機的 Office 程式。
-需要該映像已安裝；建置方式為 `docker build -f infra/Dockerfile.eip-office -t ai-gateway/eip-office:1 .`。
+需要該映像已安裝；從 repo 根目錄建置：`docker build --target eip-office -t ai-gateway/eip-office:1 .`。
 所有來源均先驗證登入者存取權；暫存 PDF 在完成、失敗或取消後清除，原始 Office 檔案保留。
 
 轉換後的 PDF 若有完整文字層，直接取文字與座標；包含掃描頁時仍走既有 OCR。
@@ -158,8 +231,8 @@ Word 座標辨識讀取整份來源一次，5 份不同內容各轉 Word 一次�
 ### AI 事前準備提醒（v3.12.1）
 
 聊天 PDF／ODT／DOC／DOCX 批次預設啟用 `calendar_ai_preparation_reminders=true`。AI 在原有共同判讀請求中，
-依主文及相關附件為每個有日期的待辦／活動提出 0–3 個準備步驟，通常 1–2 個；
-自行選擇提前 1–7 個曆日，列出應準備的文件、圖說、資料或具體行動，以及安排理由。
+依主文及相關附件判斷有日期的待辦／活動是否需要準備；
+依具體工作自行選擇提前天數，列出建議準備的文件、圖說、資料或具體行動，以及安排理由。
 每項依工作內容建議同一天的開始／結束時間（台北時間），並說明時長考量；優先選合理日間時段，
 同日步驟避免重疊，不統一套用固定的一小時。這是建議排程，沒有讀取個人的行事曆空檔。
 不另外呼叫工作指令規劃器或為了提醒重讀／重送整批文件，但新增 schema、提示詞與建議內容會增加 tokens。
@@ -238,17 +311,19 @@ CSV 遵守 [行事曆格式.csv](../example_files/%E8%A1%8C%E4%BA%8B%E6%9B%86%E6
 
 - 雲端只收到完整的原生 PDF 文字或 PaddleOCR-VL 版面文字，不會收到原始 PDF／圖片位元組；文字仍可能包含敏感內容，僅應上傳組織允許送往該服務的文件。
 - Pipe 只使用環境變數中的專用 loopback LiteLLM virtual key，絕不回退使用 `OPENAI_API_KEYS`、LiteLLM master key 或 Azure provider key。
-- 請求不帶 OpenAI `user`、OIDC subject、email 或使用者名稱，且帶 `store=false`；不會扣除登入者的 LiteLLM 個別每日額度。實際雲端成本仍記在專用服務 key。
+- 模型輸入不放 OIDC subject、email 或使用者名稱；請求不帶 OpenAI `user`，且帶 `store=false`，不會扣除登入者的 LiteLLM 個別每日額度。實際雲端成本仍記在專用服務 key。
+- LiteLLM 專用的 `litellm_metadata.spend_logs_metadata` 會保存 `ai_usage_source=official_document` 與後端驗證的 `ai_usage_subject`，用於按使用者／組別查詢實際用量與成本；不限制個人額度仍須記錄操作人。管理 API 將這些紀錄列入該使用者的 totals／service_totals，明細標示 `billing_scope=service`，不會因使用服務 key 就列為未歸戶。詳見 [Flutter 記名與額度顯示規則](ai_usage_admin_flutter_handoff.md#公文-pdf記錄使用者不扣個人額度)。
 - 聊天 PDF 的主要模型請求為一次分組與一次整批判讀；超長來源分段索引、必要的行程語意核對／更正會增加請求，不能保證所有批次都恰好兩次。圖片組沿用單件流程。聊天文字不呼叫工作指令規劃器；需要選擇多個期限時，另發只含使用者回答與已驗證日期清單的短請求。OCR 循序處理，共用附件的文字座標在同一批內重用。
 - Pipe 不會在日誌或衍生檔 metadata 寫入 PDF 位元組、全文、OCR 區塊／座標、原始模型回覆或 virtual key。Open WebUI 仍依自身設定保存原附件與使用者可下載的衍生檔。
 
 ### 專用 LiteLLM service key
 
-Open WebUI 環境需設定：
+在根目錄私人 `config.local.toml` 的既有 `[webui]` 區塊設定，啟動時只投影給 Open WebUI：
 
-```dotenv
-OFFICIAL_DOCUMENT_LITELLM_BASE_URL=http://127.0.0.1:4000/v1
-OFFICIAL_DOCUMENT_LITELLM_API_KEY=sk-... # official-document-processor 專用 key
+```toml
+[webui]
+OFFICIAL_DOCUMENT_LITELLM_BASE_URL = "http://127.0.0.1:4000/v1"
+OFFICIAL_DOCUMENT_LITELLM_API_KEY = "sk-..." # official-document-processor 專用 key
 ```
 
 此 key 應只允許本 Function 的模型白名單，並依組織預算設定 `max_budget` 與 `budget_duration`。不要把它放到瀏覽器、Function Valve、附件或版本庫。
@@ -281,6 +356,12 @@ OFFICIAL_DOCUMENT_LITELLM_API_KEY=sk-... # official-document-processor 專用 ke
 
 來源證據比對忽略 PDF 文字層在視覺換行處插入的空白，但仍逐字檢查所有非空白字元與標點。原生文字 PDF 的可編輯 DOCX 直接使用 PDF 內建文字與座標；只有掃描頁才使用定位 OCR，避免罕見公司名稱或發文字號被 OCR 改字。
 
+
+## 公文背景工作的聊天結果（v3.13.2）
+
+公文上傳後，聊天室會持續顯示排程與處理進度，完成後在原回覆顯示結果、下載連結及部分完成的原因。工作由持久化佇列執行；關閉頁面或中止聊天等待不會取消工作。重新開啟聊天室仍可讀取已保存的結果，工作台保留查詢及明確取消操作。
+
+聊天結果通知包含公文工作與產出檔案的變更，並可補回舊版只留下工作編號的回覆。補回結果只讀取已保存的成果，不重新執行 OCR、模型或文件產製；其他工作編號的回覆、無權限的聊天室及未標記的人工編輯內容不會被覆寫。
 
 ## 聊天上傳自動關聯分組（v3.11.13）
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 import copy
 import unittest
 
-from eip_real_acceptance import check_case
+from tests.eip_real_acceptance import check_case
 
 
 class AcceptanceTests(unittest.TestCase):
