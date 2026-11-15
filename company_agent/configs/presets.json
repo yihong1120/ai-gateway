@@ -1,0 +1,221 @@
+{
+  "defaults": {
+    "state_dir": "/srv/company-agent-private",
+    "model_name": "gemini-3.5-flash-lite",
+    "require_user_billing": true,
+    "structured_completion": true,
+    "require_artifact_review": true,
+    "require_delivery_plan": true,
+    "compact_prompts": true,
+    "orchestration_mode": "hybrid",
+    "office_execution_mode": "specialist",
+    "model_timeout_seconds": 300,
+    "roots": []
+  },
+  "role_defaults": {
+    "model": "gemini-3.5-flash-lite",
+    "reasoning_effort": "medium",
+    "max_tokens": 4096
+  },
+  "roles": [
+    "coordinator",
+    "knowledge",
+    "data",
+    "document",
+    "reviewer",
+    "research",
+    "engineering",
+    "eip"
+  ],
+  "candidates": {
+    "config.optimized.example.json": {
+      "role_models": {
+        "data": {
+          "request_timeout_seconds": 60
+        }
+      },
+      "purpose_models": {
+        "summary": {
+          "model": "gemini-3.5-flash-lite",
+          "reasoning_effort": "minimal",
+          "max_tokens": 2048
+        }
+      },
+      "model_profiles": {
+        "lite": {
+          "model": "gemini-3.5-flash-lite",
+          "reasoning_effort": "medium",
+          "max_tokens": 4096,
+          "supports_images": true,
+          "description": "預設優先使用的小型 Gemini 模型，處理一般文字、圖片與附件；資訊不足時說明缺漏，不自行推測。"
+        },
+        "flash": {
+          "model": "gemini-3.8-flash",
+          "reasoning_effort": "low",
+          "max_tokens": 4096,
+          "supports_images": true,
+          "description": "較複雜的圖文、附件關聯或跨來源分析，確有必要時選用；一般整理優先 lite。"
+        },
+        "pro": {
+          "model": "gemini-4-argon",
+          "reasoning_effort": "high",
+          "max_tokens": 8192,
+          "supports_images": true,
+          "description": "僅限需要深入推理的困難圖文或來源矛盾分析；一般工作優先 lite，不作預設。"
+        }
+      },
+      "max_concurrent_jobs": 8,
+      "max_pending_jobs": 1000,
+      "max_pending_per_user": 20,
+      "model_timeout_seconds": 60
+    },
+    "config.mixed-candidate.example.json": {
+      "role_models": {
+        "data": {
+          "model": "gemini-4-argon",
+          "request_timeout_seconds": 150
+        }
+      },
+      "purpose_models": {
+        "summary": {
+          "model": "gemini-3.5-flash-lite",
+          "reasoning_effort": "minimal",
+          "max_tokens": 2048
+        }
+      },
+      "model_profiles": {
+        "lite": {
+          "model": "gemini-3.5-flash-lite",
+          "reasoning_effort": "medium",
+          "max_tokens": 4096,
+          "supports_images": true,
+          "description": "預設優先使用的小型 Gemini 模型，處理一般文字、圖片與附件；資訊不足時說明缺漏，不自行推測。"
+        },
+        "flash": {
+          "model": "gemini-3.8-flash",
+          "reasoning_effort": "low",
+          "max_tokens": 4096,
+          "supports_images": true,
+          "description": "較複雜的圖文、附件關聯或跨來源分析，確有必要時選用；一般整理優先 lite。"
+        },
+        "pro": {
+          "model": "gemini-4-argon",
+          "reasoning_effort": "high",
+          "max_tokens": 8192,
+          "supports_images": true,
+          "description": "僅限需要深入推理的困難圖文或來源矛盾分析；一般工作優先 lite，不作預設。"
+        }
+      },
+      "max_concurrent_jobs": 8,
+      "max_pending_jobs": 1000,
+      "max_pending_per_user": 20,
+      "model_timeout_seconds": 60
+    },
+    "config.data-flash-candidate.example.json": {
+      "role_models": {
+        "data": {
+          "model": "gemini-3.8-flash",
+          "request_timeout_seconds": 150
+        }
+      },
+      "purpose_models": {
+        "summary": {
+          "model": "gemini-3.5-flash-lite",
+          "reasoning_effort": "minimal",
+          "max_tokens": 2048
+        }
+      },
+      "model_profiles": {
+        "lite": {
+          "model": "gemini-3.5-flash-lite",
+          "reasoning_effort": "medium",
+          "max_tokens": 4096,
+          "supports_images": true,
+          "description": "預設優先使用的小型 Gemini 模型，處理一般文字、圖片與附件；資訊不足時說明缺漏，不自行推測。"
+        },
+        "flash": {
+          "model": "gemini-3.8-flash",
+          "reasoning_effort": "low",
+          "max_tokens": 4096,
+          "supports_images": true,
+          "description": "較複雜的圖文、附件關聯或跨來源分析，確有必要時選用；一般整理優先 lite。"
+        },
+        "pro": {
+          "model": "gemini-4-argon",
+          "reasoning_effort": "high",
+          "max_tokens": 8192,
+          "supports_images": true,
+          "description": "僅限需要深入推理的困難圖文或來源矛盾分析；一般工作優先 lite，不作預設。"
+        }
+      },
+      "max_concurrent_jobs": 8,
+      "max_pending_jobs": 1000,
+      "max_pending_per_user": 20,
+      "model_timeout_seconds": 60
+    },
+    "config.office-v31-flash.example.json": {
+      "enable_spreadsheet_reports": true,
+      "max_steps": 40,
+      "execution_timeout_seconds": 600,
+      "role_models": {
+        "coordinator": {
+          "request_timeout_seconds": 300
+        },
+        "knowledge": {
+          "request_timeout_seconds": 300
+        },
+        "data": {
+          "model": "gemini-3.8-flash",
+          "request_timeout_seconds": 300
+        },
+        "document": {
+          "request_timeout_seconds": 300
+        },
+        "reviewer": {
+          "request_timeout_seconds": 300
+        },
+        "research": {
+          "request_timeout_seconds": 300
+        },
+        "engineering": {
+          "request_timeout_seconds": 300
+        },
+        "eip": {
+          "request_timeout_seconds": 300
+        }
+      }
+    },
+    "config.office-v31-argon.example.json": {
+      "enable_spreadsheet_reports": true,
+      "max_steps": 40,
+      "execution_timeout_seconds": 600,
+      "role_models": {
+        "coordinator": {
+          "request_timeout_seconds": 300
+        },
+        "knowledge": {
+          "request_timeout_seconds": 300
+        },
+        "data": {
+          "model": "gemini-4-argon",
+          "request_timeout_seconds": 300
+        },
+        "document": {
+          "request_timeout_seconds": 300
+        },
+        "reviewer": {
+          "request_timeout_seconds": 300
+        },
+        "research": {
+          "request_timeout_seconds": 300
+        },
+        "engineering": {
+          "request_timeout_seconds": 300
+        },
+        "eip": {
+          "request_timeout_seconds": 300
+        }
+      }
+    }
+  }
+}

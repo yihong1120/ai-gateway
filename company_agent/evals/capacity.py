@@ -15,6 +15,8 @@ import tempfile
 import time
 import uuid
 from collections import Counter
+from functools import partial
+from types import SimpleNamespace
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
@@ -24,12 +26,12 @@ from psycopg import sql
 
 from company_agent.api.queue import WorkQueue
 from company_agent.api.service import Service
-from company_agent.tests.postgres_fixture import make_state_directory
-from official_document_workflow.application import automation
-from official_document_workflow.application import background_upload
-from official_document_workflow.infrastructure import concurrency
-from official_document_workflow.infrastructure.storage.automation_store import AutomationStore
-from official_document_workflow.infrastructure.storage.state import State
+from company_agent.evals.sandbox import make_state_directory
+from company_agent.evals.runner import evaluation
+from examples.shared.runtime import concurrency
+from examples.shared.runtime.workers import WorkerHealth
+from examples.official_document_workflow.infrastructure.storage.automation_store import AutomationStore
+from examples.official_document_workflow.infrastructure.storage.state import State, Journal
 
 
 def percentile(values, fraction):
@@ -59,6 +61,7 @@ def render_document():
 
 
 async def profile(limit, model_limit, ocr_limit, users, hold):
+    from examples.official_document_workflow.application import automation, background_upload
     company_dsn = os.environ['COMPANY_AGENT_TEST_DATABASE_URL']
     eip_dsn = os.environ['EIP_TEST_DATABASE_URL']
     company_schema = 'company_agent_test_' + uuid.uuid4().hex
@@ -77,6 +80,7 @@ async def profile(limit, model_limit, ocr_limit, users, hold):
             make_state_directory(state_path)
             queue = WorkQueue(state_path, root/'uploads')
             db = AutomationStore(root/'eip.key')
+            journal = Journal(dsn=eip_dsn, schema=eip_schema)
             state = State()
             state.processing = concurrency.OwnerSlots(limit)
             jobs = []
@@ -161,11 +165,13 @@ async def profile(limit, model_limit, ocr_limit, users, hold):
             with patch.object(concurrency, 'DOCUMENTS', concurrency.OwnerSlots(limit)), \
                 patch.object(concurrency, 'MODELS', model_gate), patch.object(concurrency, 'OCR', ocr_gate), \
                 patch.object(service, 'execute', side_effect=company), \
-                patch.object(background_upload, 'execute', side_effect=document), \
-                patch.object(automation, 'STATE', state), patch.object(automation, 'store', return_value=db), \
-                    patch.object(automation, 'run_account', side_effect=account):
+                patch.object(background_upload, 'execute', side_effect=document):
                 service.task = asyncio.create_task(service.loop())
-                eip_task = asyncio.create_task(automation.scheduler(None))
+                scheduler = automation.AutomaticScheduler(
+                    db, journal, state, WorkerHealth(),
+                    account=SimpleNamespace(run=partial(account, db, journal)),
+                )
+                eip_task = asyncio.create_task(scheduler.run())
                 observer = asyncio.create_task(monitor())
                 try:
                     async with asyncio.timeout(180):
@@ -269,6 +275,7 @@ def backlog(total, per_user):
                 connection.execute(sql.SQL('DROP SCHEMA IF EXISTS {} CASCADE').format(sql.Identifier(schema)))
 
 
+@evaluation
 async def main(args):
     results = {'warning': 'Not a live cloud-model or live EIP throughput measurement.', 'profiles': [], 'backlogs': []}
     for limit, model, ocr in [(4, 8, 2), (8, 16, 2), (12, 24, 3), (16, 32, 4)]:

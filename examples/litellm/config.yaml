@@ -1,83 +1,91 @@
 model_list:
-  # Local Gemma 4 31B served by TabbyAPI/ExLlamaV2.
-  # The upstream model name after "openai/" should match TabbyAPI's /v1/models id.
-  # - model_name: gemma-4-31b
-  #   litellm_params:
-  #     model: openai/gemma-4-31b
-  #     api_base: http://127.0.0.1:5000/v1
-  #     api_key: tabby-local
-  #     extra_headers:
-  #       x-api-key: tabby-local
-  # GCP Agent Platform (Vertex AI). Credential path is relative to the
-  # service working directory (repository root on systemd, /app in Docker).
+  # A's vLLM 0.31 / official Gemma 4 12B QAT, reached from B over Tailscale.
+  # The upstream ID is a compatibility alias retained from ExLlamaV3.
+  # See docs/gemma4-remote-inference.md. Combined context is 262144.
+  - model_name: gemma-4-12b
+    litellm_params:
+      model: openai/gemma-4-12B-it-exl3-4.00bpw_mul1
+      api_base: os.environ/LOCAL_MODEL_API_BASE
+      api_key: os.environ/LOCAL_MODEL_API_KEY
+      timeout: 1800
+      stream_timeout: 1800
+      max_tokens: 4096
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+    model_info:
+      mode: chat
+      max_tokens: 262144
+      max_input_tokens: 258048
+      max_output_tokens: 4096
+      supports_vision: false
+  # GCP Agent Platform (Vertex AI). Deployment identity and the absolute
+  # credential path come from the private service environment.
+  # Generation defaults and capabilities come from the provider/LiteLLM.
+  # Vertex pricing comes from LiteLLM's online model cost map.
+  - model_name: gemini-4-hydrogen
+    litellm_params:
+      model: vertex_ai/gemini-4-hydrogen
+      additional_drop_params: [temperature]
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: os.environ/VERTEX_LOCATION
+      vertex_credentials: os.environ/VERTEX_CREDENTIALS
+  - model_name: gemini-4-carbon
+    litellm_params:
+      model: vertex_ai/gemini-4-carbon
+      additional_drop_params: [temperature]
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: os.environ/VERTEX_LOCATION
+      vertex_credentials: os.environ/VERTEX_CREDENTIALS
+  - model_name: gemini-4-argon
+    litellm_params:
+      model: vertex_ai/gemini-4-argon
+      additional_drop_params: [temperature]
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: os.environ/VERTEX_LOCATION
+      vertex_credentials: os.environ/VERTEX_CREDENTIALS
   - model_name: gemini-3.5-flash-lite
     litellm_params:
       model: vertex_ai/gemini-3.5-flash-lite
-      vertex_project: changdar-ai
-      vertex_location: global
-      vertex_credentials: secrets/changdar-ai-llm-server.json
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: os.environ/VERTEX_LOCATION
+      vertex_credentials: os.environ/VERTEX_CREDENTIALS
   - model_name: gemini-3.8-flash
     litellm_params:
       model: vertex_ai/gemini-3.8-flash
-      vertex_project: changdar-ai
-      vertex_location: global
-      vertex_credentials: secrets/changdar-ai-llm-server.json
-  - model_name: gemini-3.1-pro-preview
-    litellm_params:
-      model: vertex_ai/gemini-3.1-pro-preview
-      vertex_project: changdar-ai
-      vertex_location: global
-      vertex_credentials: secrets/changdar-ai-llm-server.json
-
+      # These Gemini models use a fixed provider temperature. Older clients
+      # (including document processing) may still send temperature=0.
+      additional_drop_params: [temperature]
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: os.environ/VERTEX_LOCATION
+      vertex_credentials: os.environ/VERTEX_CREDENTIALS
   # Claude requests currently return HTTP 429 for the project's global
   # anthropic-claude-sonnet / anthropic-claude-opus request quotas (2026-09-21).
   # These routes require available quota before they can serve conversations.
   - model_name: claude-sonnet-5
     litellm_params:
       model: vertex_ai/claude-sonnet-5
-      vertex_project: changdar-ai
-      vertex_location: global
-      vertex_credentials: secrets/changdar-ai-llm-server.json
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: os.environ/VERTEX_LOCATION
+      vertex_credentials: os.environ/VERTEX_CREDENTIALS
   - model_name: claude-opus-5
     litellm_params:
       model: vertex_ai/claude-opus-5
-      vertex_project: changdar-ai
-      vertex_location: global
-      vertex_credentials: secrets/changdar-ai-llm-server.json
-
-  # - model_name: qwen3.5-27b
-  #   litellm_params:
-  #     model: openai/Qwen3.5-27B-exl3-3.0bpw
-  #     api_base: http://127.0.0.1:5001/v1
-  #     api_key: tabby-local
-
-  # Local Qwen/Tabby and Ollama models are intentionally disabled while the
-  # RTX 4090 is dedicated to PaddleOCR-VL. Their container/configuration stay
-  # in place for a future manual rollback; Open WebUI should use cloud models
-  # below through LiteLLM in the meantime.
-  # - model_name: qwen3.5-35b-a3b
-  #   litellm_params:
-  #     model: openai/Qwen3.5-35B-A3B-exl3-4.09bpw
-  #     api_base: http://127.0.0.1:5001/v1
-  #     api_key: tabby-local
-  # - model_name: gpt-oss-20b
-  #   litellm_params:
-  #     model: ollama_chat/gpt-oss:20b
-  #     api_base: http://127.0.0.1:11434
-  #   model_info:
-  #     mode: chat
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: os.environ/VERTEX_LOCATION
+      vertex_credentials: os.environ/VERTEX_CREDENTIALS
 
   # Azure AI Foundry deployments.  The resource base URL deliberately omits
   # /openai/v1: LiteLLM adds that path for the Azure v1 API.  The static
-  # deployment key is kept only in .env.litellm (never in this file).
+  # deployment key belongs to the central litellm section, never this YAML.
+  # Keep explicit rates: native 1.109.1 proxy spend logs recorded zero for an
+  # Azure Kimi request without them, despite a valid base_model SDK calculation.
   - model_name: Kimi-K2.5
     litellm_params:
       model: azure/Kimi-K2.5
-      api_base: https://changdar-ai-dev-3-resource.services.ai.azure.com
+      api_base: os.environ/AZURE_AI_API_BASE
       api_version: "v1"
       azure_scope: https://ai.azure.com/.default
       api_key: os.environ/AZURE_AI_API_KEY
-      # Required: LiteLLM 1.102.0 Azure routing records zero cost without these rates.
       input_cost_per_token: 0.0000006
       output_cost_per_token: 0.000003
       cache_read_input_token_cost: 0.0000001
@@ -87,11 +95,10 @@ model_list:
   - model_name: Kimi-K2.6
     litellm_params:
       model: azure/Kimi-K2.6
-      api_base: https://changdar-ai-dev-3-resource.services.ai.azure.com
+      api_base: os.environ/AZURE_AI_API_BASE
       api_version: "v1"
       azure_scope: https://ai.azure.com/.default
       api_key: os.environ/AZURE_AI_API_KEY
-      # Required: LiteLLM 1.102.0 Azure routing records zero cost without these rates.
       input_cost_per_token: 0.00000095
       output_cost_per_token: 0.000004
       cache_read_input_token_cost: 0.00000016
@@ -103,11 +110,10 @@ model_list:
   - model_name: grok-4.6
     litellm_params:
       model: azure/grok-4.6
-      api_base: https://changdar-ai-dev-3-resource.services.ai.azure.com
+      api_base: os.environ/AZURE_AI_API_BASE
       api_version: "v1"
       azure_scope: https://ai.azure.com/.default
       api_key: os.environ/AZURE_AI_API_KEY
-      # Required: LiteLLM 1.102.0 Azure routing records zero cost without these rates.
       input_cost_per_token: 0.000002
       output_cost_per_token: 0.000006
       cache_read_input_token_cost: 0.0000005
@@ -119,11 +125,10 @@ model_list:
   - model_name: DeepSeek-V4-Flash
     litellm_params:
       model: azure/DeepSeek-V4-Flash
-      api_base: https://changdar-ai-dev-3-resource.services.ai.azure.com
+      api_base: os.environ/AZURE_AI_API_BASE
       api_version: "v1"
       azure_scope: https://ai.azure.com/.default
       api_key: os.environ/AZURE_AI_API_KEY
-      # Required: LiteLLM 1.102.0 Azure routing records zero cost without these rates.
       input_cost_per_token: 0.00000019
       output_cost_per_token: 0.00000051
       cache_read_input_token_cost: 0.000000028
@@ -133,11 +138,10 @@ model_list:
   - model_name: DeepSeek-V4-Pro
     litellm_params:
       model: azure/DeepSeek-V4-Pro
-      api_base: https://changdar-ai-dev-3-resource.services.ai.azure.com
+      api_base: os.environ/AZURE_AI_API_BASE
       api_version: "v1"
       azure_scope: https://ai.azure.com/.default
       api_key: os.environ/AZURE_AI_API_KEY
-      # Required: LiteLLM 1.102.0 Azure routing records zero cost without these rates.
       input_cost_per_token: 0.00000174
       output_cost_per_token: 0.00000348
       cache_read_input_token_cost: 0.000000145
@@ -167,32 +171,10 @@ router_settings:
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   database_url: os.environ/LITELLM_DATABASE_URL
+  global_max_parallel_requests: 500
 
 litellm_settings:
   timezone: Asia/Taipei
   max_end_user_budget_id: openwebui-daily-usd-4
-
-# # MCP (Model Context Protocol) Servers Configuration
-# mcp_servers:
-#   # Word MCP Server - 提供文檔操作工具（86 個工具）
-#   word_mcp:
-#     url: http://192.168.50.242:9000/mcp
-#     transport: http
-#     description: "Word 文檔操作 MCP Server"
-#     # 可選：指定允許的工具（省略則允許所有）
-#     # allowed_tools:
-#     #   - read_document
-#     #   - write_document
-#     #   - create_document
-
-#     # 可選：MCP 服務器的額外信息
-#     mcp_info:
-#       # 工具成本配置（可選）
-#       mcp_server_cost_info:
-#         default_cost_per_query: 0.001
-#         tool_name_to_cost_per_query:
-#           read_document: 0.002
-#           write_document: 0.003
-
-# general_settings:
-#   master_key: null
+  default_key_generate_params:
+    max_parallel_requests: 20

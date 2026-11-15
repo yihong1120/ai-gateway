@@ -12,10 +12,10 @@ from langchain_core.messages import AIMessage
 from company_agent.config import Root
 from company_agent.config import Settings
 from company_agent.runtime.execution import DocumentAgent
-from company_agent.runtime.models import close_model
+from company_agent.evals.runner import evaluation, own_model
 from company_agent.runtime.models import GatewayModel
 from company_agent.services.office.documents import extract
-from company_agent.tests.postgres_fixture import make_state_directory
+from company_agent.evals.sandbox import make_state_directory
 
 
 class DemoInvocation:
@@ -103,6 +103,7 @@ class DemoModel:
         )
 
 
+@evaluation
 async def run(output: Path, live=False):
     # Refuse to reuse/overwrite an existing test directory or its results.
     output.mkdir(parents=True, exist_ok=False)
@@ -130,18 +131,16 @@ async def run(output: Path, live=False):
         if live
         else DemoModel()
     )
+    if live:
+        own_model(model)
     agent = DocumentAgent(settings, model)
 
-    try:
-        result = await agent.run(
-            'demo-user',
-            '找 demo 裡的 sample 文件並閱讀，依照內容產生 Word 工程週報及兩頁 PPTX。'
-            '只建立草稿，不申請存回資料夾；沒有日期就不建立行事曆。',
-            progress,
-        )
-    finally:
-        if live:
-            await close_model(model)
+    result = await agent.run(
+        'demo-user',
+        '找 demo 裡的 sample 文件並閱讀，依照內容產生 Word 工程週報及兩頁 PPTX。'
+        '只建立草稿，不申請存回資料夾；沒有日期就不建立行事曆。',
+        progress,
+    )
     verified = []
     for artifact in result['files']:
         name, sha, data = agent.store.read_artifact('demo-user', artifact['id'])

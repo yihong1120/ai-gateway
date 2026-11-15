@@ -1,0 +1,89 @@
+{
+  "state_dir": "/srv/company-agent-private",
+  "model_name": "gemini-3.5-flash-lite",
+  "require_user_billing": true,
+  "structured_completion": true,
+  "require_artifact_review": true,
+  "compact_prompts": true,
+  "role_models": {
+    "coordinator": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096
+    },
+    "knowledge": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096
+    },
+    "document": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096
+    },
+    "data": {
+      "model": "gemini-4-argon",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096,
+      "request_timeout_seconds": 150
+    },
+    "reviewer": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096
+    },
+    "research": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096
+    },
+    "engineering": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096
+    },
+    "eip": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096
+    }
+  },
+  "purpose_models": {
+    "summary": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "minimal",
+      "max_tokens": 2048
+    }
+  },
+  "roots": [],
+  "model_profiles": {
+    "lite": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096,
+      "supports_images": true,
+      "description": "預設優先使用的小型 Gemini 模型，處理一般文字、圖片與附件；資訊不足時說明缺漏，不自行推測。"
+    },
+    "flash": {
+      "model": "gemini-3.8-flash",
+      "reasoning_effort": "low",
+      "max_tokens": 4096,
+      "supports_images": true,
+      "description": "較複雜的圖文、附件關聯或跨來源分析，確有必要時選用；一般整理優先 lite。"
+    },
+    "pro": {
+      "model": "gemini-4-argon",
+      "reasoning_effort": "high",
+      "max_tokens": 8192,
+      "supports_images": true,
+      "description": "僅限需要深入推理的困難圖文或來源矛盾分析；一般工作優先 lite，不作預設。"
+    }
+  },
+  "max_concurrent_jobs": 8,
+  "max_pending_jobs": 1000,
+  "max_pending_per_user": 20,
+  "orchestration_mode": "hybrid",
+  "office_execution_mode": "specialist",
+  "model_timeout_seconds": 60,
+  "require_delivery_plan": true
+}

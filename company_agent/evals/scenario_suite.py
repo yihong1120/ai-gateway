@@ -32,7 +32,7 @@ from company_agent.evals.hard_cases import HARD_SCENARIOS
 from company_agent.evals.hard_cases import prepare_hard
 from company_agent.evals.hard_cases import PRIVATE_SENTINEL
 from company_agent.runtime.execution import DocumentAgent
-from company_agent.runtime.models import close_model
+from company_agent.evals.runner import evaluation, own_sandbox, own_model, release_model, track_report, write_json
 from company_agent.runtime.models import UserBilledModel
 from company_agent.services.office.documents import create_slides
 from company_agent.services.office.documents import create_spreadsheet
@@ -94,7 +94,7 @@ class BilledMeter(UserBilledModel):
 
 
 def prepare(folder, task):
-    from company_agent.tests.test_bridges import workbook
+    from company_agent.evals.fixtures import workbook
     folder.mkdir(mode=0o700)
     text = '合成測試工程：本週完成基礎施工，下週安排鋼筋檢查。沒有確切期限。'
     if task == 'untrusted_document':
@@ -228,16 +228,17 @@ def model_rates(entries):
     return rates
 
 
+@evaluation
 async def run(owner, output, tasks, limit, interval_seconds=0):
-    from company_agent.api.service import service, ServiceConfiguration
-    from company_agent.runtime.context import verified_user
-    from company_agent.tests.postgres_fixture import PostgreSQLTestCase, make_state_directory
-    model = service().model_factory(await verified_user(owner))
+    from company_agent.api.service import ServiceConfiguration
+    from examples.identity.adapters.webui import verified_user
+    from company_agent.evals.sandbox import make_state_directory
+    model = own_model(ServiceConfiguration.model(await verified_user(owner)))
     name = model.client.model_name
-    entries = yaml.safe_load(Path('config.yaml').read_text())['model_list']
+    entries = yaml.safe_load(Path('examples/litellm/config.yaml').read_text())['model_list']
     catalog = model_rates(entries)
     if name not in catalog:
-        await close_model(model)
+        await release_model(model)
         raise ValueError('測試模型未配置費率，未呼叫模型。')
     rates = catalog[name]
     production = ServiceConfiguration.configured_settings()
@@ -249,9 +250,7 @@ async def run(owner, output, tasks, limit, interval_seconds=0):
     ) if production else {}
     output = Path(output).resolve()
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
-    os.environ['COMPANY_AGENT_TEST_DATABASE_URL'] = os.environ['COMPANY_AGENT_DATABASE_URL']
-    fixture = PostgreSQLTestCase()
-    fixture.setUp()
+    own_sandbox(os.environ['COMPANY_AGENT_DATABASE_URL'])
     budget = Budget(limit)
     state = output/'state'
     make_state_directory(state)
@@ -264,6 +263,7 @@ async def run(owner, output, tasks, limit, interval_seconds=0):
         'configured_rates_per_token': catalog, 'per_case_timeout_seconds': 300,
         'cost_notice': 'Configured gateway rate estimates, not provider invoice; failures retain a conservative reserve.',
     }
+    track_report(output / 'report.json', report)
     try:
         for index, task in enumerate(tasks):
             if index and interval_seconds:
@@ -363,7 +363,7 @@ async def run(owner, output, tasks, limit, interval_seconds=0):
                     'task': pending, 'status': 'not_run', 'passed': False,
                     'reason': '先前請求遇到額度／權限／速率限制，未繼續呼叫模型。',
                 } for pending in tasks[index+1:])
-            (output/'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+            write_json(output/'report.json', report)
             print(
                 json.dumps(
                     {
@@ -376,8 +376,7 @@ async def run(owner, output, tasks, limit, interval_seconds=0):
             if stop:
                 break
     finally:
-        fixture.doCleanups()
-        await close_model(model)
+        await release_model(model)
     print(json.dumps({'report': str(output/'report.json'), 'accounted_usd': budget.charged}), flush=True)
 
 

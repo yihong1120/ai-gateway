@@ -1,0 +1,66 @@
+{
+  "state_dir": "/srv/company-agent-private",
+  "model_name": "gemini-3.5-flash-lite",
+  "require_user_billing": true,
+  "structured_completion": true,
+  "require_artifact_review": true,
+  "require_delivery_plan": true,
+  "compact_prompts": true,
+  "orchestration_mode": "hybrid",
+  "office_execution_mode": "specialist",
+  "enable_spreadsheet_reports": true,
+  "max_steps": 40,
+  "execution_timeout_seconds": 600,
+  "model_timeout_seconds": 300,
+  "role_models": {
+    "coordinator": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096,
+      "request_timeout_seconds": 300
+    },
+    "knowledge": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096,
+      "request_timeout_seconds": 300
+    },
+    "data": {
+      "model": "gemini-3.8-flash",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096,
+      "request_timeout_seconds": 300
+    },
+    "document": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096,
+      "request_timeout_seconds": 300
+    },
+    "reviewer": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096,
+      "request_timeout_seconds": 300
+    },
+    "research": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096,
+      "request_timeout_seconds": 300
+    },
+    "engineering": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096,
+      "request_timeout_seconds": 300
+    },
+    "eip": {
+      "model": "gemini-3.5-flash-lite",
+      "reasoning_effort": "medium",
+      "max_tokens": 4096,
+      "request_timeout_seconds": 300
+    }
+  },
+  "roots": []
+}

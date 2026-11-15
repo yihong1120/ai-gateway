@@ -78,11 +78,11 @@
       "description": "較強的 Gemini 文字與視覺模型，適合複雜判讀。每百萬 tokens 基本輸入 $0.75、輸出 $3.75。近期測試曾遇到 429，非必要不作常規首選，失敗不自動重試。"
     },
     "pro": {
-      "model": "gemini-3.1-pro-preview",
+      "model": "gemini-4-argon",
       "reasoning_effort": "high",
       "max_tokens": 8192,
       "supports_images": true,
-      "description": "昂貴的深度推理模型，只在必要的困難推理、來源矛盾或複雜圖文交叉判讀考慮。200K 以內輸入每百萬 tokens 基本 $2、輸出 $12。簡單任務避免使用。"
+      "description": "Gemini 4 Argon 深度推理模型，供困難推理、來源矛盾或複雜圖文交叉判讀使用；一般工作優先 lite，不作預設。"
     }
   }
 }

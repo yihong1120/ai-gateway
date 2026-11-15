@@ -5,6 +5,8 @@
 
 | 模組 | 用途與成本 |
 | --- | --- |
+| comparison | 24題、4組的公司助理／單一Argon比較；預設只匯出離線題庫，需 --live、明確dev帳號與整批預算才付費實測 |
+| data_replacement | 固定來源、工具與其他角色，只替換 data 模型的配對評測；預設離線匯出 |
 | scenario_suite | 本人計費的多情境評測；沿用正式角色／輔助模型設定，需明確 --live、--owner 及預算 |
 | hard_cases | 困難問題、合成來源及獨立驗證；由 scenario_suite 呼叫 |
 | benchmark | 模型比較、成本計量與驗證共用函式；仍被情境測試引用 |
@@ -17,30 +19,76 @@
 不要用「執行所有模組」作為一般測試命令；smoke_research 直接執行即會連外。
 一般自動化回歸請使用公司助理 README 中的 unittest 命令。
 
-這些評測仍需工作區中的 config.yaml 及正確服務環境；套件安裝不會自動配置金鑰或模型。
+`benchmark`、`comparison`、`data_replacement`、`scenario_suite`、`smoke`、`smoke_vision` 與 `capacity` 共用 `runner`：
+每次執行持有一個 PostgreSQL pool scope，集中關閉模型及清理隔離 schema；設定、報告
+寫入或取消失敗時也會執行清理。各工具仍保留既有案例、評分與 live 授權條件。
+預算在發送前預留，無法確認成本的失敗請求保留預留額；已知實際成本再結算。
+JSON 報告以同目錄暫存檔原子替換，追蹤中的主報告包含 `execution` 完成／錯誤／取消狀態。
+清理失敗不會遮蔽原始執行錯誤。
+
+`sandbox.py` 提供隔離 schema、狀態金鑰與 checkpoint；`fixtures.py` 提供共用合成工作簿。
+評測不再匯入 `company_agent.tests`，正式 wheel 不包含測試程式；測試留在 repo 執行。
+
+這些評測仍需工作區中的 examples/litellm/config.yaml 及正確服務環境；套件安裝不會自動配置金鑰或模型。
 歷史測試結果不代表目前所有模型均已重新驗收。
 
-容量測試需設定 `COMPANY_AGENT_TEST_DATABASE_URL` 與 `EIP_TEST_DATABASE_URL`，
-可執行 `python -m company_agent.evals.capacity --users 50 --output /tmp/capacity.json`。
-涵蓋 4／8／12／16 件並行、500／1000／2000 件待處理，以及同一帳號順序、
-重複訊息、滿額拒絕與取消釋放。報告包含吞吐量、P95 提交／等待／處理時間、
-事件迴圈延遲及資源峰值；記憶體為同一測試程序的累計峰值。
-替身模型延遲僅能驗證本機排程，不代表雲端供應商的速率額度或真實公文速度。
+## 模型比較
 
-2026-10-04 的 50 人測試與 100 人突發測試數據在 [capacity_results.json](capacity_results.json)。
-50 人、150 件合成工作的 4／8／12／16 並行耗時分別為 17.42／11.22／9.68／9.36 秒；
-GPU OCR 的單頁合成掃描文件，2／3／4 並行分別約 19.88／18.70／17.69 頁／分鐘。
-可先試行公司助理、公文及 EIP 各 8 件、模型 16、OCR 2、待處理 1000、每人 20；
-模型 16 僅完成排程驗證，雲端限流仍須觀察。此次沒有修改正式容量設定。
+先匯出離線案例與 manifest，核對案例、來源與模型設定：
 
-`scenario_suite` 涵蓋多格式文件產製、原檔及草稿局部修訂、Excel 統計與格式保留、
-來源衝突、公式／文字／空白排除、跨角色交付、同文不同段落精確修改、權限拒絕、
-文件偽造指令與行程缺漏。另有 `engineering_dxf` 合成 CAD 結構讀取，以及
-`public_research` 公開工程資訊查詢；後者會使用本人 Tavily 搜尋權限與額度。
-除明確的公開查詢外只用合成檔案，不連 NAS 或 EIP，不送出外部寫入。
+```bash
+python -m company_agent.evals.comparison --output artifacts/evals/comparison-manifest.json
+python -m company_agent.evals.data_replacement --output artifacts/evals/data-replacement-pack
+```
 
-每題最多 40 次模型呼叫、300 秒，使用隨機 PostgreSQL schema；模型路由與費用計數
-共用同一份整批預算，輔助圖片分析與摘要亦計入。模型費率優先使用 config.yaml 明確配置，
-其次使用已安裝 LiteLLM 費率表，缺費率不發送請求。報告列出各題問題、獨立檢查、
-角色、耗時、模型呼叫、來源與下載成果；費用為閘道資料／估算，失敗請求保留預算。
-遇到速率、權限或預算限制停止後續題目，不以自動重送掩蓋失敗。
+`comparison` 支援公司助理與單一模型配對；檔案題不混入無工具聊天組的分母。
+優化路由可選 `company_hybrid_lite`、`company_mixed`、`company_hybrid_data_argon`、
+`company_chat_lite` 與 `company_chat_argon`；專責 Office 分工可選
+`company_specialist_lite` 與 `company_specialist_data_argon`。
+角色政策與交付契約見[工作流程設計](../../docs/company-agent-optimization-design-2026-10-17.md)。
+
+真正模型評測需要 `--live --owner 使用者 --billing-key-file /private/dev-key.json --budget-usd 額度`。
+金鑰須為正常計費、具模型白名單的一般 dev 金鑰；`--budget-usd` 不會提高 gateway 額度，
+測試結束需核對帳務並撤銷臨時金鑰。不同版本、來源與批次分開記錄。
+
+## data 角色的模型替換評測
+
+`data_replacement` 包含 22 題直接 data 工作與 4 題完整工作流程。
+缺資料與工具限制對照和正向工作分開計算，預設每題兩輪，共 104 件配對工作。
+兩組只替換 data 模型，其餘七角色、來源位元組、工具、推理等級、輸出額度與時限固定。
+
+可使用 `--cases D02 D14 D17 W01 --repeats 1` 先試跑。
+role 配對最多兩組並行，workflow 序列執行，費用分工作追蹤。
+`--source-report` 可明確指定私人目錄中的前批報告，沿用原來源並驗證 SHA；
+不會從 repo 自動尋找舊實驗資料。`--model-lock-dir` 提供跨程序的同模型執行限制，
+各程序仍須使用不同的 PostgreSQL schema。
+
+數值、工具成功憑據、來源 SHA、原簿封裝及公式重算由模型看不到的獨立 oracle 驗收。
+不同資料型別、格式或標籤不符仍算失敗；失敗後的補測另存，不能覆蓋原始結果。
+模型替換須先通過品質與操作邊界驗收，再比較每成功件的費用與交付時間。
+候選結果不會自動更換正式設定。
+
+## 多情境與容量驗證
+
+`scenario_suite` 涵蓋文件產製與局部修訂、Excel 統計、來源衝突、跨角色交付、
+權限拒絕及文件偽造指令。另有合成 CAD 結構讀取；
+`public_research` 會使用本人 Tavily 權限及額度，其餘使用合成檔案，不連 NAS／EIP。
+
+每題呼叫額度、時限與輔助模型費用共同受整批預算限制。費率優先使用
+`examples/litellm/config.yaml`，其次為已安裝 LiteLLM 費率表；缺費率不發送請求。
+報告保留問題、獨立檢查、角色、耗時、呼叫、來源及成果，未知成本保留預留額。
+
+容量驗證需設定 `COMPANY_AGENT_TEST_DATABASE_URL` 與 `EIP_TEST_DATABASE_URL`：
+
+```bash
+python -m company_agent.evals.capacity --users 50 --output artifacts/evals/capacity.json
+```
+
+此工具量測本機排程、等待、取消釋放與待處理容量；模型及 OCR 延遲使用替身。
+本機吞吐量不代表雲端供應商限流，也不會修改正式並行設定。
+
+## 輸出保存
+
+逐輪 JSON／CSV、盲評包、來源包與預覽放在已忽略的 `artifacts/` 或 repo 外的私人目錄，
+不放入 `docs/`。舊模型比較及容量實驗已移出 repo；重跑時以目前程式、來源及設定重新驗收。
+`docs/` 保留現行設計、操作與 API 契約。

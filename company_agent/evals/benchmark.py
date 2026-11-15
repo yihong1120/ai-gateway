@@ -14,36 +14,21 @@ import time
 from pathlib import Path
 
 import yaml
-from dotenv import dotenv_values
+from examples.shared.config import read_service, config_path
 from langchain_core.messages import messages_to_dict
 
 from company_agent.agents.registry import ROLE_TOOLS
 from company_agent.config import Root
 from company_agent.config import Settings
 from company_agent.runtime.execution import DocumentAgent
-from company_agent.runtime.models import close_model
+from company_agent.evals.runner import Budget, evaluation, own_model, release_model, track_report, write_json
 from company_agent.services.office.documents import create_slides
 from company_agent.services.office.documents import create_spreadsheet
 from company_agent.services.office.documents import create_word
 from company_agent.services.office.documents import extract
 from company_agent.services.office.documents import read_spreadsheet
 from company_agent.state import GRAPH_VERSION
-from company_agent.tests.postgres_fixture import make_state_directory
-
-
-class Budget:
-    def __init__(self, limit):
-        self.limit, self.charged = limit, 0.0
-        self.exhausted = False
-
-    def reserve(self, amount):
-        if self.charged + amount > self.limit:
-            self.exhausted = True
-            raise ValueError('測試費用預算不足以安全發出下一次請求；已停止。')
-        self.charged += amount
-
-    def settle(self, reserved, cost):
-        self.charged += cost - reserved
+from company_agent.evals.sandbox import make_state_directory
 
 
 class AnalysisInvocation:
@@ -71,12 +56,16 @@ class MeteredInvocation:
         row = {'role': role, 'requested_model': outer.name, 'input_serialized_bytes': size}
         try:
             message = await bound.ainvoke(messages)
-        except Exception as exc:
+        except (Exception, asyncio.CancelledError) as exc:
+            diagnostic = str(exc).lower()
             row.update(
                 status='failed',
                 error_type=type(exc).__name__,
                 seconds=round(time.monotonic() - start, 3),
                 reserved_unknown_usd=reserve,
+                provider_status=getattr(exc, 'status_code', None),
+                error_flags=[flag for flag in ('resource_exhausted', 'quota', 'max_parallel', 'budget', 'cooldown')
+                             if flag in diagnostic],
             )
             outer.calls.append(row)
             # Preserve SDK type so execution can save its normal safe failure
@@ -157,7 +146,7 @@ class MeteredModel:
     def bind_tools(self, tools, **kwargs):
         bound = self.model.bind_tools(tools, **kwargs)
         names = {t.name for t in tools}
-        role = next(
+        role = 'coordinator' if names == {'complete_job'} or any(name.startswith('delegate_') for name in names) else next(
             role
             for role, allowed in ROLE_TOOLS.items()
             if allowed == names - {'complete_job', 'complete_assignment'}
@@ -300,6 +289,7 @@ def verify(agent, result, task, owner='benchmark'):
     return checks
 
 
+@evaluation
 async def run(args):
     if not args.live or not args.ack_use_webui_key:
         raise ValueError(
@@ -311,12 +301,12 @@ async def run(args):
         raise ValueError(
             '舊版比較工具須指定 --owner 及隔離測試 schema；一般情境請用 company_agent.evals.scenario_suite。',
         )
-    from company_agent.runtime.context import verified_user
+    from examples.identity.adapters.webui import verified_user
     from company_agent.runtime.models import gateway_for_verified_user
     from company_agent.evals.scenario_suite import BilledMeter
 
     user = await verified_user(args.owner)
-    env = dotenv_values(args.env_file)
+    env = read_service('webui', config_path(args.config))
     bases = env.get('OPENAI_API_BASE_URLS', '').split(';')
     keys = env.get('OPENAI_API_KEYS', '').split(';')
     if (
@@ -325,7 +315,7 @@ async def run(args):
         or not bases[0].startswith(('http://127.0.0.1:', 'http://localhost:'))
     ):
         raise ValueError('測試只允許單一本機 LiteLLM 端點，未自動選擇其他端點。')
-    configured = yaml.safe_load(Path('config.yaml').read_text())
+    configured = yaml.safe_load(Path('examples/litellm/config.yaml').read_text())
     rates = {}
     for item in configured['model_list']:
         p = item['litellm_params']
@@ -356,6 +346,7 @@ async def run(args):
         'runs': [],
         'pricing_notice': '閘道費率估算，不是 Azure 最終帳單；未知失敗請求保留預算。',
     }
+    track_report(output / 'report.json', report)
     for name in args.models:
         for task in args.tasks:
             instruction = TASKS[task]
@@ -405,7 +396,7 @@ async def run(args):
                     ),
                 ],
             )
-            gateway = gateway_for_verified_user(user, bases[0], keys[0], name)
+            gateway = own_model(gateway_for_verified_user(user, bases[0], keys[0], name))
             gateway.client.include_response_headers = True
             meter = BilledMeter(gateway, name, rates[name], budget)
             agent = DocumentAgent(settings, meter)
@@ -426,7 +417,7 @@ async def run(args):
                         output_file.write(data)
                     item['download_path'] = str(target)
             finally:
-                await close_model(gateway)
+                await release_model(gateway)
             row = {
                 'model': name,
                 'task': task,
@@ -448,9 +439,7 @@ async def run(args):
             }
             report['runs'].append(row)
             report['budget_accounted_usd'] = budget.charged
-            (output / 'report.json').write_text(
-                json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8',
-            )
+            write_json(output / 'report.json', report)
             print(
                 json.dumps(
                     {
@@ -476,7 +465,7 @@ def main():
     parser.add_argument(
         '--owner', required=True, help='Server-verified WebUI user UUID for personal billing',
     )
-    parser.add_argument('--env-file', default='.env.openwebui')
+    parser.add_argument('--config', type=Path)
     parser.add_argument(
         '--models', nargs='+', default=['DeepSeek-V4-Flash', 'Kimi-K2.5', 'grok-4.6'],
     )

@@ -1,0 +1,5 @@
+# Dev policy overrides; production reads config.yaml directly.
+general_settings:
+  global_max_parallel_requests: 2
+litellm_settings:
+  max_end_user_budget_id: openwebui-dev-daily-usd-1
