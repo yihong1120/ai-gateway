@@ -1,38 +1,129 @@
-# Local environment files; keep distributable templates.
+# Private configuration at any depth; keep config.example.toml and model presets.
+config.local.*
+config.*.local.*
+*.local.yaml
+*.local.yml
+*.private.json
+
+# Runtime dotenv files are local/generated; config.example.toml is the public template.
 .env
 .env.*
-!.env.example
-!.env.*.example
+*.env
+*.env.*
 
 # Local credentials, overrides, and runtime state.
-/secrets/
+secrets/
+/private/
+/backups/
 .webui_secret_key
-config.local.json
-checkpoint.key
-nas.key
-eip-automation.key
+*.key
+*-key.pem
+*-private.pem
+*.private.pem
+*.p12
+*.pfx
+id_rsa
+id_ed25519
 run-*.lock
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
 *.sqlite3
 *.sqlite3-*
 /.history
 
 # Python environments, bytecode, and build outputs.
-.venv/
+.venv*/
+venv/
 __pycache__/
 *.py[cod]
 *.egg-info/
-/build/
-/dist/
+build/
+dist/
+*.whl
 
 # Development tool caches.
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+.ipynb_checkpoints/
+node_modules/
+/.cache/
+
+# Coverage reports and local editor/OS files.
+.coverage
+.coverage.*
+coverage.xml
+/coverage/
+/htmlcov/
+/logs/
+*.log
+*.log.*
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+*~
+*.swp
+*.swo
 
 # Local test inputs and generated evaluation outputs.
 /example_files/
 /test_outputs/
+/artifacts/
+/reports/
+/tmp/
+/temp/
+
+# Local document sample and generated handoff/evaluation bundles.
+# Keep source documentation, API contracts, human review data, and archive metadata.
+# Local browser captures include device-binding URLs and desktop context.
+/docs/changdar-ai-codex-default-model-20261024/
+/docs/20261022141617379.pdf
+/docs/company-ai-access-handoff.zip
+/docs/*-blind-review.zip
+/docs/company-data-model-*/
+/docs/company-data-*-previews-*/
+/docs/company-vs-argon-*-assets/
+/docs/company-vs-argon-test-inputs-*.zip
+/docs/company-vs-argon-test-catalog-*.csv
+/docs/company-vs-argon-test-catalog-*.xlsx
+
+# Generated, dated operational/evaluation reports; keep Markdown and API contracts.
+/docs/*-20??-??-??.json
+/docs/*-results.json
+/docs/*-validation.json
+/docs/company-agent-data-flash-*-results-20??-??-??.csv
+/docs/*-20??????/*.json
+
+# Retired experiment reports and generated data; new runs belong in artifacts/.
+/docs/company-agent-data-flash-*
+/docs/company-agent-vs-argon-*
+/docs/company-agent-optimization-validation-*
+/docs/company-agent-reliability-optimization-results-*
+/docs/ocr-*-comparison-*
+/docs/gemma4-capacity*
+/company_agent/evals/capacity_results.json
+
+# Generated from examples/bff/proxy.py by python -m examples.bff.deployment.
+/examples/company_ai_access/deployment/production/bff-artifact.json
 
 # .NET CAD worker build outputs.
 /company_agent/services/cad/worker/bin/
 /company_agent/services/cad/worker/obj/
+
+# Complete identity/BFF deployment bundle.
+/examples/company_ai_access/deployment/production/identity-services.zip
+
+# Local historical snapshots and release binaries; keep integrity.json and README.
+/examples/deployment/archive/dev/
+/examples/deployment/archive/releases/

@@ -1,203 +1,56 @@
-# AI Gateway (LiteLLM Proxy)
+# AI Gateway
 
-This repository provides a unified LLM gateway service that:
-1. Centrally manages models (Google, OpenAI, Ollama)
-2. Exposes an OpenAI-compatible API (`http://localhost:4000/v1`)
-3. **Integrates MCP (Model Context Protocol) Tools** for specialized capabilities
+LiteLLM 模型代理、Open WebUI 整合、公司助理及公文工作流。
+服務與工具依產品放在 [examples](examples/README.md)；公司助理核心位於 `company_agent/`，
+公司共用 NAS／EIP MCP獨立服務位於 `company_mcp/`。
 
-## Features
+## 安裝與啟動
 
-- 🚀 **Unified Model API**: Single endpoint for multiple LLM providers
-- 🔧 **MCP Tools Support**: Integrate external tools via Model Context Protocol
-- 🌐 **OpenAI Compatible**: Works with OpenAI SDK and clients
-- 🐳 **Docker Ready**: Easy deployment with docker-compose
-- 🔒 **Flexible Auth**: Optional authentication for local development
+所有 Python 依賴統一在根目錄 `pyproject.toml` 宣告、`uv.lock` 鎖定。
+依服務選擇安裝組合；開發、測試及發布步驟見 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-Local development mode: no JWT and no enforced authorisation. You only need to specify `model` in your request.
-
-## Quick start
-
-This directory includes a local environment file: `.env` (replace any `REPLACE_ME` values with your own).
-
-1. Copy the environment template:
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Edit `.env` and fill in your API keys:
-   ```ini
-   GOOGLE_API_KEY=yourGoogleKey
-   ```
-
-3. Start the service (choose one of the following):
-
-    - Option A: Docker
-       ```bash
-       docker-compose up -d
-       ```
-
-    - Option B: Run locally (FastAPI/Uvicorn, no Docker required)
-       ```bash
-       # Install dependencies (uv recommended)
-       uv sync
-
-       # If you do not have uv installed, you can use pip instead:
-       # pip install -r requirements.txt
-
-       # Load local environment variables (.env) and start the LiteLLM Proxy
-       set -a
-       source ./.env
-       set +a
-
-       uv run litellm --config ./config.yaml --port 4000 --detailed_debug
-       ```
-
-4. Test connectivity:
-   ```bash
-    # Works without a token
-    curl http://localhost:4000/v1/models
-
-    # Call with a specified model
-    curl http://localhost:4000/v1/chat/completions \
-       -H 'Content-Type: application/json' \
-       -d '{"model":"gemini-2.5-flash-lite","messages":[{"role":"user","content":"ping"}],"max_tokens":8}'
-
-    # Ollama / gpt-oss-20b notes:
-    # The gpt-oss family may output "thinking" first, then the final answer.
-    # If max_tokens is too low, a common result is an empty message.content.
-    # Fix: increase max_tokens, or set reasoning_effort=low when you need short outputs.
-    curl http://localhost:4000/v1/chat/completions \
-       -H 'Content-Type: application/json' \
-       -d '{"model":"gpt-oss-20b","messages":[{"role":"user","content":"Reply with exactly: OK"}],"reasoning_effort":"low","max_tokens":16,"temperature":0}'
-
-    # Embeddings (e.g. Ollama's bge-m3)
-    curl http://localhost:4000/v1/embeddings \
-       -H 'Content-Type: application/json' \
-       -d '{"model":"bge-m3","input":["hello","world"]}'
-   ```
-
-## Local Gemma 4 31B via TabbyAPI / ExLlamaV2
-
-`config.yaml` includes a `gemma-4-31b` route that forwards LiteLLM requests to a local TabbyAPI server:
-
-```yaml
-model: openai/gemma-4-31b
-api_base: http://127.0.0.1:5000/v1
-```
-
-Before using it, start TabbyAPI with a Gemma 4 31B EXL2 model loaded. The upstream model id in `config.yaml` (`gemma-4-31b`) should match the id returned by TabbyAPI's OpenAI-compatible models endpoint:
+安裝 uv 後，從 repo 根目錄建立並啟用開發環境（以下使用 Linux bash／zsh）。
+再從範本建立私人設定，填入實際憑證、端點及資料庫設定；已有設定時保留原檔：
 
 ```bash
-curl http://127.0.0.1:5000/v1/models
+uv sync --frozen --all-extras
+source .venv/bin/activate
+cp -n config.example.toml config.local.toml
+chmod 600 config.local.toml
+# 填入各服務的實際設定後：
+ai-gateway check
+ai-gateway compose litellm up -d
 ```
 
-Then restart this gateway and test through LiteLLM:
+單一私人設定為 `config.local.toml`；既有環境的一次性轉存見 [開發指南](CONTRIBUTING.md#環境設定)。
+完整模型設定、原生服務及 dev profile 見 [LiteLLM 文件](examples/litellm/README.md)。
+Open WebUI 連至 `http://127.0.0.1:4000/v1`，使用配置的受限 virtual key。
+私人環境、資料庫、金鑰與預算在開發及正式環境分開管理。
+
+## 功能入口
+
+- [服務總覽與安裝組合](examples/README.md)：identity、BFF、管理、用量與部署註冊。
+- [公司 AI 裝置與 CLI](examples/company_ai_access/README.md)：核准、交付、續期與撤銷。
+- [公司助理](company_agent/README.md)：背景工作、工具及工作台。
+- [公司資源 MCP](docs/company-ai-codex-design.md)：獨立 `company_mcp/`、Codex／Claude原生 OAuth及本人資源；預設停用。
+- [公文工作流](examples/official_document_workflow/README.md)：解析、文件輸出與 EIP。
+- [Open WebUI 組裝](examples/openwebui/README.md)：宿主入口與 Function。
+- [本機推論](examples/litellm/README.md#本機推論)、[OCR 1.6](docs/paddleocr-vl-service.md)：GPU 服務與後端設定。
+- [部署與完整驗證](examples/deployment/README.md)：測試、發布包及隔離資源。
+
+開發環境安裝後，完整離線驗證與 CI 使用相同命令：
 
 ```bash
-curl http://localhost:4000/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"gemma-4-31b","messages":[{"role":"user","content":"Reply with exactly: OK"}],"max_tokens":16,"temperature":0}'
+uv run --frozen --all-extras python -m examples.deployment.tools.validate
 ```
 
-If your TabbyAPI instance uses a different port, model id, or API key, update the `gemma-4-31b` entry in `config.yaml`. Keep the `api_base` value ending in `/v1`.
+模型、費率及政策以 `examples/litellm/config.yaml` 為準。`docs/` 保留設計與操作文件，
+實驗輸出放在已忽略的 `artifacts/`；歷史數據不代表主機目前狀態。舊 TabbyAPI、OCR 1.5／PP-OCR 備援及
+已完成的模型退役工具已移除；目前只維護對應產品目錄中的啟動設定。
 
-## MCP Tools Integration
+## 架構與執行契約
 
-This gateway includes **MCP (Model Context Protocol)** support for accessing external tools:
-
-### Currently Configured MCP Servers
-
-- **Word MCP**: Document manipulation tools at `http://192.168.50.239:9000/mcp`
-  - Create, read, edit Word documents
-  - Automated document generation
-
-### Testing MCP Tools
-
-```bash
-# Test MCP integration
-python test_mcp_tools.py
-
-# Test Open-WebUI integration patterns
-python openwebui_integration_example.py
-```
-
-### Using MCP Tools in Code
-
-```python
-from openai import OpenAI
-
-client = OpenAI(
-    api_key="sk-1234",
-    base_url="http://localhost:4000"
-)
-
-# Define MCP tools
-mcp_tools = [{
-    "type": "mcp",
-    "server_label": "word-mcp",
-    "server_url": "litellm_proxy",
-    "require_approval": "never"
-}]
-
-# Use with chat completions
-response = client.chat.completions.create(
-    model="gemini-2.5-flash",
-    messages=[{"role": "user", "content": "Create a document"}],
-    tools=mcp_tools
-)
-```
-
-See [MCP_INTEGRATION.md](MCP_INTEGRATION.md) for detailed documentation.
-
-## Architecture with Open-WebUI
-
-```
-Open-WebUI (Frontend + File/Web Search)
-    ↓
-LiteLLM Gateway (Model Router + MCP Tools)
-    ↓
-Multiple LLM Providers (Google, OpenAI, Ollama)
-```
-
-**Responsibility Division**:
-- **Open-WebUI**: User interface, file search, web search, RAG
-- **LiteLLM Gateway**: Model management, MCP tools execution
-- Clear separation of concerns, no feature duplication
-
-## Integrating with Open-WebUI
-
-In Open-WebUI settings, configure:
-
-```ini
-OPENAI_API_BASE_URL=http://localhost:4000/v1
-OPENAI_API_KEY=sk-1234  # Any value for local dev
-```
-
-Enable in Open-WebUI:
-- ✅ Web Search (Open-WebUI feature)
-- ✅ Document Search (Open-WebUI feature)
-- ✅ MCP Tools (via LiteLLM Gateway)
-
-
-### 公司助理與公文的多人並行
-
-Open WebUI 維持單一應用程序；公司助理由持有 PostgreSQL lease 的單一排程器管理多件並行工作。請勿單純增加 Uvicorn workers：EIP Session 及處理名額仍屬程序內狀態。
-
-公司助理與公文上傳均採異步提交：聊天立即取得工作編號，執行與瀏覽器連線分離；進度、下載及取消集中於 `/agents`。同一帳號跨公司助理與公文工作依序執行，各類工作有獨立並行名額，避免公文佔滿公司助理名額。公文使用已啟用的處理程式與提交時設定，執行前重驗本人附件與程式版本；版本變更會停止舊工作。已輸出的公文檔案逐筆保留，中斷工作不自動重播。
-
-`COMPANY_AGENT_CONFIG` 的設定：`max_concurrent_jobs` 預設 4（可設 1–32），`max_pending_jobs` 預設 500，`max_pending_per_user` 預設 20。後兩者計算等待及執行中的工作；重送同一請求會連回既有工作。同一使用者跨聊天最多執行一件；有大量待處理工作的帳號不會擋住其他帳號。工作失敗或服務重啟不自動重播外部操作。
-
-2026-10-04 本機正式設定：公司助理、公文上傳與 EIP 各 8 件並行，共用模型 16、OCR 2。公司助理與公文上傳共用的持久化佇列最多 1000 件待處理（含執行中）、每人 20 件。公司設定在 `company_agent/configs/config.production.json`，共用資源設定在使用者 systemd 的 `openwebui.service.d/company-concurrency.conf`。50 人與 100 人的本機測試數據見 `company_agent/evals/capacity_results.json`；模型 16 的雲端供應商限流仍需實際觀察。
-
-公文共用資源可用服務環境變數調整，修改後需重啟服務：
-
-| 變數 | 預設 | 範圍 | 用途 |
-| --- | ---: | --- | --- |
-| `DOCUMENT_MAX_CONCURRENT_JOBS` | 4 | 1–32 | PDF／Word／ODT／圖片上傳的完整處理流程 |
-| `EIP_MAX_CONCURRENT_JOBS` | 4 | 1–32 | 手動、自動與公司助理的 EIP 公文處理 |
-| `MODEL_MAX_CONCURRENT_REQUESTS` | 8 | 1–64 | 公司助理與公文共用的模型請求名額 |
-| `OCR_MAX_CONCURRENT_REQUESTS` | 2 | 1–8 | 共用 GPU OCR 請求名額 |
-
-公文與 EIP 各自對同一使用者依序處理，不同使用者可並行；程序內的資源等待名額各最多 500 件、同一帳號最多等待 20 件，與公司助理／公文的持久化佇列上限分開計算，滿額時明確拒絕新請求。等待資源採非同步方式，取得名額後才開始模型／OCR 的網路逾時計時。取消中的同步 OCR 會保留名額直到原請求結束。模型供應商的速率／token 配額仍可能限制吞吐量；調大並行值前應確認 GPU 與供應商容量。
-
-管理員可登入後查詢 `/agents/capacity` 查看各流程上限及使用量；端點不回傳帳號、指令或文件內容。服務更新應在執行、排隊及自動帳號處理數量皆為零時進行。
+應用持有各自資源，背景工作由 PostgreSQL lease 管理，同一帳號依序處理。
+工作重啟不重播外部操作；已完成成果、待確認與結果不明分開保存。
+並行名額、資料一致性及取消處理見 [架構說明](docs/runtime-refactor.md)，
+各產品設定與操作限制見上方功能文件。
