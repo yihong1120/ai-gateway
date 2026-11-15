@@ -3,6 +3,9 @@
 適用於 Visionnaire Flutter Web、iOS 與 Android。此 API 只顯示「目前登入
 使用者」在當日的 AI 用量與剩餘額度；前端不能指定其他人的資料。
 
+本文件維持個人頁面的原有契約。新增的管理員頁面、組別／使用者篩選與分頁
+請另見 [AI 用量管理：Flutter 交接規格](ai_usage_admin_flutter_handoff.md)。
+
 ## 上線前提
 
 後端完成下列項目後，前端才能串接：

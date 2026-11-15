@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 
 _TEST_ENV = {
+    'PYTHON_DOTENV_DISABLED': '1',
     'AI_USAGE_LITELLM_BASE_URL': 'http://127.0.0.1:4000',
     'LITELLM_USAGE_READER_KEY': 'test-reader-key',
     'AI_USAGE_OIDC_ISSUER_URL': 'https://issuer.example/realms/visionnaire',

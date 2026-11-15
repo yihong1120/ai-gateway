@@ -1,6 +1,8 @@
 """Authentication and runtime dependencies for the AI usage API."""
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+from typing import Any
 from typing import cast
 
 import httpx
@@ -11,9 +13,11 @@ from fastapi import status
 from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.security import HTTPBearer
 from jwt.exceptions import InvalidTokenError
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from examples.ai_usage.config import AiUsageSettings
-from examples.auth.oidc import OidcTokenVerifier
+from examples.identity.providers.oidc import OidcTokenVerifier
 
 
 _bearer = HTTPBearer(auto_error=False)
@@ -29,11 +33,11 @@ def get_litellm_http_client(request: Request) -> httpx.AsyncClient:
     return cast(httpx.AsyncClient, request.app.state.litellm_http_client)
 
 
-async def get_current_subject(
+async def get_current_claims(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Security(_bearer),
-) -> str:
-    """Verify Keycloak access token and return its immutable OIDC ``sub``."""
+) -> dict[str, Any]:
+    """Verify a Keycloak access token before any directory lookup."""
     if credentials is None or not credentials.credentials:
         raise _authentication_error('missing_access_token')
 
@@ -46,7 +50,34 @@ async def get_current_subject(
     subject = claims.get('sub')
     if not isinstance(subject, str) or not subject.strip():
         raise _authentication_error('invalid_access_token')
-    return subject.strip()
+    return claims
+
+
+async def get_current_subject(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Security(_bearer),
+) -> str:
+    """Keep the personal API's immutable accounting identity unchanged."""
+    claims = await get_current_claims(request, credentials)
+    return str(claims['sub']).strip()
+
+
+async def get_admin_db(request: Request) -> AsyncGenerator[AsyncSession]:
+    """Open a request-local directory session only for administrator routes."""
+    factory = getattr(request.app.state, 'admin_session_factory', None)
+    if factory is None:
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'ai_usage_admin_not_configured'},
+        )
+    try:
+        async with factory() as session:
+            yield session
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'ai_usage_directory_unavailable'},
+        ) from exc
 
 
 def _authentication_error(code: str) -> HTTPException:

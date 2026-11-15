@@ -1,30 +1,25 @@
 """Configuration for the private AI usage API.
 
-Only public Keycloak resource-server settings and a restricted LiteLLM reader
-key are required.  The service never needs a Keycloak client secret, the
-LiteLLM master key, provider credentials, or access to Visionnaire's database.
+Personal queries need public Keycloak settings and a restricted LiteLLM reader
+key. Optional administrator queries also need read access to the local account
+directory. No Keycloak client secret or LiteLLM master key is required.
 """
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
-from dataclasses import field
-from decimal import Decimal
-from decimal import InvalidOperation
-from pathlib import Path
+from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
-from zoneinfo import ZoneInfo
-from zoneinfo import ZoneInfoNotFoundError
+from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from dotenv import load_dotenv
+from examples.shared.config import load_service
 
 
 class ConfigurationError(ValueError):
     """Raised when an AI usage service setting is absent or unsafe."""
 
 
-_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-_DEFAULT_ENV_FILE = _REPOSITORY_ROOT / '.env.ai_usage'
 _ASYMMETRIC_OIDC_ALGORITHMS = frozenset(
     {
         'ES256',
@@ -38,17 +33,6 @@ _ASYMMETRIC_OIDC_ALGORITHMS = frozenset(
         'RS512',
     },
 )
-
-
-def _load_env_file() -> None:
-    """Load the dedicated service environment file without overwriting env."""
-    configured = os.getenv('AI_USAGE_ENV_FILE', '').strip()
-    env_file = Path(configured).expanduser(
-    ) if configured else _DEFAULT_ENV_FILE
-    if not env_file.is_absolute():
-        env_file = _REPOSITORY_ROOT / env_file
-    if env_file.is_file():
-        load_dotenv(env_file, override=False)
 
 
 def _value(name: str, *fallback_names: str) -> str:
@@ -70,7 +54,10 @@ def _require(name: str, *fallback_names: str) -> str:
 
 def _http_url(name: str, value: str) -> str:
     """Require an absolute HTTP(S) URL and normalise its trailing slash."""
-    parsed = urlsplit(value)
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        raise ConfigurationError(f'{name} must be an absolute HTTP(S) URL') from None
     if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
         raise ConfigurationError(f'{name} must be an absolute HTTP(S) URL')
     return value.rstrip('/')
@@ -119,52 +106,68 @@ def _csv(value: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in value.split(',') if part.strip())
 
 
-@dataclass(frozen=True, slots=True)
-class AiUsageSettings:
-    """Validated runtime settings for the AI usage API."""
+@dataclass(frozen=True, slots=True, kw_only=True)
+class UsageQuerySettings:
+    """A validated read-only usage snapshot without login or directory settings."""
 
     litellm_base_url: str
     litellm_reader_key: str = field(repr=False)
-    daily_budget_usd: Decimal
-    timezone_name: str
-    timezone: ZoneInfo
+    daily_budget_usd: Decimal = Decimal('4.00')
+    timezone_name: str = 'Asia/Taipei'
+    timezone: ZoneInfo | None = None
+    request_timeout_seconds: float = 15
+    log_page_size: int = 1000
+    max_log_pages: int = 100
+    max_record_limit: int = 100
+    local_model_names: frozenset[str] = frozenset({'qwen3.5-35b-a3b', 'gpt-oss-20b'})
+    official_document_key_hash: str = ''
+    max_range_days: int = 366
+
+    def __post_init__(self):
+        object.__setattr__(self, 'litellm_base_url', _http_url('AI_USAGE_LITELLM_BASE_URL', self.litellm_base_url))
+        try:
+            budget = Decimal(str(self.daily_budget_usd))
+        except InvalidOperation:
+            raise ConfigurationError('AI_USAGE_DAILY_BUDGET_USD must be a decimal amount') from None
+        if not budget.is_finite() or not 0 < budget <= Decimal(100000):
+            raise ConfigurationError('AI_USAGE_DAILY_BUDGET_USD must be above 0 and reasonable')
+        object.__setattr__(self, 'daily_budget_usd', budget)
+        try:
+            zone = ZoneInfo(self.timezone_name)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ConfigurationError('AI_USAGE_TIMEZONE must be a valid IANA timezone') from None
+        object.__setattr__(self, 'timezone', zone)
+        object.__setattr__(self, 'request_timeout_seconds', _positive_float(
+            'AI_USAGE_REQUEST_TIMEOUT_SECONDS', self.request_timeout_seconds, minimum=1, maximum=120))
+        for name, maximum in (('log_page_size', 1000), ('max_log_pages', 1000),
+                              ('max_record_limit', 500), ('max_range_days', 366)):
+            object.__setattr__(self, name, _positive_int('AI_USAGE_' + name.upper(), getattr(self, name),
+                                                      minimum=1, maximum=maximum))
+        object.__setattr__(self, 'local_model_names', frozenset(self.local_model_names))
+        fingerprint = self.official_document_key_hash.lower()
+        if fingerprint and (len(fingerprint) != 64 or any(char not in '0123456789abcdef' for char in fingerprint)):
+            raise ConfigurationError('AI_USAGE_OFFICIAL_DOCUMENT_KEY_HASH must be a SHA256 hex digest')
+        object.__setattr__(self, 'official_document_key_hash', fingerprint)
+
+
+@dataclass(frozen=True, slots=True)
+class AiUsageSettings(UsageQuerySettings):
+    """Usage query settings plus the API's identity and directory contract."""
+
     oidc_issuer_url: str
     oidc_jwks_url: str
     oidc_audiences: tuple[str, ...]
     oidc_algorithms: tuple[str, ...]
     oidc_jwks_cache_seconds: int
     oidc_jwks_timeout_seconds: float
-    request_timeout_seconds: float
-    log_page_size: int
-    max_log_pages: int
-    max_record_limit: int
-    local_model_names: frozenset[str]
+    admin_database_url: str = field(default='', repr=False)
+    oidc_identity_provider: str = 'keycloak'
+    gateway_tenant_id: str = ''
 
     @classmethod
     def from_environment(cls) -> AiUsageSettings:
-        """Build validated settings from ``.env.ai_usage`` and process env."""
-        _load_env_file()
-
-        timezone_name = _value('AI_USAGE_TIMEZONE', 'TZ') or 'Asia/Taipei'
-        try:
-            timezone = ZoneInfo(timezone_name)
-        except ZoneInfoNotFoundError as exc:
-            raise ConfigurationError(
-                'AI_USAGE_TIMEZONE must be a valid IANA timezone',
-            ) from exc
-
-        try:
-            daily_budget = Decimal(
-                _value('AI_USAGE_DAILY_BUDGET_USD') or '4.00',
-            )
-        except InvalidOperation as exc:
-            raise ConfigurationError(
-                'AI_USAGE_DAILY_BUDGET_USD must be a decimal amount',
-            ) from exc
-        if daily_budget <= 0 or daily_budget > Decimal('100000'):
-            raise ConfigurationError(
-                'AI_USAGE_DAILY_BUDGET_USD must be above 0 and reasonable',
-            )
+        """Build a validated service snapshot; explicit process env wins."""
+        load_service('ai_usage')
 
         audiences = _csv(
             _require('AI_USAGE_OIDC_AUDIENCE', 'OIDC_AUDIENCE'),
@@ -187,19 +190,18 @@ class AiUsageSettings:
                 or 'qwen3.5-35b-a3b,gpt-oss-20b',
             ),
         )
+        gateway_tenant_id = _value('AI_USAGE_GATEWAY_TENANT_ID')
+        if gateway_tenant_id:
+            try:
+                gateway_tenant_id = str(UUID(gateway_tenant_id))
+            except ValueError as exc:
+                raise ConfigurationError('AI_USAGE_GATEWAY_TENANT_ID must be a tenant UUID') from exc
 
         return cls(
-            litellm_base_url=_http_url(
-                'AI_USAGE_LITELLM_BASE_URL',
-                _require(
-                    'AI_USAGE_LITELLM_BASE_URL',
-                    'LITELLM_USAGE_API_URL',
-                ),
-            ),
+            litellm_base_url=_require('AI_USAGE_LITELLM_BASE_URL', 'LITELLM_USAGE_API_URL'),
             litellm_reader_key=_require('LITELLM_USAGE_READER_KEY'),
-            daily_budget_usd=daily_budget,
-            timezone_name=timezone_name,
-            timezone=timezone,
+            daily_budget_usd=_value('AI_USAGE_DAILY_BUDGET_USD') or '4.00',
+            timezone_name=_value('AI_USAGE_TIMEZONE', 'TZ') or 'Asia/Taipei',
             oidc_issuer_url=_http_url(
                 'AI_USAGE_OIDC_ISSUER_URL',
                 _require('AI_USAGE_OIDC_ISSUER_URL', 'OIDC_ISSUER_URL'),
@@ -230,29 +232,16 @@ class AiUsageSettings:
                 minimum=1,
                 maximum=60,
             ),
-            request_timeout_seconds=_positive_float(
-                'AI_USAGE_REQUEST_TIMEOUT_SECONDS',
-                _value('AI_USAGE_REQUEST_TIMEOUT_SECONDS') or '15',
-                minimum=1,
-                maximum=120,
-            ),
-            log_page_size=_positive_int(
-                'AI_USAGE_LOG_PAGE_SIZE',
-                _value('AI_USAGE_LOG_PAGE_SIZE') or '1000',
-                minimum=1,
-                maximum=1000,
-            ),
-            max_log_pages=_positive_int(
-                'AI_USAGE_MAX_LOG_PAGES',
-                _value('AI_USAGE_MAX_LOG_PAGES') or '100',
-                minimum=1,
-                maximum=1000,
-            ),
-            max_record_limit=_positive_int(
-                'AI_USAGE_MAX_RECORD_LIMIT',
-                _value('AI_USAGE_MAX_RECORD_LIMIT') or '100',
-                minimum=1,
-                maximum=500,
-            ),
+            request_timeout_seconds=_value('AI_USAGE_REQUEST_TIMEOUT_SECONDS') or '15',
+            log_page_size=_value('AI_USAGE_LOG_PAGE_SIZE') or '1000',
+            max_log_pages=_value('AI_USAGE_MAX_LOG_PAGES') or '100',
+            max_record_limit=_value('AI_USAGE_MAX_RECORD_LIMIT') or '100',
             local_model_names=local_models,
+            admin_database_url=_value('AI_USAGE_ADMIN_DATABASE_URL'),
+            oidc_identity_provider=(
+                _value('AI_USAGE_OIDC_IDENTITY_PROVIDER') or 'keycloak'
+            ),
+            official_document_key_hash=_value('AI_USAGE_OFFICIAL_DOCUMENT_KEY_HASH'),
+            gateway_tenant_id=gateway_tenant_id,
+            max_range_days=_value('AI_USAGE_MAX_RANGE_DAYS') or '366',
         )

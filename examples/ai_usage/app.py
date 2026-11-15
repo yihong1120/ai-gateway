@@ -1,4 +1,4 @@
-"""Standalone private API for Visionnaire users' LiteLLM usage dashboard."""
+"""Private personal and administrator LiteLLM usage dashboards."""
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
@@ -10,11 +10,14 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine
 from starlette.responses import Response
 
 from examples.ai_usage.config import AiUsageSettings
+from examples.ai_usage.routers.admin_usage import router as admin_usage_router
 from examples.ai_usage.routers.usage import router as usage_router
-from examples.auth.oidc import OidcTokenVerifier
+from examples.identity.providers.oidc import OidcTokenVerifier
 
 
 @asynccontextmanager
@@ -30,24 +33,38 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         jwks_cache_seconds=settings.oidc_jwks_cache_seconds,
         jwks_timeout_seconds=settings.oidc_jwks_timeout_seconds,
     )
+    engine = (
+        create_async_engine(
+            settings.admin_database_url,
+            pool_pre_ping=True,
+        )
+        if settings.admin_database_url else None
+    )
+    app.state.admin_session_factory = (
+        async_sessionmaker(engine, expire_on_commit=False) if engine else None
+    )
     timeout = httpx.Timeout(
         settings.request_timeout_seconds,
         connect=min(5.0, settings.request_timeout_seconds),
     )
-    async with httpx.AsyncClient(
-        base_url=settings.litellm_base_url,
-        timeout=timeout,
-        follow_redirects=False,
-    ) as client:
-        app.state.litellm_http_client = client
-        yield
+    try:
+        async with httpx.AsyncClient(
+            base_url=settings.litellm_base_url,
+            timeout=timeout,
+            follow_redirects=False,
+        ) as client:
+            app.state.litellm_http_client = client
+            yield
+    finally:
+        if engine is not None:
+            await engine.dispose()
 
 
 app = FastAPI(
     title='Visionnaire AI Usage API',
-    version='1.0.0',
+    version='1.5.0',
     description=(
-        'Private current-day LiteLLM usage for the authenticated Keycloak user.'
+        'Private current-day personal and tenant-scoped administrator usage.'
     ),
     lifespan=lifespan,
 )
@@ -74,17 +91,18 @@ async def request_id_and_safe_error_response(
             },
         )
     response.headers['X-Request-ID'] = request_id
-    if request.url.path.startswith('/v1/me/'):
+    if request.url.path.startswith(('/v1/me/', '/v1/admin/usage')):
         response.headers['Cache-Control'] = 'no-store'
     return response
 
 
 app.include_router(usage_router)
+app.include_router(admin_usage_router)
 
 
 def main() -> None:
     """Run the AI usage API locally."""
-    uvicorn.run(app, host='127.0.0.1', port=8012, workers=4)
+    uvicorn.run('examples.ai_usage.app:app', host='127.0.0.1', port=8012, workers=4)
 
 
 if __name__ == '__main__':

@@ -3,9 +3,16 @@ from __future__ import annotations
 
 from datetime import date as CalendarDate
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 from pydantic import Field
+
+
+UsageSource = Literal['openwebui', 'official_document', 'company_agent', 'company_ai', 'unknown']
+UnattributedCategory = Literal[
+    'document_service', 'identity_not_linked', 'system_operation', 'failed_request', 'missing_identity',
+]
 
 
 class UsagePeriod(BaseModel):
@@ -65,6 +72,22 @@ class UsageRecord(BaseModel):
     cache_read_input_tokens: int = Field(ge=0)
     total_tokens: int = Field(ge=0)
     spend_usd: float = Field(ge=0)
+    source: UsageSource = 'unknown'
+    billing_scope: Literal['user', 'service'] = 'user'
+
+
+class SourceUsage(BaseModel):
+    """Full usage of one application within the selected authorised scope."""
+
+    source: UsageSource
+    totals: UsageTotals
+
+
+class UnattributedCategoryUsage(BaseModel):
+    """Unallocated costs grouped by an evidence-based reason."""
+
+    category: UnattributedCategory
+    totals: UsageTotals
 
 
 class DailyUsageResponse(BaseModel):
